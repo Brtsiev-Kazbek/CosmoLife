@@ -31,6 +31,10 @@ function love.load(args)
         elseif a == "--selftest" then
             selftest = require("tests.selftest")
             frame = 0
+        elseif a == "--shots" then
+            selftest = selftest or require("tests.selftest")
+            selftest.shots = true
+            frame = frame or 0
         end
     end
 end
@@ -46,7 +50,10 @@ function love.update(dt)
     game:update(dt)
 end
 
-function love.draw() game:draw() end
+function love.draw()
+    game:draw()
+    if selftest then selftest.captureIfWanted(frame) end
+end
 
 function love.resize(w, h) game:resize(w, h) end
 

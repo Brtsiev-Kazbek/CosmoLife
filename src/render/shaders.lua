@@ -110,6 +110,21 @@ float valueNoise(vec2 p)
     return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
 }
 
+float fbm(vec2 p, int octaves)
+{
+    float sum = 0.0;
+    float amp = 0.5;
+    float norm = 0.0;
+    for (int i = 0; i < 5; i++) {
+        if (i >= octaves) break;
+        sum += amp * valueNoise(p);
+        norm += amp;
+        p *= 2.07;
+        amp *= 0.55;
+    }
+    return sum / max(norm, 0.0001);
+}
+
 vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc)
 {
     // reconstruct a world space ray for this pixel
@@ -122,13 +137,37 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc)
 
     float up = dot(dir, normalize(u_worldUp));
 
-    // space background: near black with a slow nebula wash
-    vec3 spaceCol = mix(vec3(0.015, 0.016, 0.03), vec3(0.03, 0.02, 0.05), up * 0.5 + 0.5);
+    // Space background.
+    //
+    // Nebulae are three octaves of value noise in two colours, gated so most
+    // of the sky stays dark and the clouds appear in drifts.  A separate,
+    // much larger band adds the galactic plane -- a faint bright stripe with
+    // dust lanes cut through it -- which is what stops deep space from
+    // looking like a uniform black box in every direction.
+    vec3 spaceCol = mix(vec3(0.012, 0.013, 0.026), vec3(0.026, 0.018, 0.045), up * 0.5 + 0.5);
+
     if (u_nebula > 0.001) {
-        float n = valueNoise(dir.xy * 3.0 + dir.z * 2.0);
-        n += 0.5 * valueNoise(dir.yz * 7.0 - dir.x * 3.0);
-        n = smoothstep(0.55, 1.35, n);
-        spaceCol += u_zenith * n * u_nebula * 0.35;
+        // galactic plane: a broad band around one great circle
+        float band = 1.0 - abs(dot(dir, normalize(vec3(0.24, 0.94, -0.13))));
+        float plane = smoothstep(0.86, 1.0, band);
+        float dust = fbm(dir.xz * 5.0 + dir.y * 2.0, 3);
+        plane *= mix(0.35, 1.0, smoothstep(0.35, 0.75, dust));
+        spaceCol += vec3(0.16, 0.17, 0.22) * plane * u_nebula * 0.5;
+        // a dense scatter of unresolved stars inside the band
+        float grain = fbm(dir.xy * 42.0 + dir.z * 17.0, 2);
+        spaceCol += vec3(0.10, 0.11, 0.14) * plane * smoothstep(0.62, 0.95, grain) * u_nebula;
+
+        // two nebula clouds in complementary hues
+        float n1 = fbm(dir.xy * 2.4 + dir.z * 1.7, 4);
+        float n2 = fbm(dir.yz * 3.1 - dir.x * 2.3 + 11.0, 4);
+        float c1 = smoothstep(0.56, 0.92, n1);
+        float c2 = smoothstep(0.60, 0.95, n2);
+        vec3 hueA = u_zenith * 1.6 + vec3(0.10, 0.02, 0.16);
+        vec3 hueB = vec3(0.06, 0.16, 0.22);
+        spaceCol += hueA * c1 * u_nebula * 0.40;
+        spaceCol += hueB * c2 * u_nebula * 0.34;
+        // bright cores where the two overlap
+        spaceCol += vec3(0.22, 0.16, 0.28) * c1 * c2 * u_nebula * 0.5;
     }
 
     // atmospheric sky: zenith -> horizon -> ground haze, warmed towards the sun

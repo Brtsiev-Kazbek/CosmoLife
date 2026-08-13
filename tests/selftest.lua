@@ -101,6 +101,22 @@ step(120, "touchdown registered", function(game)
     assert(f.landedOn, "the ship never registered as landed")
 end)
 
+step(124, "diagnostics: landed state", function(game)
+    local f = game.manager:current()
+    local s = f.surface
+    local gh = s:groundHeight(f.local_.pos.x, f.local_.pos.z)
+    local n = 0
+    for _ in pairs(s.chunkCache or {}) do n = n + 1 end
+    io.write(string.format(
+        "    DIAG-L local=(%.0f,%.0f,%.0f) ground=%.0f alt(hud)=%.0f lod=%d size=%.0f chunks=%d\n",
+        f.local_.pos.x, f.local_.pos.y, f.local_.pos.z, gh, f.altitude or -1,
+        s.lodLevel, s.chunkSize, n))
+    local fieldH = s.field:height(f.local_.pos.x, f.local_.pos.z)
+    io.write(string.format("    DIAG-L fieldH=%.0f curvature=%.0f originLat=%.4f originLon=%.4f\n",
+        fieldH, (f.local_.pos.x^2 + f.local_.pos.z^2) / (2 * s.radius), s.field.originLat, s.field.originLon))
+    io.flush()
+end)
+
 step(130, "disembark on foot", function(game)
     local f = game.manager:current()
     f:disembark()
@@ -114,6 +130,25 @@ step(150, "walk around", function(game)
     s.yaw = 1.2
     s.vel:set(2, 0, 2)
     assert(s.onGround ~= nil, "ground contact not evaluated")
+end)
+
+step(157, "diagnostics: surface state", function(game)
+    local s = game.manager:current()
+    local surf = s.surface
+    local n = 0
+    for _ in pairs(surf.chunkCache or {}) do n = n + 1 end
+    local gh = surf:groundHeight(s.pos.x, s.pos.z)
+    io.write(string.format(
+        "    DIAG lod=%d size=%.0f chunks=%d pos=(%.0f,%.0f,%.0f) ground=%.0f alt=%.1f settlements=%d draws=%d\n",
+        surf.lodLevel, surf.chunkSize, n, s.pos.x, s.pos.y, s.pos.z, gh, s.pos.y - gh,
+        #surf.settlements, game.renderer.stats.draws))
+    io.write(string.format("    DIAG camera=(%.0f,%.0f,%.0f) fwd=(%.2f,%.2f,%.2f) up=(%.2f,%.2f,%.2f)\n",
+        game.camera.pos.x, game.camera.pos.y, game.camera.pos.z,
+        game.camera.fwd.x, game.camera.fwd.y, game.camera.fwd.z,
+        game.camera.up.x, game.camera.up.y, game.camera.up.z))
+    local origin = surf.origin
+    io.write(string.format("    DIAG origin=(%.0f,%.0f,%.0f) bodyR=%.0f\n", origin.x, origin.y, origin.z, surf.radius))
+    io.flush()
 end)
 
 step(165, "enter a building interior", function(game)
@@ -150,7 +185,7 @@ step(185, "open a service terminal", function(game)
     room.pos:set(t.x, 0, t.z + 1.0)
     room:updatePrompt()
     assert(room.action and room.action.kind == "service", "terminal did not offer a service")
-    room:keypressed("e")
+    room:keypressed(require("src.config").keys.interact[1])
     local port = game.manager:current()
     assert(port.menu, "port screen has no menu")
     selftest.port = port
@@ -190,7 +225,7 @@ step(230, "leave the port and the building", function(game)
     if s.room then
         s.pos:set(s.room.exit.x, 0, s.room.exit.z)
         s:updatePrompt()
-        s:keypressed("e")
+        s:keypressed(require("src.config").keys.interact[1])
     end
 end)
 
@@ -199,7 +234,7 @@ step(245, "board the ship", function(game)
     if s.shipLocal then
         s.pos:set(s.shipLocal.x, s.pos.y, s.shipLocal.z)
         s:updatePrompt()
-        s:keypressed("u")
+        s:keypressed(require("src.config").keys.disembark[1])
     end
     local f = game.manager:current()
     assert(f.ship, "did not return to the flight state")
@@ -207,7 +242,8 @@ end)
 
 step(260, "open the galaxy map", function(game)
     local f = game.manager:current()
-    f:keypressed("tab")
+    local config = require("src.config")
+    f:keypressed(config.keys.map[1])
     local map = game.manager:current()
     assert(map.systems, "galaxy map has no systems")
     assert(#map.systems > 0, "galaxy map is empty")
@@ -237,14 +273,15 @@ end)
 
 step(305, "logbook and colony screens", function(game)
     local f = game.manager:current()
-    f:keypressed("n")
+    local config = require("src.config")
+    f:keypressed(config.keys.missions[1])
     local log = game.manager:current()
     for i = 1, 3 do
         log.tab = i
         log:draw()
     end
     log:keypressed("escape")
-    f:keypressed("c")
+    f:keypressed(config.keys.colony[1])
     local col = game.manager:current()
     col:draw()
     col:keypressed("escape")
@@ -261,7 +298,7 @@ end)
 
 step(335, "chase view and wireframe", function(game)
     local f = game.manager:current()
-    f:keypressed("v")
+    f:keypressed(require("src.config").keys.view[1])
     game.renderer.settings.wireframe = true
     game.renderer.settings.post = false
 end)
@@ -275,7 +312,29 @@ end)
 
 -- ---------------------------------------------------------------------------
 
+-- Frames to capture to disk (LÖVE's save directory) when --shots is passed.
+-- Looking at the output is the only way to check that a procedural renderer
+-- actually produces the picture you intended.
+local SHOTS = {
+    [30] = "01-space",
+    [95] = "02-descent",
+    [125] = "03-landed",
+    [158] = "04-onfoot",
+    [178] = "05-interior",
+    [205] = "06-port",
+    [268] = "07-chart",
+    [345] = "08-chase",
+    [358] = "09-title",
+}
+
 selftest.lastFrame = 360
+
+function selftest.captureIfWanted(frame)
+    local name = SHOTS[frame]
+    if name and selftest.shots then
+        love.graphics.captureScreenshot(string.format("shot-%s.png", name))
+    end
+end
 
 function selftest.run(game, frame)
     -- a heartbeat with real wall-clock time, so a stall is distinguishable

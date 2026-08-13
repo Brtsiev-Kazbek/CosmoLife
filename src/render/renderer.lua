@@ -32,8 +32,16 @@ Renderer.LAYER_NEAR = LAYER_NEAR
 Renderer.LAYER_FX = LAYER_FX
 
 local NEAR_NEAR, NEAR_FAR = 0.2, 30000
-local FAR_NEAR, FAR_FAR = 20000, 2e11
+local FAR_FAR = 2e11
 local LAYER_SPLIT = 24000       -- objects beyond this go to the far layer
+
+-- The far layer's near plane is adaptive.  Standing on a planet, the sphere
+-- that stands in for the ground beyond the streamed terrain patch starts a few
+-- hundred metres away, and a fixed 20 km near plane would clip it into a hole
+-- full of stars.  Flight lowers this as altitude drops; the only cost is depth
+-- precision out at planetary distances, where nothing interpenetrates anyway.
+local FAR_NEAR_MAX = 20000
+local FAR_NEAR_MIN = 400
 
 local IDENTITY_BASIS = {
     right = vec3(1, 0, 0),
@@ -74,6 +82,7 @@ function Renderer:init()
     }
 
     self.stats = { draws = 0, triangles = 0 }
+    self.farNear = FAR_NEAR_MAX
 
     self._mvp = mat4.identity()
     self._model = mat4.identity()
@@ -126,6 +135,15 @@ end
 -- ---------------------------------------------------------------------------
 -- Frame
 -- ---------------------------------------------------------------------------
+
+--- Sets the far layer's near plane from how close the camera is to a surface.
+-- `clearance` is metres of empty space in front of the nearest huge body.
+function Renderer:setFarClearance(clearance)
+    local n = clearance and (clearance * 0.3) or FAR_NEAR_MAX
+    if n > FAR_NEAR_MAX then n = FAR_NEAR_MAX end
+    if n < FAR_NEAR_MIN then n = FAR_NEAR_MIN end
+    self.farNear = n
+end
 
 function Renderer:beginFrame(camera)
     self.camera = camera
@@ -292,7 +310,7 @@ function Renderer:endFrame(overlay2d)
     self:_setupShader(env)
 
     love.graphics.setDepthMode("lequal", true)
-    self:_drawQueue(LAYER_FAR, FAR_NEAR, FAR_FAR)
+    self:_drawQueue(LAYER_FAR, self.farNear, FAR_FAR)
     love.graphics.clear(false, false, true)
     self:_drawQueue(LAYER_NEAR, NEAR_NEAR, NEAR_FAR)
 

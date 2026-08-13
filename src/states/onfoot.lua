@@ -119,7 +119,7 @@ function OnFoot:update(dt, background)
         self.onGround = false
     end
 
-    surface:update(self.pos.x, self.pos.z, dt)
+    surface:update(self.pos.x, self.pos.z, dt, 0)
     self:updatePrompt()
     self:updateCamera(dt)
 end
@@ -223,7 +223,7 @@ function OnFoot:draw(background)
         flight:submitBodies(renderer)
         flight:submitStations(renderer)
     end
-    self.surface:draw(renderer, { nightGlow = flight and flight.nightGlow or 1 })
+    self.surface:draw(renderer, { nightGlow = flight and flight.nightGlow or 1, eye = self.pos })
 
     -- the parked ship
     if flight then
@@ -236,7 +236,9 @@ function OnFoot:draw(background)
     local sys = self.world.system
     renderer:endFrame(function()
         self.game.sky:draw(camera, w, h, 1 - (renderer.env.atmos or 0) * 0.95)
-        self.game.sky:drawSun(camera, sys.star.pos, w, h, sys.star.radius, sys.star.color, false)
+        if not flight or flight:sunVisible() then
+            self.game.sky:drawSun(camera, sys.star.pos, w, h, sys.star.radius, sys.star.color, false)
+        end
     end)
     renderer:present()
 

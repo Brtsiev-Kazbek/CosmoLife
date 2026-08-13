@@ -94,7 +94,10 @@ function Flight:enter(spawnOpts)
     self.local_ = { pos = vec3(), vel = vec3(), right = vec3(1, 0, 0), up = vec3(0, 1, 0), fwd = vec3(0, 0, -1) }
 
     self:spawn(spawnOpts)
-    self.game.camera.mode = self.game.camera.mode or "cockpit"
+    -- chase view by default: it is far easier to judge attitude and altitude
+    -- with the hull in frame than from inside it
+    self.game.camera.mode = self.game.camera.mode or "chase"
+    self:setMouseFlight(true)
 end
 
 --- Places the ship somewhere sensible on entering the state.
@@ -281,15 +284,21 @@ function Flight:updateEnvironment(skipHandover)
         env.fogAmount = util.clamp(atmos * 0.85, 0, 0.9)
         env.fogNear = util.lerp(20000, 1200, atmos)
         env.fogFar = util.lerp(60000, S.terrainViewRange * 1.1, atmos)
+        -- A night side lit only by the sun is a black hole you cannot fly
+        -- over.  Starlight, airglow and the ship's own floods put a floor
+        -- under it, so the ground stays readable after dark.
+        local nightFloor = 0.26
         env.ambient = {
-            0.09 + day * 0.22 * base[1],
-            0.10 + day * 0.22 * base[2],
-            0.13 + day * 0.24 * base[3],
+            nightFloor * base[1] + day * 0.30 * base[1],
+            nightFloor * base[2] + day * 0.30 * base[2],
+            nightFloor * base[3] * 1.15 + day * 0.32 * base[3],
         }
+        env.shadeFloor = 0.10
         self.dayFactor = day
     else
         env.fogAmount = 0
         env.ambient = { 0.075, 0.08, 0.105 }
+        env.shadeFloor = 0.06
         self.dayFactor = 1
     end
 
@@ -315,6 +324,37 @@ function Flight:updateEnvironment(skipHandover)
     end
 end
 
+--- Roll and pitch relative to the local horizontal, for the attitude
+--- indicator.  In surface mode the local frame already *is* the horizontal,
+--- which makes this two dot products rather than a change of basis.
+function Flight:attitude()
+    if not self.surface or not self.altitude then return nil end
+    if self.altitude > 26000 then return nil end
+    local l = self.local_
+    local pitch = math.asin(util.clamp(l.fwd.y, -1, 1))
+    local roll = math.atan2 and math.atan2(l.right.y, l.up.y) or 0
+    local landable = false
+    if self.surface then
+        landable = self.surface:isLandable(l.pos.x, l.pos.z, 14)
+    end
+    return { roll = roll, pitch = pitch, landable = landable }
+end
+
+--- False once the star has set behind the body we are standing on: the sun
+--- sprite is drawn without depth, so it has to be culled by hand.
+function Flight:sunVisible()
+    local body, up = self.nearBody, self.upVec
+    if not body or not up then return true end
+    local alt = self.altitude or 0
+    if alt > body.radius then return true end
+    -- how far below the horizontal the horizon sits at this altitude
+    local dip = math.sqrt(math.max(2 * alt / body.radius, 0))
+    local sunUp = -(self.game.renderer.env.sunDir.x * up.x
+                  + self.game.renderer.env.sunDir.y * up.y
+                  + self.game.renderer.env.sunDir.z * up.z)
+    return sunUp > -dip - 0.02
+end
+
 function Flight:skyTint(body)
     local t = body.type
     if t == "terran" then return { 0.42, 0.60, 0.95 } end
@@ -330,8 +370,16 @@ end
 -- Controls
 -- ---------------------------------------------------------------------------
 
+--- Attitude input.
+--
+-- The mouse is the primary aim device and is on by default: the pointer is
+-- captured and its motion pitches and yaws the nose directly, which is the
+-- scheme every space sim converged on because it maps "look where you want to
+-- go" onto the device people already point with.  The keyboard keeps a full
+-- fallback so the game is playable without a mouse at all.
 function Flight:readRotation(dt, basis, agility)
     local pitch, yaw, roll = 0, 0, 0
+
     if config.down("pitchUp") then pitch = pitch + 1 end
     if config.down("pitchDown") then pitch = pitch - 1 end
     if config.down("yawLeft") then yaw = yaw - 1 end
@@ -339,11 +387,29 @@ function Flight:readRotation(dt, basis, agility)
     if config.down("rollLeft") then roll = roll - 1 end
     if config.down("rollRight") then roll = roll + 1 end
 
-    -- mouse steering when the pointer is captured
     if self.mouseSteer then
-        pitch = pitch + util.clamp(-self.mouseDy * 0.06, -1, 1)
-        yaw = yaw + util.clamp(self.mouseDx * 0.06, -1, 1)
-        self.mouseDx, self.mouseDy = 0, 0
+        -- accumulated mouse motion, decayed so the ship settles when the hand
+        -- stops rather than drifting on
+        pitch = pitch + util.clamp(-(self.mouseDy or 0), -1, 1)
+        yaw = yaw + util.clamp(self.mouseDx or 0, -1, 1)
+        local decay = math.exp(-16 * dt)
+        self.mouseDx = (self.mouseDx or 0) * decay
+        self.mouseDy = (self.mouseDy or 0) * decay
+    end
+
+    -- Landing mode: with the gear down close to the ground the ship holds
+    -- itself level with the local horizon.  This is the single biggest reason
+    -- landing used to feel like being upside down -- there was no up.
+    if self.hoverMode then
+        local ux, uy, uz = 0, 1, 0        -- local frame: up is +Y by definition
+        -- roll and pitch back towards level, leaving yaw to the player
+        local tiltRight = basis.right.y
+        local tiltFwd = basis.fwd.y
+        roll = roll - util.clamp(tiltRight * 3.2, -1, 1)
+        pitch = pitch - util.clamp(tiltFwd * 3.2, -1, 1)
+    elseif self.autoLevel and self.surface then
+        local tiltRight = basis.right.y
+        roll = roll - util.clamp(tiltRight * 2.6, -1, 1)
     end
 
     local a = self.ship.angular
@@ -352,7 +418,6 @@ function Flight:readRotation(dt, basis, agility)
     a.y = util.damp(a.y, yaw * FL.yawRate * rate, FL.rotDamping, dt)
     a.z = util.damp(a.z, roll * FL.rollRate * rate, FL.rotDamping, dt)
 
-    -- integrate: pitch about right, yaw about up, roll about forward
     basis.fwd:addScaled(basis.up, a.x * dt)
     basis.fwd:addScaled(basis.right, a.y * dt)
     basis.up:addScaled(basis.right, -a.z * dt)
@@ -455,6 +520,15 @@ function Flight:updateShip(dt)
     local topSpeed = stats.topSpeed or FL.maxSpeed
     if self.boosting then topSpeed = topSpeed * 1.6 end
 
+    -- Landing mode: gear down, close to the ground, moving slowly.  The ship
+    -- holds level (see readRotation), the main drive is capped to a taxi
+    -- speed, and the translation thrusters take over -- so setting down is
+    -- flying a hovering craft, not aiming a fighter at the dirt.
+    self.hoverMode = onSurface and self.gearDown
+        and (self.altitude or 1e9) < FL.hoverAltitude
+        and self.warpState == "off"
+    if self.hoverMode then topSpeed = min(topSpeed, FL.hoverSpeed) end
+
     -- main drive
     local targetSpeed = topSpeed * self.throttle
     if self.throttle < 0 then targetSpeed = topSpeed * self.throttle * FL.reverseFactor end
@@ -462,8 +536,21 @@ function Flight:updateShip(dt)
     local delta = util.approach(along, targetSpeed, accel * dt) - along
     vel:addScaled(basis.fwd, delta)
 
+    -- translation thrusters: strafe and vertical, always available.  These
+    -- are what make a precise landing possible at all.
+    local strafe, lift = 0, 0
+    if config.down("strafeLeft") then strafe = strafe - 1 end
+    if config.down("strafeRight") then strafe = strafe + 1 end
+    if config.down("thrustUp") then lift = lift + 1 end
+    if config.down("thrustDown") then lift = lift - 1 end
+    local transAccel = accel * FL.lateralFactor
+    if strafe ~= 0 then vel:addScaled(basis.right, strafe * transAccel * dt) end
+    if lift ~= 0 then vel:addScaled(basis.up, lift * transAccel * dt) end
+    self.translating = (strafe ~= 0 or lift ~= 0)
+
     -- flight assist: bleed off sideways velocity so the ship goes where it points
     local assist = 1 - math.exp(-2.6 * dt)
+    if self.hoverMode then assist = 1 - math.exp(-4.5 * dt) end
     local lateralX = vel.x - basis.fwd.x * along
     local lateralY = vel.y - basis.fwd.y * along
     local lateralZ = vel.z - basis.fwd.z * along
@@ -473,7 +560,14 @@ function Flight:updateShip(dt)
 
     -- gravity and atmosphere
     if onSurface then
-        vel.y = vel.y - self.gravity * dt
+        -- in landing mode the drives carry most of the weight, so the ship
+        -- settles gently instead of dropping like a stone
+        local weight = self.hoverMode and (self.gravity * FL.hoverGravityRelief) or self.gravity
+        vel.y = vel.y - weight * dt
+        if self.hoverMode and lift == 0 then
+            -- damp vertical drift so it hovers where it was left
+            vel.y = vel.y * math.exp(-2.2 * dt)
+        end
         if self.airDensity > 0.001 then
             local speed = vel:length()
             local drag = FL.dragSeaLevel * self.airDensity * speed
@@ -826,6 +920,15 @@ function Flight:update(dt, background)
     self.world:update(dt)
     if self.dying then return end
 
+    -- The world clock just moved every planet along its orbit.  Re-anchor the
+    -- landing frame and re-place the ship inside it *before* anything measures
+    -- an altitude, or the ship is compared against a planet that has already
+    -- moved on and the whole surface reference goes inconsistent.
+    if self.surface then
+        self.surface:refreshFrame()
+        self:syncFromLocal()
+    end
+
     self:updateEnvironment()
     self:updateShip(dt)
     self:updateWeapons(dt)
@@ -863,7 +966,7 @@ function Flight:update(dt, background)
 
     -- surface streaming
     if self.surface then
-        self.surface:update(self.local_.pos.x, self.local_.pos.z, dt)
+        self.surface:update(self.local_.pos.x, self.local_.pos.z, dt, self.altitude)
     end
 
     self:updateContacts()
@@ -872,7 +975,17 @@ function Flight:update(dt, background)
     self.player.hull = self.ship.hull
     self.player.shield = self.ship.shield
 
-    self.game.camera:follow(self.ship, dt)
+    local camera = self.game.camera
+    camera:follow(self.ship, dt)
+    -- Level the view with the local horizon as the ground comes up.  Full
+    -- lock while landing, tapering off to none by the top of the atmosphere.
+    if self.upVec and self.altitude then
+        local strength = util.clamp(1 - (self.altitude / 30000), 0, 1)
+        if self.hoverMode then strength = 1 end
+        if strength > 0 then
+            camera:levelToHorizon(self.upVec, strength * (1 - math.exp(-9 * dt)))
+        end
+    end
 end
 
 function Flight:onKill(victim, killer)
@@ -915,29 +1028,42 @@ function Flight:submitBodies(renderer)
         scale = sys.star.radius, emissive = 1, layer = renderer.LAYER_FAR,
     })
 
+
+    -- Celestial bodies always belong to the far layer.  Left to the automatic
+    -- split they would fall into the near layer as soon as their *surface*
+    -- came within 24 km -- exactly when landing -- and the near layer's 30 km
+    -- far plane would cut the planet into a hole full of stars.
+    local FAR = { layer = renderer.LAYER_FAR }
     for _, b in ipairs(sys.bodies) do
         if b.kind == "planet" then
             local dist = vec3.distance(b.pos, camPos)
             -- more segments when it fills the sky
             local detail = (dist < b.radius * 12) and 64 or 32
             local basis = self:bodyBasis(b)
-            renderer:draw(bodies.planet(b, detail), b.pos, basis, { scale = b.radius })
+            renderer:draw(bodies.planet(b, detail), b.pos, basis,
+                { scale = b.radius, layer = renderer.LAYER_FAR })
             local atmo = bodies.atmosphere(b)
-            if atmo then
+            -- the shell is only meaningful from outside; inside it the sky
+            -- shader is doing the work
+            if atmo and dist > b.radius + S.atmosphereHeight then
                 renderer:draw(atmo, b.pos, basis, {
                     scale = b.radius * (1 + S.atmosphereHeight / b.radius),
-                    alpha = 0.55, additive = true, layer = renderer.LAYER_FAR,
+                    alpha = 0.55, additive = true,
                 })
             end
             local rings = bodies.rings(b)
             if rings then
-                renderer:draw(rings, b.pos, basis, { scale = b.radius })
+                renderer:draw(rings, b.pos, basis, { scale = b.radius, layer = renderer.LAYER_FAR })
             end
             for _, m in ipairs(b.moons) do
-                renderer:draw(bodies.planet(m, 24), m.pos, self:bodyBasis(m), { scale = m.radius })
+                renderer:draw(bodies.planet(m, 24), m.pos, self:bodyBasis(m),
+                    { scale = m.radius, layer = renderer.LAYER_FAR })
             end
         end
     end
+
+    -- give the far layer a near plane that clears whatever we are standing on
+    renderer:setFarClearance(self.altitude)
 end
 
 --- Basis for a body, applying its spin about a polar axis tilted by
@@ -1067,7 +1193,7 @@ function Flight:draw(background)
     self:submitBodies(renderer)
     self:submitStations(renderer)
     if self.surface then
-        self.surface:draw(renderer, { nightGlow = self.nightGlow })
+        self.surface:draw(renderer, { nightGlow = self.nightGlow, eye = self.local_.pos })
     end
     self:submitShips(renderer)
     self:submitEffects(renderer)
@@ -1075,7 +1201,11 @@ function Flight:draw(background)
     local sys = self.world.system
     renderer:endFrame(function()
         self.game.sky:draw(camera, w, h, 1 - (renderer.env.atmos or 0) * 0.95)
-        self.game.sky:drawSun(camera, sys.star.pos, w, h, sys.star.radius, sys.star.color, false)
+        -- The sun disc is 2D and has no depth, so it must not be drawn once
+        -- the local horizon has swallowed it.
+        if self:sunVisible() then
+            self.game.sky:drawSun(camera, sys.star.pos, w, h, sys.star.radius, sys.star.color, false)
+        end
     end)
     renderer:present()
 
@@ -1099,6 +1229,8 @@ function Flight:draw(background)
         overheating = self.overheating,
         warpState = self.warpState,
         warpFraction = self.warpFraction,
+        hoverMode = self.hoverMode,
+        horizon = self:attitude(),
         prompt = self.dockPrompt and self.dockPrompt.text or nil,
     }, w, h)
 
@@ -1107,32 +1239,36 @@ end
 
 function Flight:drawHelp(w, h)
     local lines = {
-        { "Pitch / roll", "W S / A D" },
-        { "Yaw", config.keyName("yawLeft") .. " " .. config.keyName("yawRight") },
-        { "Throttle up / down", config.keyName("throttleUp") .. " / " .. config.keyName("throttleDown") },
-        { "Full / cut throttle", config.keyName("throttleFull") .. " / " .. config.keyName("throttleZero") },
+        { "Aim (pitch / yaw)", "MOUSE" },
+        { "Roll", "A / D" },
+        { "Throttle", "W / S" },
+        { "Full / cut throttle", "Z / X" },
+        { "Strafe left / right", "Q / E" },
+        { "Thrust up / down", "R / F" },
         { "Boost", "SHIFT" },
-        { "Frame shift cruise (hold)", config.keyName("warp") },
-        { "Fire", "SPACE" },
-        { "Target next / scan", config.keyName("target") .. " / " .. config.keyName("scan") },
-        { "Landing gear", config.keyName("landingGear") },
-        { "Dock / enter", config.keyName("dock") },
-        { "Disembark on foot", config.keyName("disembark") },
-        { "Galaxy map", "TAB" },
-        { "Mission log", config.keyName("missions") },
-        { "Colonies", config.keyName("colony") },
-        { "View (cockpit/chase)", config.keyName("view") },
+        { "Frame shift cruise (hold)", "CTRL" },
+        { "Fire / missile", "SPACE / 2" },
+        { "Landing gear (landing mode)", "G" },
+        { "Auto-level / mouse flight", "H / TAB" },
+        { "Target / hostile / scan", "T / Y / B" },
+        { "Dock or enter", "ENTER" },
+        { "Disembark on foot", "U" },
+        { "Galaxy map / log / colonies", "M / N / C" },
+        { "Cockpit or chase view", "V" },
         { "Save / load", "F5 / F9" },
-        { "Wireframe / post / debug", "F2 / F4 / F3" },
+        { "Wireframe / debug / CRT", "F2 / F3 / F4" },
     }
-    local pw, ph = 380, #lines * 20 + 54
+    local pw, ph = 420, #lines * 20 + 74
     local px, py = (w - pw) * 0.5, (h - ph) * 0.5
     ui.panel(px, py, pw, ph, "CONTROLS")
     for i, l in ipairs(lines) do
         ui.text(l[1], px + 22, py + 30 + (i - 1) * 20, C.uiText, "small")
         ui.textRight(l[2], px + pw - 22, py + 30 + (i - 1) * 20, C.uiPrimary, "small")
     end
-    ui.textCenter("F1 to close", px + pw * 0.5, py + ph - 20, C.uiDim, "small")
+    ui.textCenter("Gear down near the ground engages LANDING MODE:",
+        px + pw * 0.5, py + ph - 42, C.uiDim, "small")
+    ui.textCenter("the ship holds level and hovers. F1 to close.",
+        px + pw * 0.5, py + ph - 26, C.uiDim, "small")
 end
 
 -- ---------------------------------------------------------------------------
@@ -1165,6 +1301,16 @@ function Flight:keypressed(key)
     if config.is("target", key) then self:cycleTarget(false) return end
     if config.is("nextTarget", key) then self:cycleTarget(true) return end
     if config.is("scan", key) then self:scanTarget() return end
+    if config.is("mouseFlight", key) then
+        self:setMouseFlight(not self.mouseSteer)
+        hud.message(self.mouseSteer and "Mouse flight on" or "Mouse flight off", "info")
+        return
+    end
+    if config.is("levelOut", key) then
+        self.autoLevel = not self.autoLevel
+        hud.message(self.autoLevel and "Auto-level on" or "Auto-level off", "info")
+        return
+    end
     if config.is("view", key) then
         self.game.camera.mode = (self.game.camera.mode == "cockpit") and "chase" or "cockpit"
         return
@@ -1209,19 +1355,24 @@ function Flight:keypressed(key)
     end
 end
 
+function Flight:setMouseFlight(on)
+    self.mouseSteer = on
+    self.mouseDx, self.mouseDy = 0, 0
+    if love and love.mouse then love.mouse.setRelativeMode(on) end
+end
+
 function Flight:mousepressed(x, y, button)
     if button == 2 then
-        self.mouseSteer = not self.mouseSteer
-        love.mouse.setRelativeMode(self.mouseSteer)
-        self.mouseDx, self.mouseDy = 0, 0
+        self:setMouseFlight(not self.mouseSteer)
         hud.message(self.mouseSteer and "Mouse flight on" or "Mouse flight off", "info")
     end
 end
 
 function Flight:mousemoved(x, y, dx, dy)
     if self.mouseSteer then
-        self.mouseDx = (self.mouseDx or 0) + dx * config.walk.mouseSens * 40
-        self.mouseDy = (self.mouseDy or 0) + dy * config.walk.mouseSens * 40
+        local s = config.flight.mouseSensitivity
+        self.mouseDx = util.clamp((self.mouseDx or 0) + dx * s, -1.6, 1.6)
+        self.mouseDy = util.clamp((self.mouseDy or 0) + dy * s, -1.6, 1.6)
     end
 end
 
@@ -1230,6 +1381,7 @@ function Flight:wheelmoved(x, y)
 end
 
 function Flight:resume()
+    self:setMouseFlight(self.mouseSteer ~= false)
     -- coming back from a docked screen: the ship may have been outfitted
     self.ship.stats = self.player.stats
     self.ship.hull = self.player.hull
@@ -1239,9 +1391,13 @@ function Flight:resume()
     self.ship.hardpoints = self.player.shipDef.hardpoints
 end
 
+function Flight:pause()
+    if love and love.mouse then love.mouse.setRelativeMode(false) end
+end
+
 function Flight:exit()
     if self.surface then self.surface:release() end
-    if self.mouseSteer then love.mouse.setRelativeMode(false) end
+    if love and love.mouse then love.mouse.setRelativeMode(false) end
 end
 
 return Flight

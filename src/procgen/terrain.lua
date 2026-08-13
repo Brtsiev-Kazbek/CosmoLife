@@ -26,13 +26,13 @@ local floor, sqrt, max, min, abs = math.floor, math.sqrt, math.max, math.min, ma
 -- Terrain "recipes" per planet class: amplitude in metres and the mix of
 -- noise layers that gives each class its silhouette.
 local PROFILES = {
-    terran   = { amp = 2200, ridge = 0.55, warp = 900, sea = 0.34, detail = 90,  crater = 0.0 },
-    ocean    = { amp = 1400, ridge = 0.35, warp = 700, sea = 0.62, detail = 60,  crater = 0.0 },
+    terran   = { amp = 2200, ridge = 0.55, warp = 900, sea = 0.42, detail = 90,  crater = 0.0, rivers = 1.0 },
+    ocean    = { amp = 1400, ridge = 0.35, warp = 700, sea = 0.68, detail = 60,  crater = 0.0, rivers = 0.8 },
     desert   = { amp = 1700, ridge = 0.45, warp = 1400, sea = 0.0, detail = 120, crater = 0.15 },
-    ice      = { amp = 1900, ridge = 0.50, warp = 800, sea = 0.18, detail = 80,  crater = 0.2 },
+    ice      = { amp = 1900, ridge = 0.50, warp = 800, sea = 0.26, detail = 80,  crater = 0.2, rivers = 0.3 },
     volcanic = { amp = 2600, ridge = 0.72, warp = 600, sea = 0.08, detail = 140, crater = 0.35 },
     barren   = { amp = 1500, ridge = 0.40, warp = 500, sea = 0.0,  detail = 70,  crater = 0.75 },
-    toxic    = { amp = 1800, ridge = 0.48, warp = 1100, sea = 0.22, detail = 100, crater = 0.1 },
+    toxic    = { amp = 1800, ridge = 0.48, warp = 1100, sea = 0.30, detail = 100, crater = 0.1, rivers = 0.6 },
 }
 
 local Field = class("TerrainField")
@@ -53,10 +53,17 @@ function Field:init(body)
     self.continentScale = rng:range(320000, 900000)
     self.mountainScale = rng:range(38000, 90000)
     self.detailScale = rng:range(2600, 6200)
-    self.amplitude = p.amp * rng:range(0.7, 1.35)
+    -- Relief reaches roughly 2.7x this before the sea-level clamp, so a
+    -- fraction of the profile amplitude gives a few kilometres of mountain --
+    -- dramatic from orbit, still flyable at low level.
+    self.amplitude = p.amp * rng:range(0.34, 0.62)
     self.seaLevel = p.sea
     self.craterAmount = p.crater
     self.craterScale = rng:range(4000, 12000)
+    self.riverAmount = p.rivers or 0
+    self.riverScale = rng:range(90000, 220000)
+    self.riverWidth = rng:range(0.018, 0.045)
+    self.riverDepth = self.amplitude * rng:range(0.20, 0.42)
 
     local ramp = palette.terrainSets[kind] or palette.terrainSets.barren
     self.ramp = {}
@@ -128,12 +135,34 @@ function Field:heightDir(dx, dy, dz)
         end
     end
 
-    -- sea level flattening
+    -- Rivers.
+    --
+    -- A cheap, convincing trick: take a second noise field, and where its
+    -- value passes close to zero carve a narrow valley.  The zero set of a
+    -- smooth field is a set of winding curves, which is exactly what a river
+    -- network looks like from above -- and because the carve is scaled by
+    -- height above the sea, rivers run in the lowlands and fade out on peaks.
+    if self.riverAmount > 0.01 and self.seaLevel > 0 then
+        local rf = R / self.riverScale
+        local v = noise.fbm3(s + 2131, dx * rf, dy * rf, dz * rf, 3, 2.0, 0.5)
+        local channel = 1 - util.clamp(abs(v) / self.riverWidth, 0, 1)
+        if channel > 0 then
+            local sea = self:seaHeight()
+            -- only above the water line, and less as the land rises
+            local above = metres - sea
+            if above > 0 then
+                local fade = util.clamp(1 - above / (self.amplitude * 1.1), 0, 1)
+                local depth = channel * channel * self.riverDepth * fade
+                metres = math.max(sea + 1, metres - depth)
+            end
+        end
+    end
+
+    -- sea level: a real flat plane, not a squashed slope, so oceans read as
+    -- water rather than as low ground
     if self.seaLevel > 0 then
         local sea = self:seaHeight()
-        if metres < sea then
-            metres = sea - (sea - metres) * 0.18
-        end
+        if metres < sea then metres = sea end
     end
     return metres
 end
@@ -154,8 +183,15 @@ end
 function Field:height(x, z)
     local dx, dy, dz = self:directionAt(x, z)
     local metres = self:heightDir(dx, dy, dz)
-    -- metre-scale roughness, applied in the tangent plane where it belongs
+    -- water stays perfectly flat; only land gets metre-scale roughness
+    if self.seaLevel > 0 and metres <= self:seaHeight() + 0.5 then return metres end
     return metres + noise.perlin2(self.seed + 1009, x / 140, z / 140) * self.profile.detail * 0.12
+end
+
+--- True where the surface is standing water (sea or river).
+function Field:isWater(h)
+    if self.seaLevel <= 0 then return false end
+    return h <= self:seaHeight() + self.amplitude * 0.025
 end
 
 function Field:seaHeight()
@@ -188,8 +224,10 @@ end
 function Field:colorForHeight(h, latitude)
     local ramp = self.ramp
     local n = #ramp
-    local sea = self:seaHeight()
-    if h <= sea then
+    if self:isWater(h) then
+        -- shallows near the waterline, deep water further down; rivers land in
+        -- the shallow band and so read as water too
+        local sea = self:seaHeight()
         local depth = util.clamp((sea - h) / (self.amplitude * 0.4), 0, 1)
         return palette.mix(ramp[2] or ramp[1], ramp[1], depth)
     end
@@ -210,9 +248,9 @@ function Field:colorAt(x, z, h)
     local ramp = self.ramp
     local n = #ramp
     local t = util.clamp((h + self.amplitude) / (self.amplitude * 2), 0, 0.999)
-    -- water first: everything below sea level uses the two lowest ramp stops
+    -- water first: sea and river channels use the two lowest ramp stops
     local sea = self:seaHeight()
-    if h <= sea then
+    if self:isWater(h) then
         local depth = util.clamp((sea - h) / (self.amplitude * 0.4), 0, 1)
         return palette.mix(ramp[2] or ramp[1], ramp[1], depth)
     end
@@ -222,6 +260,7 @@ function Field:colorAt(x, z, h)
     local f = idx - i0
     local col = palette.mix(ramp[max(i0, 1)], ramp[i1], f)
 
+    if self:isWater(h) then return col end
     -- steep ground shows rock regardless of altitude
     local _, ny = self:normal(x, z, 30)
     if ny < 0.82 then

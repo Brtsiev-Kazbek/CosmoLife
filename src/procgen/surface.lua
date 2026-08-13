@@ -33,7 +33,21 @@ local floor, sqrt, max, min, abs = math.floor, math.sqrt, math.max, math.min, ma
 local CHUNK = config.render.terrainChunkSize
 local RINGS = config.render.terrainRings
 local REORIGIN_DISTANCE = CHUNK * 6
-local BUILD_BUDGET = 2            -- chunks per frame, to avoid hitches
+local BUILD_BUDGET = 3            -- chunks per frame, to avoid hitches
+
+--- Chunk edge length for an altitude.
+--
+-- A sphere mesh fine enough to look like ground from 60 km up would need
+-- thousands of segments, so above the treetops the patch itself grows: chunks
+-- double in size every octave of altitude, keeping roughly the same number of
+-- them on screen and the same number of pixels per triangle.  Sizes snap to
+-- powers of two of the base so the level is stable and does not flicker.
+local function lodSizeFor(altitude)
+    local target = math.max(CHUNK, (altitude or 0) * 0.55)
+    local level = math.floor(math.log(target / CHUNK) / math.log(2) + 0.5)
+    if level < 0 then level = 0 elseif level > 5 then level = 5 end
+    return CHUNK * (2 ^ level), level
+end
 
 function Surface:init(body, opts)
     opts = opts or {}
@@ -51,6 +65,8 @@ function Surface:init(body, opts)
     self.pending = {}
     self.active = {}
     self.viewRange = config.scale.terrainViewRange
+    self.chunkSize = CHUNK
+    self.lodLevel = 0
 end
 
 -- ---------------------------------------------------------------------------
@@ -225,12 +241,25 @@ end
 local function chunkKey(cx, cz) return cx .. ":" .. cz end
 
 --- Brings the working set up to date around a local point.
-function Surface:update(x, z, dt)
+function Surface:update(x, z, dt, altitude)
     self:refreshFrame()
-
-    local cx0 = floor(x / CHUNK)
-    local cz0 = floor(z / CHUNK)
     self.chunkCache = self.chunkCache or {}
+
+    -- switch detail level with altitude, dropping the old working set
+    local size, level = lodSizeFor(altitude)
+    if level ~= self.lodLevel then
+        for _, c in pairs(self.chunkCache) do
+            if c.model and c.model.mesh and c.model.mesh.release then c.model.mesh:release() end
+        end
+        self.chunkCache = {}
+        self.chunkSize = size
+        self.lodLevel = level
+        self.primed = false
+    end
+    local CH = self.chunkSize
+
+    local cx0 = floor(x / CH)
+    local cz0 = floor(z / CH)
 
     -- mark what should be resident
     local wanted = {}
@@ -262,9 +291,17 @@ function Surface:update(x, z, dt)
     table.sort(todo, function(a, b) return a.d < b.d end)
 
     local budget = BUILD_BUDGET
-    -- the first frame on a new patch builds everything, so the ground is
-    -- never missing under the ship
-    if not self.primed then budget = #todo; self.primed = true end
+    -- On a new patch, build the chunks immediately under the ship at once so
+    -- the ground is never missing, but let the outer rings stream in over the
+    -- next second rather than stalling for a hundred chunks.
+    if not self.primed then
+        self.primed = true
+        budget = 0
+        for i = 1, #todo do
+            if todo[i].d <= 1.5 then budget = budget + 1 end
+        end
+        budget = math.max(budget, 1)
+    end
     for i = 1, min(budget, #todo) do
         local t = todo[i]
         self:_buildChunk(t.cx, t.cz, t.d)
@@ -281,7 +318,8 @@ function Surface:update(x, z, dt)
 end
 
 function Surface:_buildChunk(cx, cz, ringDistance)
-    local ox, oz = cx * CHUNK, cz * CHUNK
+    local CH = self.chunkSize
+    local ox, oz = cx * CH, cz * CH
     -- resolution falls off with distance: near ground is detailed, the far
     -- ring is coarse, and because heights are a pure function of position the
     -- seams between resolutions stay small
@@ -291,7 +329,7 @@ function Surface:_buildChunk(cx, cz, ringDistance)
     res = max(res, 4)
 
     local b = require("src.render.mesh").new()
-    local step = CHUNK / res
+    local step = CH / res
     local hs = {}
     for j = 0, res do
         hs[j] = {}
@@ -317,9 +355,10 @@ function Surface:_buildChunk(cx, cz, ringDistance)
         end
     end
 
-    local chunk = { ox = ox, oz = oz, model = b:build(), res = res }
-    if ringDistance <= 1.5 then
-        chunk.scatter = self.field:buildScatter(ox, oz, CHUNK, 1)
+    local chunk = { ox = ox, oz = oz, size = CH, model = b:build(), res = res }
+    -- scenery is only worth placing at the finest level, where it is visible
+    if ringDistance <= 1.5 and self.lodLevel == 0 then
+        chunk.scatter = self.field:buildScatter(ox, oz, CH, 1)
     end
     self.chunkCache[chunkKey(cx, cz)] = chunk
     return chunk
@@ -371,14 +410,31 @@ function Surface:draw(renderer, opts)
     local pos = self._drawPos or vec3()
     self._drawPos = pos
 
+    -- A high altitude patch is hundreds of kilometres across, well past the
+    -- near layer's far plane, so each chunk picks its own depth layer by how
+    -- far away it is.  The two layers overlap, so there is no seam.
+    local eye = opts and opts.eye
+    local nearOpts = self._nearOpts or { layer = renderer.LAYER_NEAR }
+    local farOpts = self._farOpts or { layer = renderer.LAYER_FAR }
+    self._nearOpts, self._farOpts = nearOpts, farOpts
+    local split = 22000
+
     for _, c in pairs(self.chunkCache) do
+        local o = nearOpts
+        if eye then
+            local half = (c.size or self.chunkSize) * 0.5
+            local dx = c.ox + half - eye.x
+            local dz = c.oz + half - eye.z
+            local dy = eye.y or 0
+            if sqrt(dx * dx + dz * dz + dy * dy) - half > split then o = farOpts end
+        end
         if c.model then
             self:toWorld(c.ox, 0, c.oz, pos)
-            renderer:draw(c.model, pos, basis, { layer = renderer.LAYER_NEAR })
+            renderer:draw(c.model, pos, basis, o)
         end
         if c.scatter then
             self:toWorld(c.ox, 0, c.oz, pos)
-            renderer:draw(c.scatter, pos, basis, { layer = renderer.LAYER_NEAR })
+            renderer:draw(c.scatter, pos, basis, nearOpts)
         end
     end
 

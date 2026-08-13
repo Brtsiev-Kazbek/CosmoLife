@@ -29,6 +29,52 @@ function Sky:init(seed)
         self.stars[i] = { x, y, z, r * b, g * b, bl * b, 1 + mag * 2.2 }
     end
     self.points = {}
+    self:buildConstellations(rng)
+end
+
+--- Constellations.
+--
+-- Real constellations are just bright stars that people joined with lines, so
+-- that is exactly how these are made: take the brightest stars, and link each
+-- to a near neighbour a few times.  Drawn faintly, they give the sky structure
+-- and make one system's night distinguishable from another's.
+function Sky:buildConstellations(rng)
+    local bright = {}
+    for i = 1, #self.stars do
+        if self.stars[i][7] > 2.0 then bright[#bright + 1] = i end
+    end
+    self.lines = {}
+    local groups = math.min(math.floor(#bright / 6), 22)
+    local used = {}
+    for _ = 1, groups do
+        -- pick an unused seed star and grow a short chain from it
+        local start
+        for _ = 1, 30 do
+            local cand = bright[rng:int(1, #bright)]
+            if not used[cand] then start = cand break end
+        end
+        if not start then break end
+        local current = start
+        used[current] = true
+        local links = rng:int(2, 5)
+        for _ = 1, links do
+            -- nearest unused bright star within a plausible angular reach
+            local best, bestD = nil, 0.55
+            local a = self.stars[current]
+            for _, j in ipairs(bright) do
+                if not used[j] then
+                    local b = self.stars[j]
+                    local dx, dy, dz = b[1] - a[1], b[2] - a[2], b[3] - a[3]
+                    local d = math.sqrt(dx * dx + dy * dy + dz * dz)
+                    if d < bestD then best, bestD = j, d end
+                end
+            end
+            if not best then break end
+            used[best] = true
+            self.lines[#self.lines + 1] = { current, best }
+            current = best
+        end
+    end
 end
 
 --- Draws the starfield for the current camera.  `fade` dims the field as the
@@ -67,6 +113,32 @@ function Sky:draw(camera, w, h, fade)
         end
     end
     self._visible = n
+
+    -- constellation lines, drawn under the stars
+    if self.lines and fade > 0.25 then
+        local proj = self._proj or {}
+        self._proj = proj
+        local function project(i)
+            local st = self.stars[i]
+            local zf = st[1] * fx + st[2] * fy + st[3] * fz
+            if zf <= 0.08 then return nil end
+            local xr = st[1] * rx + st[2] * ry + st[3] * rz
+            local yu = st[1] * ux + st[2] * uy + st[3] * uz
+            return ((xr / zf) * invT / aspect * 0.5 + 0.5) * w,
+                   (0.5 - (yu / zf) * invT * 0.5) * h
+        end
+        love.graphics.setLineWidth(1)
+        love.graphics.setColor(0.42, 0.56, 0.78, 0.16 * fade)
+        for i = 1, #self.lines do
+            local a, b = self.lines[i][1], self.lines[i][2]
+            local ax, ay = project(a)
+            if ax then
+                local bx, by = project(b)
+                if bx then love.graphics.line(ax, ay, bx, by) end
+            end
+        end
+        love.graphics.setColor(1, 1, 1, 1)
+    end
 
     for g = 1, 3 do
         local list = sizeGroups[g]

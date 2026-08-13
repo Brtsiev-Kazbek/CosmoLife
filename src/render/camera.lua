@@ -34,6 +34,27 @@ function Camera:setBasis(right, up, fwd)
     mat4.orthonormalize(self.right, self.up, self.fwd)
 end
 
+--- Blends the camera's roll towards a world "up" so that near a planet the
+--- horizon stays horizontal.  Flying inverted over a surface with the camera
+--- glued to the hull is the single most disorienting thing a space sim can do,
+--- so close to the ground the view levels out and only the ship rolls.
+-- `strength` 0 keeps the hull's own roll, 1 locks the horizon flat.
+function Camera:levelToHorizon(worldUp, strength)
+    if not worldUp or strength <= 0 then return end
+    -- component of world up perpendicular to the view direction
+    local d = vec3.dot(worldUp, self.fwd)
+    local ux = worldUp.x - self.fwd.x * d
+    local uy = worldUp.y - self.fwd.y * d
+    local uz = worldUp.z - self.fwd.z * d
+    local l = math.sqrt(ux * ux + uy * uy + uz * uz)
+    if l < 1e-4 then return end          -- looking straight up or down
+    ux, uy, uz = ux / l, uy / l, uz / l
+    self.up.x = self.up.x + (ux - self.up.x) * strength
+    self.up.y = self.up.y + (uy - self.up.y) * strength
+    self.up.z = self.up.z + (uz - self.up.z) * strength
+    mat4.orthonormalize(self.right, self.up, self.fwd)
+end
+
 --- Attaches the camera to a body (ship, walker) in the current view mode.
 function Camera:follow(body, dt, offset)
     local mode = self.mode
@@ -99,8 +120,18 @@ function Camera:viewMatrix(out)
     return mat4.view(vec3.zero, self.right, self.up, self.fwd, out)
 end
 
+--- Projection for the 3D pass.
+--
+-- LOVE flips the projection when it renders into a Canvas, so that y = 0 stays
+-- the top-left corner in both canvas and screen space.  Our 3D pass supplies
+-- its own matrix and so misses that flip, which mirrors every polygon
+-- vertically: the ground you are standing on draws above the horizon.  Undoing
+-- it here keeps the geometry, the sky shader (which works from screen
+-- coordinates) and the 2D HUD all agreeing on which way is up.
 function Camera:projection(near, far, out)
-    return mat4.perspective(self.fov, self.aspect, near, far, out)
+    out = mat4.perspective(self.fov, self.aspect, near, far, out)
+    out[6] = -out[6]
+    return out
 end
 
 --- Projects a world point to screen coordinates.

@@ -25,6 +25,18 @@ config.scale = {
     orbitMin       = 2.0e9,
     orbitMax       = 3.2e10,
 
+    -- Orbital and rotation rates.
+    --
+    -- These are set so that a planet's own motion is *slow next to the ship*:
+    -- a world drifts along its orbit at tens of metres per second and its
+    -- equator turns at a similar rate.  Get this wrong and nothing near a
+    -- planet works -- with a 90 day orbit a world crosses 600 km every second,
+    -- outrunning the ship by a thousand to one and tearing the landing frame
+    -- apart between one frame and the next.
+    orbitPeriodBase   = 900000,   -- days at orbitMin  (~45 m/s)
+    dayLengthBase     = 2200,     -- days per rotation (~30 m/s at the equator)
+    stationOrbitPeriod = 4000,    -- days
+
     planetRadiusMin = 1.4e6,
     planetRadiusMax = 7.2e6,
     moonRadiusMin   = 3.0e5,
@@ -49,6 +61,7 @@ config.flight = {
     reverseFactor  = 0.45,
     lateralFactor  = 0.55,
 
+    mouseSensitivity = 0.055,     -- mouse pixels -> attitude command
     pitchRate      = 1.35,        -- rad/s
     yawRate        = 0.85,
     rollRate       = 2.20,
@@ -72,6 +85,11 @@ config.flight = {
     landingSpeedMax = 22,
     landingAngleMax = math.rad(28),
     landingPadRadius = 24,
+
+    -- landing ("hover") mode: engaged with the gear down near the ground
+    hoverAltitude   = 900,        -- metres at which the assist takes over
+    hoverSpeed      = 90,         -- taxi speed cap while hovering
+    hoverGravityRelief = 0.18,    -- fraction of weight the pilot still feels
 }
 
 config.walk = {
@@ -132,45 +150,69 @@ config.render = {
     lightBands     = 5,
     post           = true,
     starCount      = 1400,
+    -- The streamed patch must reach past the far layer's near plane, or there
+    -- is a ring of nothing between the terrain and the planet standing in for
+    -- it: rings * chunkSize is the radius covered, and 6 * 2600 = 15.6 km.
     terrainChunk   = 24,          -- vertices per chunk edge
-    terrainChunkSize = 1800,      -- metres per chunk edge
-    terrainRings   = 5,           -- LOD rings around the player
+    terrainChunkSize = 2600,      -- metres per chunk edge
+    terrainRings   = 6,           -- LOD rings around the player
 }
 
 -- ---------------------------------------------------------------------------
 -- Controls.  Every action maps to a list of keys; the first is what the UI
 -- shows in the help overlay.
 -- ---------------------------------------------------------------------------
+-- The scheme is the one most space sims settled on, because it is the one
+-- people already know: the mouse aims the nose, the keyboard does everything
+-- that is not aiming.  Pitch and yaw are never on the same keys as the mouse
+-- axes, which is what made the first layout so confusing to fly.
 config.keys = {
-    pitchUp      = { "s", "down" },
-    pitchDown    = { "w", "up" },
-    yawLeft      = { "q" },
-    yawRight     = { "e" },
+    -- flight: the mouse aims, the keyboard does the rest
+    throttleUp   = { "w", "up" },
+    throttleDown = { "s", "down" },
     rollLeft     = { "a", "left" },
     rollRight    = { "d", "right" },
-    throttleUp   = { "r" },
-    throttleDown = { "f" },
+    strafeLeft   = { "q" },
+    strafeRight  = { "e" },
+    thrustUp     = { "r" },
+    thrustDown   = { "f" },
     throttleZero = { "x" },
     throttleFull = { "z" },
     boost        = { "lshift", "rshift" },
-    warp         = { "j" },
+    warp         = { "lctrl", "rctrl" },
+    levelOut     = { "h" },
+    mouseFlight  = { "tab" },
+
+    -- keyboard-only attitude, for anyone who turns the mouse off
+    pitchUp      = { "k" },
+    pitchDown    = { "i" },
+    yawLeft      = { "j" },
+    yawRight     = { "l" },
+
+    -- combat and systems
     fire         = { "space" },
-    missile      = { "m" },
+    missile      = { "2" },
     target       = { "t" },
     nextTarget   = { "y" },
-    scan         = { "g" },
-    landingGear  = { "l" },
+    scan         = { "b" },
+    landingGear  = { "g" },
     dock         = { "return" },
     disembark    = { "u" },
-    map          = { "tab" },
-    missions     = { "n" },
-    market       = { "b" },
-    ship         = { "i" },
-    colony       = { "c" },
     view         = { "v" },
+
+    -- screens
+    map          = { "m" },
+    missions     = { "n" },
+    colony       = { "c" },
+    ship         = { "o" },
+    market       = { "period" },
+
+    -- on foot
     interact     = { "e", "return" },
     jump         = { "space" },
     run          = { "lshift" },
+
+    -- meta
     pause        = { "escape" },
     help         = { "f1" },
     save         = { "f5" },

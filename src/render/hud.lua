@@ -127,6 +127,74 @@ local function drawContactMarker(camera, w, h, c, selected)
 end
 
 -- ---------------------------------------------------------------------------
+-- Artificial horizon
+-- ---------------------------------------------------------------------------
+
+--- Attitude indicator: the ladder every pilot reads without being taught.
+-- `roll` and `pitch` are the ship's attitude relative to the local horizontal;
+-- `alt` and `vs` drive the tapes either side.
+local function drawHorizon(cx, cy, r, roll, pitch, alt, vs, landable)
+    local accent = landable and C.uiPrimary or C.uiWarn
+
+    love.graphics.push()
+    love.graphics.translate(cx, cy)
+
+    -- fixed aircraft reference
+    ui.setColor(C.uiWarn, 1)
+    love.graphics.setLineWidth(2)
+    love.graphics.line(-r * 0.55, 0, -r * 0.2, 0)
+    love.graphics.line(r * 0.2, 0, r * 0.55, 0)
+    love.graphics.line(0, -4, 0, 4)
+    love.graphics.setLineWidth(1)
+
+    -- rotating ladder
+    love.graphics.push()
+    love.graphics.rotate(-roll)
+    local pitchPx = r * 0.9
+    local offset = (pitch / (math.pi * 0.5)) * pitchPx
+    ui.setColor(accent, 0.85)
+    love.graphics.line(-r, offset, -r * 0.25, offset)
+    love.graphics.line(r * 0.25, offset, r, offset)
+    for _, step in ipairs({ -30, -20, -10, 10, 20, 30 }) do
+        local y = offset - (math.rad(step) / (math.pi * 0.5)) * pitchPx
+        if math.abs(y) < r * 1.1 then
+            local w = (step % 20 == 0) and r * 0.34 or r * 0.18
+            ui.setColor(accent, 0.4)
+            love.graphics.line(-w, y, w, y)
+        end
+    end
+    love.graphics.pop()
+
+    -- roll scale
+    ui.setColor(accent, 0.5)
+    love.graphics.circle("line", 0, 0, r)
+    for _, a in ipairs({ -60, -30, 0, 30, 60 }) do
+        local rad = math.rad(a) - math.pi * 0.5
+        local x1, y1 = math.cos(rad) * r, math.sin(rad) * r
+        local x2, y2 = math.cos(rad) * (r * 0.9), math.sin(rad) * (r * 0.9)
+        love.graphics.line(x1, y1, x2, y2)
+    end
+    -- roll pointer
+    local rad = -roll - math.pi * 0.5
+    ui.setColor(C.uiWarn, 1)
+    love.graphics.polygon("fill",
+        math.cos(rad) * r, math.sin(rad) * r,
+        math.cos(rad + 0.07) * (r * 0.88), math.sin(rad + 0.07) * (r * 0.88),
+        math.cos(rad - 0.07) * (r * 0.88), math.sin(rad - 0.07) * (r * 0.88))
+
+    love.graphics.pop()
+
+    -- tapes
+    ui.textRight(util.distance(alt or 0), cx - r - 14, cy - 9,
+        (alt or 0) < 300 and C.uiWarn or C.uiText, "small")
+    ui.text(string.format("%+.0f m/s", vs or 0), cx + r + 14, cy - 9,
+        (vs or 0) < -30 and C.uiDanger or C.uiText, "small")
+    ui.textRight("ALT", cx - r - 14, cy + 6, C.uiDim, "small")
+    ui.text("V/S", cx + r + 14, cy + 6, C.uiDim, "small")
+    love.graphics.setColor(1, 1, 1, 1)
+end
+
+-- ---------------------------------------------------------------------------
 -- Main draw
 -- ---------------------------------------------------------------------------
 
@@ -216,6 +284,17 @@ function hud.draw(ctx, w, h)
     ui.textRight(string.format("%d / %d t", player:cargoUsed(), player:cargoCapacity()), rx + 190, gy + 92, C.uiText, "small")
     ui.text("CREDITS", rx, gy + 110, C.uiDim, "small")
     ui.textRight(util.money(player.credits), rx + 190, gy + 110, C.amber, "small")
+
+    -- ---- artificial horizon, whenever there is a ground to be level with --
+    if ctx.horizon then
+        drawHorizon(cx, cy - h * 0.22, math.min(w, h) * 0.11,
+            ctx.horizon.roll, ctx.horizon.pitch, ctx.altitude, ctx.verticalSpeed,
+            ctx.horizon.landable)
+        if ctx.hoverMode then
+            ui.textCenter("LANDING MODE", cx, cy - h * 0.22 + math.min(w, h) * 0.13,
+                C.uiPrimary, "small")
+        end
+    end
 
     -- ---- scanner --------------------------------------------------------
     drawScanner(cx, h - 78, 132, 58, ship, ctx.contacts, config.combat.scanRange)
