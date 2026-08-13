@@ -420,7 +420,6 @@ local strings = {
     ["On foot. {interact} to interact, {board} to board the ship."] =
         "Вы на ногах. {interact} — действие, {board} — вернуться на борт.",
     ["{key} to board ship"] = "{key} — на борт",
-    ["{key} to enter {name}"] = "{key} — войти: {name}",
     ["{key} to step outside"] = "{key} — выйти наружу",
     ["{body} surface"] = "{body}, поверхность",
     ["pop {pop}  -  {economy}"] = "насел. {pop}  -  {economy}",
@@ -674,6 +673,10 @@ local strings = {
     ["Docked at {name}"] = "Стыковка: {name}",
     ["Entered {name}"] = "Вход: {name}",
     ["Touchdown  -  {key} to disembark"] = "Посадка  -  {key} выйти наружу",
+    ["{key} to disembark"] = "{key} — выйти наружу",
+    ["{key} to dock at {name}"] = "{key} — стыковка: {name}",
+    ["{key} to enter {name}"] = "{key} — войти: {name}",
+    ["Slow to under 120 m/s to dock"] = "Для стыковки сбросьте скорость ниже 120 м/с",
     ["Landed at {name}  -  {enter} to enter, {out} to disembark"] =
         "Сели: {name}  -  {enter} войти, {out} выйти наружу",
     ["Impact! -{n} hull"] = "Удар! -{n} корпуса",

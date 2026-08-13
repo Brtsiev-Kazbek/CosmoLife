@@ -43,9 +43,20 @@ local BUILD_BUDGET = 3            -- chunks per frame, to avoid hitches
 -- double in size every octave of altitude, keeping roughly the same number of
 -- them on screen and the same number of pixels per triangle.  Sizes snap to
 -- powers of two of the base so the level is stable and does not flicker.
-local function lodSizeFor(altitude)
+-- `current` is the level already in force. Rounding to nearest with no dead
+-- band meant that hovering at a boundary flipped the level frame to frame,
+-- and every flip drops and rebuilds the entire ~120 chunk working set: a
+-- sustained stutter with no visible cause. A level is only left once the
+-- altitude is well past the point that would have chosen it.
+local LOD_HYSTERESIS = 0.28
+
+local function lodSizeFor(altitude, current)
     local target = math.max(CHUNK, (altitude or 0) * 0.55)
-    local level = math.floor(math.log(target / CHUNK) / math.log(2) + 0.5)
+    local exact = math.log(target / CHUNK) / math.log(2)
+    local level = math.floor(exact + 0.5)
+    if current and math.abs(exact - current) < 0.5 + LOD_HYSTERESIS then
+        level = current
+    end
     if level < 0 then level = 0 elseif level > 5 then level = 5 end
     return CHUNK * (2 ^ level), level
 end
@@ -247,7 +258,7 @@ function Surface:update(x, z, dt, altitude)
     self.chunkCache = self.chunkCache or {}
 
     -- switch detail level with altitude, dropping the old working set
-    local size, level = lodSizeFor(altitude)
+    local size, level = lodSizeFor(altitude, self.lodLevel)
     if level ~= self.lodLevel then
         for _, c in pairs(self.chunkCache) do
             if c.model and c.model.mesh and c.model.mesh.release then c.model.mesh:release() end
@@ -262,19 +273,29 @@ function Surface:update(x, z, dt, altitude)
     local cx0 = floor(x / CH)
     local cz0 = floor(z / CH)
 
-    -- mark what should be resident
-    local wanted = {}
+    -- Mark what should be resident.
+    --
+    -- The set only changes when the ship crosses a chunk boundary or the
+    -- quality preset moves, but this was rebuilt every frame: ~120 tables,
+    -- ~120 concatenated string keys and a sort, sixty times a second, to
+    -- arrive at the same answer.
     local rings = settings.q().terrainRings
-    for dz = -rings, rings do
-        for dx = -rings, rings do
-            local d = sqrt(dx * dx + dz * dz)
-            if d <= rings + 0.4 then
-                local cx, cz = cx0 + dx, cz0 + dz
-                local key = chunkKey(cx, cz)
-                wanted[key] = { cx = cx, cz = cz, d = d }
+    if self._wantedCx ~= cx0 or self._wantedCz ~= cz0
+        or self._wantedRings ~= rings or not self._wanted then
+        local wanted = {}
+        for dz = -rings, rings do
+            for dx = -rings, rings do
+                local d = sqrt(dx * dx + dz * dz)
+                if d <= rings + 0.4 then
+                    local cx, cz = cx0 + dx, cz0 + dz
+                    wanted[chunkKey(cx, cz)] = { cx = cx, cz = cz, d = d }
+                end
             end
         end
+        self._wanted = wanted
+        self._wantedCx, self._wantedCz, self._wantedRings = cx0, cz0, rings
     end
+    local wanted = self._wanted
 
     -- drop chunks that fell out of range
     for key, c in pairs(self.chunkCache) do
@@ -292,17 +313,20 @@ function Surface:update(x, z, dt, altitude)
     end
     table.sort(todo, function(a, b) return a.d < b.d end)
 
-    local budget = BUILD_BUDGET
-    -- On a new patch, build the chunks immediately under the ship at once so
-    -- the ground is never missing, but let the outer rings stream in over the
-    -- next second rather than stalling for a hundred chunks.
+    -- On a new patch, the ground must not be missing under the ship, so the
+    -- nearest ring is prioritised -- but building all of it in one frame was
+    -- ~9 chunks at once, which at the measured cost of a chunk is a visible
+    -- hitch every time a patch is entered or re-origined. The priming budget
+    -- is a few times the steady-state one, not unbounded, so the same chunks
+    -- arrive over three or four frames instead of one.
+    local budget = settings.q().buildBudget or BUILD_BUDGET
     if not self.primed then
-        self.primed = true
-        budget = 0
+        local near = 0
         for i = 1, #todo do
-            if todo[i].d <= 1.5 then budget = budget + 1 end
+            if todo[i].d <= 1.5 then near = near + 1 end
         end
-        budget = math.max(budget, 1)
+        budget = math.max(math.min(near, budget * 3), 1)
+        if near <= budget then self.primed = true end
     end
     for i = 1, min(budget, #todo) do
         local t = todo[i]
@@ -326,7 +350,7 @@ function Surface:_buildChunk(cx, cz, ringDistance)
     -- resolution falls off with distance: near ground is detailed, the far
     -- ring is coarse, and because heights are a pure function of position the
     -- seams between resolutions stay small
-    local res = config.render.terrainChunk
+    local res = settings.q().terrainRes or config.render.terrainChunk
     if ringDistance > 3 then res = floor(res / 4)
     elseif ringDistance > 1.8 then res = floor(res / 2) end
     res = max(res, 4)
@@ -347,7 +371,12 @@ function Surface:_buildChunk(cx, cz, ringDistance)
             local h00, h10 = hs[j][i], hs[j][i + 1]
             local h01, h11 = hs[j + 1][i], hs[j + 1][i + 1]
             local hc = (h00 + h10 + h01 + h11) * 0.25
-            local col = self.field:colorAt(ox + x0 + step * 0.5, oz + z0 + step * 0.5, hc)
+            -- the quad's own corners already describe its slope, so the
+            -- colour lookup does not have to re-sample the noise field
+            local dhx = ((h10 + h11) - (h00 + h01)) / (2 * step)
+            local dhz = ((h01 + h11) - (h00 + h10)) / (2 * step)
+            local ny = 1 / sqrt(dhx * dhx + 1 + dhz * dhz)
+            local col = self.field:colorAt(ox + x0 + step * 0.5, oz + z0 + step * 0.5, hc, ny)
             if abs(h00 - h11) <= abs(h10 - h01) then
                 b:tri(x0, h00, z0, x1, h10, z0, x1, h11, z1, col)
                 b:tri(x0, h00, z0, x1, h11, z1, x0, h01, z1, col)

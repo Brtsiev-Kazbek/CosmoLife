@@ -463,7 +463,46 @@ local function buildColors(rng, def)
 end
 
 --- Generates a ship: mesh, mount points and gameplay stats.
+-- Generated hulls, keyed by seed and role.
+--
+-- ships.generate lofts a full hull -- wings, fins, canopy, engines,
+-- hardpoints, containers, truss, dish, panels, turrets, greebles, landing
+-- gear -- and it was called uncached from npc.spawn every 2.5 to 6.5 seconds
+-- for the whole session, rebuilding the same handful of hulls over and over.
+-- The result is immutable, so it can simply be remembered.
+local defCache, defOrder = {}, {}
+local DEF_CACHE_LIMIT = 64
+
 function ships.generate(seed, role, opts)
+    opts = opts or {}
+    role = role or "shuttle"
+
+    -- only the plain (seed, role) form is cacheable; anything passing opts is
+    -- asking for a variant and gets a fresh build
+    local key
+    if not next(opts) then
+        key = tostring(seed) .. ":" .. tostring(role)
+        local hit = defCache[key]
+        if hit then return hit end
+    end
+    local def_ = ships._generate(seed, role, opts)
+    if key then
+        defCache[key] = def_
+        defOrder[#defOrder + 1] = key
+        if #defOrder > DEF_CACHE_LIMIT then
+            local oldest = table.remove(defOrder, 1)
+            defCache[oldest] = nil
+        end
+    end
+    return def_
+end
+
+--- Clears the hull cache (used by the tests, and on a language change).
+function ships.clearCache()
+    defCache, defOrder = {}, {}
+end
+
+function ships._generate(seed, role, opts)
     opts = opts or {}
     role = role or "shuttle"
     local def = ROLES[role] or ROLES.shuttle

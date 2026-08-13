@@ -254,7 +254,14 @@ function Field:colorForHeight(h, latitude)
 end
 
 --- Colour for a point, from the class ramp plus slope and latitude effects.
-function Field:colorAt(x, z, h)
+--
+-- `ny` is the vertical component of the surface normal. Pass it when the
+-- caller already knows it: without it this falls back to `Field:normal`, which
+-- is four more full noise-stack evaluations *per quad*. Chunk building does
+-- know it -- it has the quad's four corner heights in hand -- and that one
+-- argument is worth roughly a fivefold cut in the cost of building a chunk,
+-- the most expensive operation in the game.
+function Field:colorAt(x, z, h, ny)
     local ramp = self.ramp
     local n = #ramp
     local t = util.clamp((h + self.amplitude) / (self.amplitude * 2), 0, 0.999)
@@ -272,7 +279,10 @@ function Field:colorAt(x, z, h)
 
     if self:isWater(h) then return col end
     -- steep ground shows rock regardless of altitude
-    local _, ny = self:normal(x, z, 30)
+    if not ny then
+        local _, computed = self:normal(x, z, 30)
+        ny = computed
+    end
     if ny < 0.82 then
         local rock = palette.colors.rockGrey
         col = palette.mix(col, rock, util.clamp((0.82 - ny) / 0.35, 0, 1))

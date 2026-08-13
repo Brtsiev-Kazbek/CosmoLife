@@ -89,25 +89,38 @@ settings.schema = {
 -- starfield projection, terrain draw distance and sphere tessellation.  Turn
 -- them all down and the game is a few thousand flat-shaded triangles, which
 -- any machine from the last twenty years can push.
+-- `terrainRes` is the one that matters most on a weak machine and was missing:
+-- the presets only controlled how *many* chunks were resident, never how
+-- expensive each one is to build, so Potato and High built identical 1,152
+-- triangle chunks at identical cost. `buildBudget` and `poiCells` are the
+-- other two per-frame costs that were fixed regardless of preset.
 settings.quality = {
     potato = {
-        terrainRings = 3, starCount = 260, bodyDetail = 20, post = false,
+        terrainRings = 3, terrainRes = 10, buildBudget = 1, poiCells = 1,
+        starCount = 260, bodyDetail = 20, post = false,
         scatter = false, nebula = 0.35, settlementRange = 6000, maxNpcs = 4,
+        engineGlows = false,
         blurb = "Everything optional is off. Runs on anything.",
     },
     low = {
-        terrainRings = 4, starCount = 550, bodyDetail = 28, post = false,
+        terrainRings = 4, terrainRes = 14, buildBudget = 2, poiCells = 1,
+        starCount = 550, bodyDetail = 28, post = false,
         scatter = false, nebula = 0.7, settlementRange = 10000, maxNpcs = 7,
+        engineGlows = true,
         blurb = "No post pass, short draw distance.",
     },
     medium = {
-        terrainRings = 6, starCount = 1100, bodyDetail = 40, post = true,
+        terrainRings = 6, terrainRes = 20, buildBudget = 3, poiCells = 2,
+        starCount = 1100, bodyDetail = 40, post = true,
         scatter = true, nebula = 1.0, settlementRange = 16000, maxNpcs = 11,
+        engineGlows = true,
         blurb = "The intended look.",
     },
     high = {
-        terrainRings = 8, starCount = 1800, bodyDetail = 64, post = true,
+        terrainRings = 8, terrainRes = 24, buildBudget = 4, poiCells = 2,
+        starCount = 1400, bodyDetail = 64, post = true,
         scatter = true, nebula = 1.0, settlementRange = 24000, maxNpcs = 14,
+        engineGlows = true,
         blurb = "Long draw distance, dense starfield, finest spheres.",
     },
 }

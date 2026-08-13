@@ -59,7 +59,14 @@ function npc.create(opts)
     local rng = Rng.new(opts.seed or 1, "npc")
     local kind = opts.kind or "trader"
     local role = opts.role or rng:pick(ROLE_BY_KIND[kind] or ROLE_BY_KIND.civilian)
-    local def = ships.generate(Rng.hash(opts.seed or 1, role), role)
+    -- Hulls are drawn from a small per-system pool rather than being unique
+    -- per spawn. A fleet sharing a handful of designs is what real traffic
+    -- looks like, and it means the hull cache actually hits: uncached, this
+    -- lofted a complete ship -- wings, greebles, gear -- every few seconds for
+    -- the whole session, a periodic frame spike during ordinary flight.
+    local HULL_VARIANTS = 6
+    local variant = Rng.new(opts.seed or 1, "hull"):int(1, HULL_VARIANTS)
+    local def = ships.generate(Rng.hash(opts.systemSeed or 0, role, variant), role)
     local stats = equipment.derive(def.stats, LOADOUT_BY_KIND[kind] or LOADOUT_BY_KIND.civilian)
 
     local e = {
@@ -140,7 +147,8 @@ function npc.maintain(list, sys, player, diplomacy, day, camera, dt, state)
         end
     end
     if #list >= math.min(MAX_NPCS, settings.q().maxNpcs) or state.spawnTimer > 0 then return nil end
-    state.spawnTimer = 2.5 + math.random() * 4
+    -- deterministic: the project avoids math.random so a seed replays exactly
+    state.spawnTimer = 2.5 + Rng.new(sys.seed, "spawnTimer", math.floor(day * 997)):float() * 4
 
     local weights, total = npc.trafficProfile(sys, diplomacy, player)
     if total <= 0 then return nil end
@@ -170,6 +178,7 @@ function npc.maintain(list, sys, player, diplomacy, day, camera, dt, state)
     local dist = SPAWN_RADIUS * rng:range(0.55, 1.0)
     local e = npc.create({
         seed = Rng.hash(sys.seed, day, #list, kind),
+        systemSeed = sys.seed,
         kind = kind,
         faction = faction,
         x = camera.pos.x + dx * dist,
@@ -355,8 +364,9 @@ BEHAVIOUR.attack = function(e, dt, ctx)
         if l > 1e-6 then
             -- imperfect aim, scaled by skill
             local spread = (1 - e.skill) * 0.02
-            local rx = (math.random() - 0.5) * spread
-            local ry = (math.random() - 0.5) * spread
+            local jitter = Rng.new(e.seed or 1, "jitter", math.floor(ctx.time or 0))
+            local rx = (jitter:float() - 0.5) * spread
+            local ry = (jitter:float() - 0.5) * spread
             local fx = dx / l + e.right.x * rx + e.up.x * ry
             local fy = dy / l + e.right.y * rx + e.up.y * ry
             local fz = dz / l + e.right.z * rx + e.up.z * ry
@@ -377,7 +387,8 @@ BEHAVIOUR.flee = function(e, dt, ctx)
     steerTowards(e, e.pos.x * 2 - t.pos.x, e.pos.y * 2 - t.pos.y, e.pos.z * 2 - t.pos.z, dt, 0.9)
     e.throttle = 1.0
     -- a cornered trader will still shoot back
-    if e.aiKind ~= "civilian" and e.hull > e.maxHull * 0.5 and math.random() < dt * 0.2 then
+    local roll = Rng.new(e.seed or 1, "aggression", math.floor((ctx.time or 0) * 4)):float()
+    if e.aiKind ~= "civilian" and e.hull > e.maxHull * 0.5 and roll < dt * 0.2 then
         e.state = "attack"
     end
 end

@@ -1096,10 +1096,11 @@ function Flight:updateDockPrompt()
             if st.derelict then
                 self.dockPrompt = { text = st.name .. " is derelict - no docking control", station = st, blocked = true }
             elseif self.speed > 120 then
-                self.dockPrompt = { text = "Slow to under 120 m/s to dock", station = st, blocked = true }
+                self.dockPrompt = { text = L("Slow to under 120 m/s to dock"), station = st, blocked = true }
             else
                 self.dockPrompt = {
-                    text = string.format("%s to dock at %s", config.keyName("dock"), st.name),
+                    text = L("{key} to dock at {name}",
+                        { key = config.keyName("dock"), name = st.name }),
                     station = st,
                 }
             end
@@ -1110,14 +1111,15 @@ function Flight:updateDockPrompt()
     -- landed at a settlement pad
     if self.landedOn and self.landedPlace then
         self.dockPrompt = {
-            text = string.format("%s to enter %s", config.keyName("dock"), self.landedPlace.name),
+            text = L("{key} to enter {name}",
+                { key = config.keyName("dock"), name = self.landedPlace.name }),
             place = self.landedPlace,
         }
         return
     end
     if self.landedOn then
         self.dockPrompt = {
-            text = string.format("%s to disembark", config.keyName("disembark")),
+            text = L("{key} to disembark", { key = config.keyName("disembark") }),
             surface = true,
         }
     end

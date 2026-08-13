@@ -29,6 +29,14 @@ local TAU = math.pi * 2
 local CELL = 26000
 local VIEW_CELLS = 2          -- how many cells around the player to consider
 
+--- The quality preset can narrow the sweep: 5x3x5 cells is 75 hash lookups a
+--- frame, which was paid on every preset including potato.
+local function viewCells()
+    local ok, settings = pcall(require, "src.settings")
+    if ok and settings.q then return settings.q().poiCells or VIEW_CELLS end
+    return VIEW_CELLS
+end
+
 pois.SPACE_KINDS = {
     { id = "asteroids", weight = 42, name = "Asteroid cluster", scan = "minerals" },
     { id = "derelict",  weight = 16, name = "Derelict",         scan = "salvage" },
@@ -189,9 +197,10 @@ function pois.near(systemSeed, x, y, z, out)
     out = out or {}
     for i = #out, 1, -1 do out[i] = nil end
     local cx0, cy0, cz0 = floor(x / CELL), floor(y / (CELL * 0.35)), floor(z / CELL)
-    for dz = -VIEW_CELLS, VIEW_CELLS do
+    local cells = viewCells()
+    for dz = -cells, cells do
         for dy = -1, 1 do
-            for dx = -VIEW_CELLS, VIEW_CELLS do
+            for dx = -cells, cells do
                 local p = pois.spaceAt(systemSeed, cx0 + dx, cy0 + dy, cz0 + dz)
                 if p then out[#out + 1] = p end
             end
