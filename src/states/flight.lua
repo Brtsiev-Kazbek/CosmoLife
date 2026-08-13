@@ -458,19 +458,94 @@ function Flight:updateAutopilot(dt)
     local t = self.target
     if not t then self:cancelAutopilot("Autopilot disengaged") return end
 
-    local tx, ty, tz = t.pos.x, t.pos.y, t.pos.z
-    local dx, dy, dz = tx - self.ship.pos.x, ty - self.ship.pos.y, tz - self.ship.pos.z
-    local dist = sqrt(dx * dx + dy * dy + dz * dz)
+    local ship = self.ship
     local standoff = standoffFor(t)
+    local tx, ty, tz = t.pos.x, t.pos.y, t.pos.z
 
-    if dist <= standoff then
+    -- Aim at the docking corridor, not the hull.
+    --
+    -- Docking needs the ship within `size * 0.55` of the *mouth*, which is a
+    -- specific point on one face. Flying to the station's centre left the
+    -- player parked two kilometres off whichever side they happened to
+    -- approach from, with the mouth possibly round the back and nothing
+    -- saying where -- "it doesn't dock". The approach point is now on the
+    -- mouth's own axis, so the last stretch is a straight run down it.
+    if t.station then
+        local mesh = self:stationMesh(t.station)
+        local mx, my, mz, nx, ny, nz = stationGen.mouthWorld(t.station, mesh)
+        tx, ty, tz = mx + nx * standoff, my + ny * standoff, mz + nz * standoff
+        ap.corridor = true
+    else
+        ap.corridor = false
+    end
+
+    -- Everything below is in the target's frame, not the world's.
+    --
+    -- Stations orbit at around 100 m/s. Flying to a world-space point left the
+    -- ship arriving at 105 m/s next to a station doing 96 m/s in the same
+    -- direction -- a nine metre per second stern chase that never closes, and
+    -- the real reason docking felt impossible. What has to be planned is the
+    -- *closing* speed, and what arrival has to leave behind is a ship keeping
+    -- station rather than one merely slow against the stars.
+    local tvx, tvy, tvz = 0, 0, 0
+    if t.station and t.station.vel then
+        -- stations publish their own orbital velocity; use it rather than
+        -- differencing a position that also moves with the aim-point offset
+        tvx, tvy, tvz = t.station.vel[1], t.station.vel[2], t.station.vel[3]
+        ap.targetVel = ap.targetVel or { 0, 0, 0 }
+        ap.targetVel[1], ap.targetVel[2], ap.targetVel[3] = tvx, tvy, tvz
+        ap.lastTx, ap.lastTy, ap.lastTz = tx, ty, tz
+    elseif ap.lastTx then
+        local idt = dt > 1e-6 and (1 / dt) or 0
+        tvx = (tx - ap.lastTx) * idt
+        tvy = (ty - ap.lastTy) * idt
+        tvz = (tz - ap.lastTz) * idt
+    end
+    if not (t.station and t.station.vel) then
+        ap.lastTx, ap.lastTy, ap.lastTz = tx, ty, tz
+        ap.targetVel = ap.targetVel or { 0, 0, 0 }
+        -- smooth it: a one-frame difference of an orbiting body is noisy
+        local k = util.clamp(dt * 6, 0, 1)
+        ap.targetVel[1] = ap.targetVel[1] + (tvx - ap.targetVel[1]) * k
+        ap.targetVel[2] = ap.targetVel[2] + (tvy - ap.targetVel[2]) * k
+        ap.targetVel[3] = ap.targetVel[3] + (tvz - ap.targetVel[3]) * k
+    end
+
+    local dx, dy, dz = tx - ship.pos.x, ty - ship.pos.y, tz - ship.pos.z
+    local dist = sqrt(dx * dx + dy * dy + dz * dz)
+    -- the aim point is already offset by the standoff, so arriving *at* it is
+    -- the goal rather than stopping short of it
+    if ap.corridor then standoff = max(t.station.size * 0.35, 250) end
+
+    -- Arrival is a swept test, not a point test.
+    --
+    -- At cruise the ship can cover ten kilometres in a frame while a station's
+    -- standoff sphere is two across: testing `dist <= standoff` once per frame
+    -- meant the ship stepped straight over the sphere without ever registering
+    -- arrival, then turned around and did it again from the other side. That
+    -- is the "flies past and never docks" behaviour. Comparing against the
+    -- previous distance catches a crossing however fast it happened.
+    local closing = (ap.lastDist or dist) - dist
+    if dist <= standoff or (ap.lastDist and ap.lastDist > standoff and dist > ap.lastDist
+        and closing < 0 and ap.wasClose) then
         self:cancelAutopilot()
+        self:brakeToApproach()
+        -- match the target's motion, so the player is alongside it rather than
+        -- watching it slide away
+        if not self.surface then
+            ship.vel:set(ap.targetVel[1], ap.targetVel[2], ap.targetVel[3])
+        end
+        -- leave the nose pointed down the corridor, so the mouth is in front
+        -- of the player rather than somewhere behind them
+        if t.station then self:faceStationMouth(t.station) end
         hud.message(L("Autopilot: arrived"), "good")
         return
     end
+    ap.wasClose = ap.wasClose or dist < standoff * 6
+    ap.lastDist = dist
 
     -- align the nose with the target
-    local basis = self.surface and self.local_ or self.ship
+    local basis = self.surface and self.local_ or ship
     local ax, ay, az = dx / dist, dy / dist, dz / dist
     if self.surface then
         ax, ay, az = self.surface:dirToLocal(ax, ay, az)
@@ -485,15 +560,46 @@ function Flight:updateAutopilot(dt)
     basis.fwd:normalize()
     mat4.orthonormalize(basis.right, basis.up, basis.fwd)
 
-    -- throttle: full while lined up and far, easing off on approach
     local aligned = util.clamp((dot - 0.9) / 0.1, 0, 1)
-    local remaining = dist - standoff
-    self.throttle = aligned * util.clamp(remaining / (standoff * 2 + 1000), 0.15, 1)
+    local remaining = max(dist - standoff, 0)
 
-    -- cruise once pointed the right way and far enough out to be worth it
-    local _, clearance = self:warpCeiling()
-    local canCruise = remaining > 12000 and clearance > FL.warpMinAltitude and aligned > 0.6
-    if canCruise then
+    -- Speed planning.
+    --
+    -- The old version set the throttle from remaining distance alone and let
+    -- the mass-lock ceiling decide the cruise speed. Near a station that
+    -- ceiling is set by the planet the station orbits, so it was several
+    -- hundred kilometres per second -- a speed the hull sheds at 90 m/s^2 and
+    -- therefore needs two million kilometres to lose. The autopilot now picks
+    -- the fastest speed it can still stop from, which is what a pilot does.
+    local stats = self.player.stats
+    local accel = FL.linearAccel * (stats.thrust or 1)
+    local topSpeed = stats.topSpeed or FL.maxSpeed
+
+    -- Braking curve with a terminal speed: solve for the speed that can still
+    -- be shed to `arrivalSpeed` over the distance left. Aiming at zero meant
+    -- arriving at whatever was left over; aiming at the docking gate means
+    -- the ship crosses the standoff sphere already slow enough to dock.
+    -- terminal *closing* speed: slow enough that the last stretch is gentle,
+    -- but not so slow that a station orbiting at 100 m/s outruns the approach
+    local arrivalSpeed = 45
+    local subLight = sqrt(arrivalSpeed * arrivalSpeed + 2 * accel * remaining * 0.85)
+    local approachSpeed = min(topSpeed * 0.9, subLight)
+
+    local ceiling, clearance = self:warpCeiling()
+    -- In cruise, velocity is set rather than accumulated, and it decays at
+    -- `warpAccel` per second -- so what has to be stoppable is the *distance
+    -- covered while decaying*, roughly speed / warpAccel. Keep the cruise
+    -- speed under what that allows, and the drop-out is never a surprise.
+    local cruiseSpeed = min(ceiling, remaining * FL.warpAccel * 0.45)
+    -- Leaving cruise hands the hull back its own top speed, and that still has
+    -- to be shed before the standoff sphere: stay sub-light once the room left
+    -- is only just enough to brake from it.
+    local brakeRoom = (topSpeed * topSpeed - arrivalSpeed * arrivalSpeed) / (2 * accel)
+    local worthCruising = cruiseSpeed > topSpeed * 1.5
+        and remaining > brakeRoom * 2.2
+        and clearance > FL.warpMinAltitude and aligned > 0.6
+
+    if worthCruising then
         if self.warpState == "off" then
             self.warpState = "spool"
             self.warpSpool = 0
@@ -501,12 +607,72 @@ function Flight:updateAutopilot(dt)
             self.warpSpool = self.warpSpool + dt
             if self.warpSpool >= FL.warpSpoolTime then self.warpState = "cruise" end
         end
-    elseif self.warpState ~= "off" then
-        self.warpState = "off"
-        self.warpSpeed = 0
+        -- throttle is the fraction of the ceiling the autopilot wants
+        self.throttle = aligned * util.clamp(cruiseSpeed / max(ceiling, 1), 0.05, 1)
+    else
+        if self.warpState ~= "off" then
+            self.warpState = "off"
+            self.warpSpeed = 0
+            self:brakeToApproach()
+        end
+        -- sub-light: aim at the speed we can still stop from, and use reverse
+        -- thrust when already going faster than that
+        -- desired world velocity: the target's own motion, plus a closing
+        -- component along the bearing
+        local wantX = ap.targetVel[1] + (dx / dist) * approachSpeed
+        local wantY = ap.targetVel[2] + (dy / dist) * approachSpeed
+        local wantZ = ap.targetVel[3] + (dz / dist) * approachSpeed
+        local wantAlong = wantX * basis.fwd.x + wantY * basis.fwd.y + wantZ * basis.fwd.z
+        local along = ship.vel.x * basis.fwd.x + ship.vel.y * basis.fwd.y + ship.vel.z * basis.fwd.z
+        if along > wantAlong + 20 then
+            self.throttle = -0.4
+        else
+            self.throttle = aligned * util.clamp(wantAlong / max(topSpeed, 1), 0, 1)
+        end
     end
+
     ap.distance = dist
     ap.remaining = remaining
+    ap.speed = self.speed
+end
+
+--- The ship's speed relative to something that is itself moving.
+function Flight:relativeSpeed(vel)
+    local v = self.ship.vel
+    if not vel then return self.speed or v:length() end
+    local dx, dy, dz = v.x - (vel[1] or 0), v.y - (vel[2] or 0), v.z - (vel[3] or 0)
+    return sqrt(dx * dx + dy * dy + dz * dz)
+end
+
+--- Points the ship at a station's docking mouth.
+function Flight:faceStationMouth(station)
+    if self.surface then return end
+    local mesh = self:stationMesh(station)
+    local mx, my, mz = stationGen.mouthWorld(station, mesh)
+    local ship = self.ship
+    local dx, dy, dz = mx - ship.pos.x, my - ship.pos.y, mz - ship.pos.z
+    local len = sqrt(dx * dx + dy * dy + dz * dz)
+    if len < 1 then return end
+    ship.fwd:set(dx / len, dy / len, dz / len)
+    mat4.orthonormalize(ship.right, ship.up, ship.fwd)
+end
+
+--- Sheds cruise velocity when leaving frame shift.
+--
+-- In cruise the velocity vector is *assigned* every frame from the nose
+-- direction and the cruise speed; it is not momentum the hull ever built up.
+-- Dropping out simply stopped assigning it, which left a several-hundred
+-- kilometre per second vector in a Newtonian integrator that can shed 90 m/s
+-- per second. The ship kept that speed for the rest of the flight. Frame
+-- shift is not a rocket, so leaving it returns the hull to a speed it could
+-- actually have reached on its own.
+function Flight:brakeToApproach()
+    local vel = self.surface and self.local_.vel or self.ship.vel
+    local topSpeed = (self.player.stats.topSpeed or FL.maxSpeed)
+    local speed = vel:length()
+    if speed > topSpeed then
+        vel:scale(topSpeed / speed)
+    end
 end
 
 --- The nebula hue for the current system, cached per system id.
@@ -682,6 +848,7 @@ function Flight:updateWarp(dt)
         self.warpSpool = self.warpSpool + dt
         if not wants then
             self.warpState = "off"
+            self:brakeToApproach()
         elseif self.warpSpool >= FL.warpSpoolTime then
             self.warpState = "cruise"
             self.warpSpeed = max(self.warpSpeed, FL.warpMinSpeed)
@@ -691,6 +858,10 @@ function Flight:updateWarp(dt)
         if not wants or self.massLocked then
             self.warpState = "off"
             self.warpSpeed = 0
+            -- the same applies to letting go of the key by hand: cruise
+            -- velocity is assigned, not accumulated, so it must not be handed
+            -- to the Newtonian integrator as if the hull had earned it
+            self:brakeToApproach()
             if self.massLocked then hud.message(L("Frame shift dropped - mass lock"), "warn") end
         else
             local target = ceiling * util.clamp(self.throttle, 0, 1)
@@ -1085,6 +1256,7 @@ end
 
 function Flight:updateDockPrompt()
     self.dockPrompt = nil
+    self.relativeTo = nil
     if self.warpState == "cruise" then return end
     local ship = self.ship
 
@@ -1097,7 +1269,11 @@ function Flight:updateDockPrompt()
         if d < st.size * 0.55 then
             if st.derelict then
                 self.dockPrompt = { text = st.name .. " is derelict - no docking control", station = st, blocked = true }
-            elseif self.speed > 120 then
+            elseif self:relativeSpeed(st.vel) > 120 then
+                -- relative to the station, not to the stars: it is orbiting at
+                -- around 100 m/s itself, so a world-frame limit made the
+                -- window between "fast enough to catch it" and "slow enough to
+                -- be allowed in" about twenty metres per second wide
                 self.dockPrompt = { text = L("Slow to under 120 m/s to dock"), station = st, blocked = true }
             else
                 self.dockPrompt = {
@@ -1106,6 +1282,11 @@ function Flight:updateDockPrompt()
                     station = st,
                 }
             end
+            -- Inside a station's approach the HUD reports closing speed rather
+            -- than speed against the stars: next to something orbiting at
+            -- 100 m/s, the world-frame number tells the player nothing about
+            -- whether they are allowed to dock.
+            self.relativeTo = st.vel
             return
         end
     end
@@ -1735,6 +1916,7 @@ function Flight:draw(background)
         contacts = self.contacts,
         target = self.target,
         speed = self.speed or 0,
+        relativeSpeed = self.relativeTo and self:relativeSpeed(self.relativeTo) or nil,
         throttle = self.throttle,
         altitude = self.altitude,
         verticalSpeed = self.surface and self.local_.vel.y or nil,

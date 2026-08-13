@@ -98,6 +98,96 @@ step(44, "a new arrival can reach a port", function(game)
     f:toggleAutopilot()
 end)
 
+step(46, "autopilot arrives without overshooting", function(game)
+    -- The failure this guards against: at cruise the ship covered ~10 km per
+    -- frame while a station's standoff sphere is ~2 km across, so it stepped
+    -- over the sphere, kept the cruise velocity after dropping out, and sailed
+    -- past forever. Fly the whole approach and check it converges.
+    local f = game.manager:current()
+    local port = f:targetNearestPort()
+    assert(port, "nothing to fly to")
+    local startDist = port.distance
+    assert(f.autopilot == nil, "autopilot was already running")
+    f:toggleAutopilot()
+    assert(f.autopilot, "autopilot refused to engage")
+
+    local closest = math.huge
+    local arrived = false
+    for _ = 1, 4000 do
+        game:update(1 / 60)
+        if not f.autopilot then arrived = true break end
+        local t = f.target
+        if t then closest = math.min(closest, t.distance or math.huge) end
+    end
+
+    assert(arrived, string.format(
+        "autopilot never arrived: got within %.0f m of a %.0f m start", closest, startDist))
+
+    -- What matters is the speed *relative to the station*: it orbits at about
+    -- 100 m/s itself, so a low world speed next to it is a stern chase and a
+    -- matched world speed is station-keeping.
+    local speed = f.ship.vel:length()
+    local rel = f:relativeSpeed(port.station and port.station.vel)
+    assert(rel < 120, string.format(
+        "arrived doing %.0f m/s relative to the station; the docking gate is 120", rel))
+    io.write(string.format(
+        "    DIAG-AP start=%.0f m  arrived: %.0f m/s world, %.0f m/s relative  closest=%.0f m\n",
+        startDist, speed, rel, closest))
+    io.flush()
+    -- The point of arriving on the corridor: a player who simply flies at the
+    -- mouth they can now see must reach a dock prompt. The station spins and
+    -- orbits, so steer at the mouth each frame the way a pilot would.
+    local stationGen = require("src.procgen.stations")
+    local station = port.station
+    assert(station, "the nearest port was not a station")
+    local mat4 = require("src.lib.mat4")
+    for _ = 1, 1800 do
+        local mesh = f:stationMesh(station)
+        local mx, my, mz = stationGen.mouthWorld(station, mesh)
+        local dx, dy, dz = mx - f.ship.pos.x, my - f.ship.pos.y, mz - f.ship.pos.z
+        local d = math.sqrt(dx * dx + dy * dy + dz * dz)
+        f.ship.fwd:set(dx / d, dy / d, dz / d)
+        mat4.orthonormalize(f.ship.right, f.ship.up, f.ship.fwd)
+        f.throttle = (d > 600) and 0.55 or 0
+        game:update(1 / 60)
+        if f.dockPrompt and not f.dockPrompt.blocked then break end
+    end
+    assert(f.dockPrompt, "no dock prompt after flying at the mouth from where the autopilot left us")
+    assert(not f.dockPrompt.blocked,
+        "reached the mouth but could not dock: " .. tostring(f.dockPrompt.text))
+
+    selftest.autopilotSpeed = speed
+    selftest.autopilotClosest = closest
+end)
+
+step(50, "autopilot handles a distant, large target", function(game)
+    -- A planet is millions of metres away with a standoff tens of kilometres
+    -- wide -- a different regime from a station, and the one where the cruise
+    -- speed the autopilot picks matters most.
+    local f = game.manager:current()
+    local body
+    for _, c in ipairs(f.contacts) do
+        if c.body and c.kind == "body" then body = c break end
+    end
+    if not body then return end
+    f.target = body
+    local startDist = body.distance
+    f:toggleAutopilot()
+    assert(f.autopilot, "autopilot refused a planet")
+
+    local arrived = false
+    for _ = 1, 6000 do
+        game:update(1 / 60)
+        if not f.autopilot then arrived = true break end
+    end
+    local speed = f.ship.vel:length()
+    io.write(string.format("    DIAG-AP2 planet start=%.0f m  arrived at %.0f m/s\n",
+        startDist, speed))
+    io.flush()
+    assert(arrived, string.format("never reached a planet %.0f m away", startDist))
+    assert(speed < 2000, string.format("arrived at a planet doing %.0f m/s", speed))
+end)
+
 step(55, "fire weapons", function(game)
     local f = game.manager:current()
     local w = game.world.player:weapon()
@@ -423,6 +513,7 @@ end)
 -- actually produces the picture you intended.
 local SHOTS = {
     [30] = "01-space",
+    [54] = "01b-approach",
     [95] = "02-descent",
     [125] = "03-landed",
     [158] = "04-onfoot",

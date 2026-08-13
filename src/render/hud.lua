@@ -331,8 +331,16 @@ function hud.draw(ctx, w, h)
     ui.bar(rx, gy + 16, 190, 9, ctx.throttle or 0, C.uiPrimary)
     ui.textRight(string.format("%d%%", floor((ctx.throttle or 0) * 100)), rx + 190, gy - 2, C.uiText, "small")
 
-    ui.text(L("SPEED"), rx, gy + 32, C.uiDim, "small")
-    ui.textRight(util.speed(ctx.speed or 0), rx + 190, gy + 32, C.uiText, "small")
+    -- inside a station's approach the closing speed is what the docking gate
+    -- actually measures, so that is what is shown
+    if ctx.relativeSpeed then
+        ui.text(L("CLOSING"), rx, gy + 32, C.uiDim, "small")
+        ui.textRight(util.speed(ctx.relativeSpeed), rx + 190, gy + 32,
+            ctx.relativeSpeed > 120 and C.uiWarn or C.uiPrimary, "small")
+    else
+        ui.text(L("SPEED"), rx, gy + 32, C.uiDim, "small")
+        ui.textRight(util.speed(ctx.speed or 0), rx + 190, gy + 32, C.uiText, "small")
+    end
 
     if ctx.warpState and ctx.warpState ~= "off" then
         ui.text(L("FRAME SHIFT"), rx, gy + 52, C.uiDim, "small")

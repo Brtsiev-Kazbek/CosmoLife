@@ -455,9 +455,26 @@ function system.updateOrbits(sys, t)
         local host = st.host
         local hx, hy, hz = 0, 0, 0
         if host then hx, hy, hz = host.pos.x, host.pos.y, host.pos.z end
+        local px, py, pz = st.pos.x, st.pos.y, st.pos.z
         local x, y, z = orbitPosition(st.orbitRadius, st.orbitPeriod, st.orbitPhase, st.orbitInclination, t)
         st.pos.x, st.pos.y, st.pos.z = hx + x, hy + y, hz + z
         st.spin = (st.rotationPhase + t * st.rotation * TAU * 40) % TAU
+        -- Orbital velocity, in metres per real second.
+        --
+        -- A station moves at around 100 m/s, which is the same order as the
+        -- docking speed limit -- so "how fast am I going" only means anything
+        -- relative to the station. Without this, closing on one was a stern
+        -- chase and the speed gate measured the wrong thing entirely.
+        st.vel = st.vel or { 0, 0, 0 }
+        local elapsed = (t - (st._velDay or t)) * config.economy.dayLength
+        if elapsed > 1e-6 then
+            local idt = 1 / elapsed
+            local k = 0.25
+            st.vel[1] = st.vel[1] + ((st.pos.x - px) * idt - st.vel[1]) * k
+            st.vel[2] = st.vel[2] + ((st.pos.y - py) * idt - st.vel[2]) * k
+            st.vel[3] = st.vel[3] + ((st.pos.z - pz) * idt - st.vel[3]) * k
+        end
+        st._velDay = t
     end
     for _, s in ipairs(sys.settlements) do
         local x, y, z = system.surfacePoint(s.body, s.latitude, s.longitude, 0)
