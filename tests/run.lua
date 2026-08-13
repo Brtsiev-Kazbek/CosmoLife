@@ -960,7 +960,7 @@ end)
 test("every russian translation is a non-empty string", function(assert_)
     local ru = require("src.locale.ru")
     local n = 0
-    for k, v in pairs(ru) do
+    for k, v in pairs(ru.strings) do
         check("every russian translation is a non-empty string",
             type(k) == "string" and type(v) == "string" and #v > 0,
             "bad entry for " .. tostring(k))
@@ -969,9 +969,105 @@ test("every russian translation is a non-empty string", function(assert_)
         local dstCount = select(2, v:gsub("%%[sd]", ""))
         check("every russian translation is a non-empty string", srcCount == dstCount,
             string.format("placeholder mismatch in %q -> %q", k, v))
+        -- named placeholders must survive too: a template that loses {dest}
+        -- silently drops the destination from a contract brief
+        for name in k:gmatch("{([%w_]+)[:%w_]*}") do
+            check("every russian translation is a non-empty string",
+                v:find("{" .. name, 1, true) ~= nil,
+                string.format("translation of %q dropped {%s}", k, name))
+        end
         n = n + 1
     end
     assert_(n > 100, "only " .. n .. " strings translated")
+end)
+
+test("russian counting rule picks the right form", function(assert_)
+    i18n.setLocale("ru")
+    local cases = {
+        [0] = "many", [1] = "one", [2] = "few", [4] = "few", [5] = "many",
+        [11] = "many", [12] = "many", [14] = "many", [15] = "many",
+        [21] = "one", [22] = "few", [25] = "many", [101] = "one",
+        [111] = "many", [112] = "many", [121] = "one", [1002] = "few",
+    }
+    for n, want in pairs(cases) do
+        check("russian counting rule picks the right form", i18n.pluralForm(n) == want,
+            string.format("%d should be %s, got %s", n, want, i18n.pluralForm(n)))
+    end
+    assert_(i18n.plural(1, "тонна", "тонны", "тонн") == "тонна", "1 t")
+    assert_(i18n.plural(3, "тонна", "тонны", "тонн") == "тонны", "3 t")
+    assert_(i18n.plural(17, "тонна", "тонны", "тонн") == "тонн", "17 t")
+    -- English keeps the singular/plural split it has
+    i18n.setLocale("en")
+    assert_(i18n.plural(1, "tonne", nil, "tonnes") == "tonne", "en singular")
+    assert_(i18n.plural(4, "tonne", nil, "tonnes") == "tonnes", "en plural")
+end)
+
+test("every declinable term has all six cases and three counts", function(assert_)
+    i18n.setLocale("ru")
+    local n = 0
+    for source, term in pairs(i18n.nouns) do
+        for _, c in ipairs(i18n.CASES) do
+            check("every declinable term has all six cases and three counts",
+                type(term[c]) == "string" and #term[c] > 0,
+                string.format("%s has no %s", source, c))
+        end
+        for _, f in ipairs({ "one", "few", "many" }) do
+            check("every declinable term has all six cases and three counts",
+                type(term[f]) == "string" and #term[f] > 0,
+                string.format("%s has no %s form", source, f))
+        end
+        -- a form that still carries a generator artefact means the pattern was
+        -- wrong for that word: "наркотикя", "робототехникы", "тканй"
+        for _, key in ipairs({ "nom", "gen", "dat", "acc", "ins", "pre", "one", "few", "many" }) do
+            local v = term[key]
+            check("every declinable term has all six cases and three counts",
+                not (v:find("кы") or v:find("гы") or v:find("хы") or v:find("кя")
+                     or v:find("ии[оа]") or v:find("нй")),
+                string.format("%s.%s looks malformed: %s", source, key, v))
+        end
+        n = n + 1
+    end
+    assert_(n > 80, "only " .. n .. " declinable terms")
+end)
+
+test("templates decline their arguments", function(assert_)
+    i18n.setLocale("ru")
+    local grain = i18n.term("Grain")
+    local station = i18n.term("Station")
+    assert_(i18n.isNoun(grain), "Grain should be declinable")
+
+    local out = i18n.format("Доставить {qty} {qty:t} {cargo:gen:lc} на {dest:acc}",
+        { qty = 12, cargo = grain, dest = station })
+    assert_(out == "Доставить 12 тонн зерна на Станцию", "got: " .. out)
+
+    out = i18n.format("Доставить {qty} {qty:t} {cargo:gen:lc} на {dest:acc}",
+        { qty = 1, cargo = grain, dest = station })
+    assert_(out == "Доставить 1 тонна зерна на Станцию", "got: " .. out)
+
+    -- the count tag agrees the noun itself with a named number
+    out = i18n.format("{qty} {cargo:count:qty:lc}", { qty = 3, cargo = i18n.term("Colonists") })
+    assert_(out == "3 колониста", "got: " .. out)
+    out = i18n.format("{qty} {cargo:count:qty:lc}", { qty = 7, cargo = i18n.term("Colonists") })
+    assert_(out == "7 колонистов", "got: " .. out)
+
+    -- a placeholder with no argument must be visible, not silently blank
+    out = i18n.format("нет {missing} тут", { qty = 1 })
+    assert_(out:find("{missing}", 1, true) ~= nil, "missing argument vanished")
+
+    -- plain strings still work as arguments
+    out = i18n.format("привет {who}", { who = "Кеплер" })
+    assert_(out == "привет Кеплер", "got: " .. out)
+end)
+
+test("letter case helpers handle cyrillic", function(assert_)
+    assert_(i18n.lcFirst("Зерно") == "зерно", "lc cyrillic")
+    assert_(i18n.lcFirst("Руда") == "руда", "lc cyrillic р-я range")
+    assert_(i18n.lcFirst("Ёмкость") == "ёмкость", "lc yo")
+    assert_(i18n.ucFirst("зерно") == "Зерно", "uc cyrillic")
+    assert_(i18n.ucFirst("руда") == "Руда", "uc cyrillic р-я range")
+    assert_(i18n.ucFirst("ёмкость") == "Ёмкость", "uc yo")
+    assert_(i18n.lcFirst("Fuel") == "fuel", "lc ascii still works")
+    assert_(i18n.ucFirst("") == "", "empty string")
 end)
 
 test("points of interest are deterministic and spread out", function(assert_)
