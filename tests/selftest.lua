@@ -1,0 +1,312 @@
+-- Scripted smoke test for the parts that need a real GPU and a real LOVE.
+--
+--     love . --selftest
+--
+-- It starts a new commander and then drives the game through every rendering
+-- path in turn -- space, descent, surface, on foot, a building interior, the
+-- docked screens, the galaxy map and a hyperspace jump -- drawing every frame
+-- and reporting the first failure of each step.  Exit code is non-zero if any
+-- step failed, so it can gate a release.
+
+local selftest = {}
+
+local steps = {}
+local function step(atFrame, name, fn)
+    steps[#steps + 1] = { frame = atFrame, name = name, fn = fn }
+end
+
+local results = {}
+local function record(name, ok, err)
+    results[#results + 1] = { name = name, ok = ok, err = err }
+    io.write(ok and "  ok    " or "  FAIL  ", name, ok and "" or ("   " .. tostring(err)), "\n")
+    io.flush()
+end
+
+-- ---------------------------------------------------------------------------
+
+step(2, "new commander in flight", function(game)
+    game:newGame(20250811, "Selftest")
+    local Flight = require("src.states.flight")
+    game.manager:switch(Flight.new())
+    local f = game.manager:current()
+    assert(f.ship, "no ship")
+    assert(game.world.system, "no system")
+end)
+
+step(20, "fly in normal space", function(game)
+    local f = game.manager:current()
+    f.throttle = 1
+    f.ship.angular:set(0.2, 0.1, 0)
+    assert(f.speed ~= nil, "no speed computed")
+end)
+
+step(40, "target and scan", function(game)
+    local f = game.manager:current()
+    f:cycleTarget(false)
+    f:scanTarget()
+end)
+
+step(55, "fire weapons", function(game)
+    local f = game.manager:current()
+    local w = game.world.player:weapon()
+    local combat = require("src.sim.combat")
+    for i = 1, 5 do
+        combat.fire(f.arena, f.ship, w, f.ship.fwd.x, f.ship.fwd.y, f.ship.fwd.z, i)
+    end
+    assert(f.arena.nProjectiles >= 5, "projectiles were not queued")
+end)
+
+step(70, "approach a landable world", function(game)
+    local f = game.manager:current()
+    local systemGen = require("src.procgen.system")
+    local body
+    for _, b in ipairs(systemGen.landables(game.world.system)) do
+        if b.landable and not b.giant then body = b break end
+    end
+    assert(body, "no landable body in the start system")
+    selftest.body = body
+    -- drop the ship into the upper atmosphere directly above the equator
+    local x, y, z = systemGen.surfacePoint(body, 0.12, 0.4, 40000)
+    f.ship.pos:set(x, y, z)
+    f.ship.vel:set(0, 0, 0)
+    f.throttle = 0
+    f.warpState = "off"
+end)
+
+step(90, "terrain streamed in", function(game)
+    local f = game.manager:current()
+    assert(f.surface, "no surface patch after descending to 40 km")
+    local n = 0
+    for _ in pairs(f.surface.chunkCache or {}) do n = n + 1 end
+    assert(n > 0, "no terrain chunks were built")
+    selftest.chunkCount = n
+end)
+
+step(105, "land on the surface", function(game)
+    local f = game.manager:current()
+    local s = f.surface
+    f.gearDown = true
+    local h = s:groundHeight(f.local_.pos.x, f.local_.pos.z)
+    f.local_.pos.y = h + game.world.player.shipDef.length * 0.22 + 1.0
+    f.local_.vel:set(0, 0, 0)
+    f.local_.up:set(0, 1, 0)
+    f.local_.fwd:set(0, 0, 1)
+    local mat4 = require("src.lib.mat4")
+    mat4.orthonormalize(f.local_.right, f.local_.up, f.local_.fwd)
+    f:syncFromLocal()
+end)
+
+step(120, "touchdown registered", function(game)
+    local f = game.manager:current()
+    assert(f.landedOn, "the ship never registered as landed")
+end)
+
+step(130, "disembark on foot", function(game)
+    local f = game.manager:current()
+    f:disembark()
+    local s = game.manager:current()
+    assert(s.pos, "on-foot state has no position")
+    selftest.onFoot = s
+end)
+
+step(150, "walk around", function(game)
+    local s = game.manager:current()
+    s.yaw = 1.2
+    s.vel:set(2, 0, 2)
+    assert(s.onGround ~= nil, "ground contact not evaluated")
+end)
+
+step(165, "enter a building interior", function(game)
+    local onfoot = game.manager:current()
+    -- find any settlement on this patch and walk into its first door
+    local surface = onfoot.surface
+    local site = surface.settlements[1]
+    if not site then
+        record("enter a building interior", true, nil)
+        selftest.skippedInterior = true
+        return
+    end
+    local mesh = surface:ensureSettlement(site.place)
+    assert(mesh, "settlement mesh was not built")
+    assert(#mesh.buildings > 0, "settlement has no buildings")
+    local target = mesh.interiors[1]
+    if not target then
+        selftest.skippedInterior = true
+        return
+    end
+    onfoot.pos:set(site.x + target.entrance.x, onfoot.pos.y, site.z + target.entrance.z)
+    onfoot.site, onfoot.siteMesh = site, mesh
+    onfoot:enterBuilding(target, site)
+    local room = game.manager:current()
+    assert(room.room and room.room.model, "interior mesh missing")
+end)
+
+step(185, "open a service terminal", function(game)
+    local room = game.manager:current()
+    if selftest.skippedInterior then return end
+    if not room.room then return end
+    local t = room.room.terminals[1]
+    assert(t, "interior has no terminals")
+    room.pos:set(t.x, 0, t.z + 1.0)
+    room:updatePrompt()
+    assert(room.action and room.action.kind == "service", "terminal did not offer a service")
+    room:keypressed("e")
+    local port = game.manager:current()
+    assert(port.menu, "port screen has no menu")
+    selftest.port = port
+end)
+
+step(200, "browse every port tab", function(game)
+    local port = selftest.port
+    if not port then return end
+    for i = 1, #port.tabs do
+        port.tab = i
+        port:rebuild()
+        port:draw()
+    end
+end)
+
+step(215, "buy and sell a commodity", function(game)
+    local port = selftest.port
+    if not port then return end
+    for i, t in ipairs(port.tabs) do
+        if t == "market" then port.tab = i end
+    end
+    port:rebuild()
+    local before = game.world.player.credits
+    port.quantity = 10
+    port:trade(false)
+    port:trade(true)
+    assert(game.world.player.credits ~= before or port.status ~= nil,
+        "trading did nothing and reported nothing")
+end)
+
+step(230, "leave the port and the building", function(game)
+    if selftest.port then
+        selftest.port:launch()
+    end
+    -- back in the room; step outside
+    local s = game.manager:current()
+    if s.room then
+        s.pos:set(s.room.exit.x, 0, s.room.exit.z)
+        s:updatePrompt()
+        s:keypressed("e")
+    end
+end)
+
+step(245, "board the ship", function(game)
+    local s = game.manager:current()
+    if s.shipLocal then
+        s.pos:set(s.shipLocal.x, s.pos.y, s.shipLocal.z)
+        s:updatePrompt()
+        s:keypressed("u")
+    end
+    local f = game.manager:current()
+    assert(f.ship, "did not return to the flight state")
+end)
+
+step(260, "open the galaxy map", function(game)
+    local f = game.manager:current()
+    f:keypressed("tab")
+    local map = game.manager:current()
+    assert(map.systems, "galaxy map has no systems")
+    assert(#map.systems > 0, "galaxy map is empty")
+    selftest.map = map
+end)
+
+step(275, "hyperspace jump", function(game)
+    local map = selftest.map
+    if not map then return end
+    local targets = game.world:jumpTargets()
+    local pick
+    for _, t in ipairs(targets) do
+        if t.reachable then pick = t break end
+    end
+    assert(pick, "nothing in jump range with a full tank")
+    map.selected = pick
+    local before = game.world.stub.id
+    map:jump()
+    assert(game.world.stub.id ~= before, "the jump did not happen")
+end)
+
+step(290, "back in flight after the jump", function(game)
+    local f = game.manager:current()
+    assert(f.ship, "not in the flight state after jumping")
+    assert(game.world.system, "arrived without a system")
+end)
+
+step(305, "logbook and colony screens", function(game)
+    local f = game.manager:current()
+    f:keypressed("n")
+    local log = game.manager:current()
+    for i = 1, 3 do
+        log.tab = i
+        log:draw()
+    end
+    log:keypressed("escape")
+    f:keypressed("c")
+    local col = game.manager:current()
+    col:draw()
+    col:keypressed("escape")
+end)
+
+step(320, "save and reload", function(game)
+    local ok, err = game:saveGame()
+    assert(ok, "save failed: " .. tostring(err))
+    local loaded, lerr = game:loadGame()
+    assert(loaded, "load failed: " .. tostring(lerr))
+    local Flight = require("src.states.flight")
+    game.manager:switch(Flight.new())
+end)
+
+step(335, "chase view and wireframe", function(game)
+    local f = game.manager:current()
+    f:keypressed("v")
+    game.renderer.settings.wireframe = true
+    game.renderer.settings.post = false
+end)
+
+step(350, "title screen renders", function(game)
+    local Menu = require("src.states.menu")
+    game.manager:switch(Menu.new())
+    game.renderer.settings.wireframe = false
+    game.renderer.settings.post = true
+end)
+
+-- ---------------------------------------------------------------------------
+
+selftest.lastFrame = 360
+
+function selftest.run(game, frame)
+    -- a heartbeat with real wall-clock time, so a stall is distinguishable
+    -- from a merely slow software renderer
+    if frame % 10 == 0 then
+        local now = love.timer.getTime()
+        local elapsed = now - (selftest.lastBeat or now)
+        selftest.lastBeat = now
+        io.write(string.format("[frame %3d] %5.1f ms/frame, %d draws, %d tris  (%s)\n",
+            frame, elapsed * 100, game.renderer.stats.draws, game.renderer.stats.triangles,
+            tostring(game.manager:current().__name or "?")))
+        io.flush()
+    end
+    for _, s in ipairs(steps) do
+        if s.frame == frame then
+            local ok, err = pcall(s.fn, game)
+            record(s.name, ok, err)
+        end
+    end
+    if frame >= selftest.lastFrame then
+        local failed = 0
+        for _, r in ipairs(results) do
+            if not r.ok then failed = failed + 1 end
+        end
+        io.write(string.rep("-", 52), "\n")
+        io.write(string.format("selftest: %d steps, %d failed\n", #results, failed))
+        io.write(string.format("renderer: %d draws, %d triangles in the last frame\n",
+            game.renderer.stats.draws, game.renderer.stats.triangles))
+        io.flush()
+        love.event.quit(failed > 0 and 1 or 0)
+    end
+end
+
+return selftest

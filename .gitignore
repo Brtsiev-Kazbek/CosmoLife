@@ -1,0 +1,13 @@
+# LÖVE distribution builds
+*.love
+build/
+dist/
+
+# save games written next to the source during development
+cosmolife-save.lua
+
+# editors / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
