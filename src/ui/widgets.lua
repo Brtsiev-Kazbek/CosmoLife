@@ -10,14 +10,33 @@ local ui = {}
 
 ui.fonts = {}
 
+--- Loads the interface fonts.
+--
+-- LOVE's built-in font is Latin only, so with it every Cyrillic string renders
+-- as a row of empty boxes.  DejaVu covers Latin, Cyrillic and Greek; if the
+-- file is missing we fall back to the built-in font rather than failing to
+-- start, which degrades the game to Latin-only instead of breaking it.
+local FONT_PATH = "assets/DejaVuSans.ttf"
+
+local function newFont(size)
+    if love.filesystem.getInfo(FONT_PATH) then
+        local ok, font = pcall(love.graphics.newFont, FONT_PATH, size)
+        if ok then return font end
+    end
+    return love.graphics.newFont(size)
+end
+
 function ui.load()
-    ui.fonts.small = love.graphics.newFont(12)
-    ui.fonts.normal = love.graphics.newFont(15)
-    ui.fonts.large = love.graphics.newFont(21)
-    ui.fonts.huge = love.graphics.newFont(38)
-    ui.fonts.title = love.graphics.newFont(64)
+    ui.fonts.small = newFont(13)
+    ui.fonts.normal = newFont(16)
+    ui.fonts.large = newFont(22)
+    ui.fonts.huge = newFont(38)
+    ui.fonts.title = newFont(64)
     for _, f in pairs(ui.fonts) do f:setFilter("nearest", "nearest") end
 end
+
+--- Rebuilds the fonts (called when the language changes).
+function ui.reloadFonts() ui.load() end
 
 function ui.font(name) return ui.fonts[name] or ui.fonts.normal end
 

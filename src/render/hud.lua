@@ -11,6 +11,8 @@ local config = require("src.config")
 local palette = require("src.render.palette")
 local ui = require("src.ui.widgets")
 local factions = require("src.sim.factions")
+local i18n = require("src.i18n")
+local L = i18n.translate
 
 local hud = {}
 
@@ -189,8 +191,8 @@ local function drawHorizon(cx, cy, r, roll, pitch, alt, vs, landable)
         (alt or 0) < 300 and C.uiWarn or C.uiText, "small")
     ui.text(string.format("%+.0f m/s", vs or 0), cx + r + 14, cy - 9,
         (vs or 0) < -30 and C.uiDanger or C.uiText, "small")
-    ui.textRight("ALT", cx - r - 14, cy + 6, C.uiDim, "small")
-    ui.text("V/S", cx + r + 14, cy + 6, C.uiDim, "small")
+    ui.textRight(L("ALT"), cx - r - 14, cy + 6, C.uiDim, "small")
+    ui.text(L("V/S"), cx + r + 14, cy + 6, C.uiDim, "small")
     love.graphics.setColor(1, 1, 1, 1)
 end
 
@@ -244,45 +246,45 @@ function hud.draw(ctx, w, h)
     local gx, gy = 26, h - 150
     ui.brackets(gx - 8, gy - 12, 210, 140, 12, accent, 0.5)
 
-    ui.text("SHIELD", gx, gy, C.uiDim, "small")
+    ui.text(L("SHIELD"), gx, gy, C.uiDim, "small")
     ui.segmentBar(gx, gy + 16, 190, 9, (ship.shield or 0) / max(stats.maxShield, 1), 14, C.cyan)
-    ui.text("HULL", gx, gy + 32, C.uiDim, "small")
+    ui.text(L("HULL"), gx, gy + 32, C.uiDim, "small")
     local hullFrac = (ship.hull or 0) / max(stats.maxHull, 1)
     ui.segmentBar(gx, gy + 48, 190, 9, hullFrac, 14, hullFrac < 0.3 and C.uiDanger or C.uiPrimary)
-    ui.text("FUEL", gx, gy + 64, C.uiDim, "small")
+    ui.text(L("FUEL"), gx, gy + 64, C.uiDim, "small")
     ui.segmentBar(gx, gy + 80, 190, 7, (player.fuel or 0) / max(stats.fuel, 1), 12, C.amber)
-    ui.text("HEAT", gx, gy + 94, C.uiDim, "small")
+    ui.text(L("HEAT"), gx, gy + 94, C.uiDim, "small")
     local heat = util.clamp((ctx.heat or 0) / max(stats.heatCapacity or 100, 1), 0, 1)
     ui.segmentBar(gx, gy + 110, 190, 7, heat, 12, heat > 0.8 and C.uiDanger or C.orange)
 
     -- ---- right gauges ---------------------------------------------------
     local rx = w - 236
     ui.brackets(rx - 8, gy - 12, 210, 140, 12, accent, 0.5)
-    ui.text("THROTTLE", rx, gy, C.uiDim, "small")
+    ui.text(L("THROTTLE"), rx, gy, C.uiDim, "small")
     ui.bar(rx, gy + 16, 190, 9, ctx.throttle or 0, C.uiPrimary)
     ui.textRight(string.format("%d%%", floor((ctx.throttle or 0) * 100)), rx + 190, gy - 2, C.uiText, "small")
 
-    ui.text("SPEED", rx, gy + 32, C.uiDim, "small")
+    ui.text(L("SPEED"), rx, gy + 32, C.uiDim, "small")
     ui.textRight(util.speed(ctx.speed or 0), rx + 190, gy + 32, C.uiText, "small")
 
     if ctx.warpState and ctx.warpState ~= "off" then
-        ui.text("FRAME SHIFT", rx, gy + 52, C.uiDim, "small")
-        local label = ctx.warpState == "spool" and "SPOOLING" or "CRUISE"
+        ui.text(L("FRAME SHIFT"), rx, gy + 52, C.uiDim, "small")
+        local label = ctx.warpState == "spool" and L("SPOOLING") or L("CRUISE")
         ui.textRight(label, rx + 190, gy + 52, C.cyan, "small")
         ui.bar(rx, gy + 70, 190, 6, ctx.warpFraction or 0, C.cyan)
     elseif ctx.altitude then
-        ui.text("ALTITUDE", rx, gy + 52, C.uiDim, "small")
+        ui.text(L("ALTITUDE"), rx, gy + 52, C.uiDim, "small")
         ui.textRight(util.distance(ctx.altitude), rx + 190, gy + 52, ctx.altitude < 800 and C.uiWarn or C.uiText, "small")
         if ctx.verticalSpeed then
-            ui.text("V/S", rx, gy + 70, C.uiDim, "small")
+            ui.text(L("V/S"), rx, gy + 70, C.uiDim, "small")
             ui.textRight(string.format("%+.0f m/s", ctx.verticalSpeed), rx + 190, gy + 70,
                 ctx.verticalSpeed < -40 and C.uiDanger or C.uiText, "small")
         end
     end
 
-    ui.text("CARGO", rx, gy + 92, C.uiDim, "small")
+    ui.text(L("CARGO"), rx, gy + 92, C.uiDim, "small")
     ui.textRight(string.format("%d / %d t", player:cargoUsed(), player:cargoCapacity()), rx + 190, gy + 92, C.uiText, "small")
-    ui.text("CREDITS", rx, gy + 110, C.uiDim, "small")
+    ui.text(L("CREDITS"), rx, gy + 110, C.uiDim, "small")
     ui.textRight(util.money(player.credits), rx + 190, gy + 110, C.amber, "small")
 
     -- ---- artificial horizon, whenever there is a ground to be level with --
@@ -291,22 +293,22 @@ function hud.draw(ctx, w, h)
             ctx.horizon.roll, ctx.horizon.pitch, ctx.altitude, ctx.verticalSpeed,
             ctx.horizon.landable)
         if ctx.hoverMode then
-            ui.textCenter("LANDING MODE", cx, cy - h * 0.22 + math.min(w, h) * 0.13,
+            ui.textCenter(L("LANDING MODE"), cx, cy - h * 0.22 + math.min(w, h) * 0.13,
                 C.uiPrimary, "small")
         end
     end
 
     -- ---- scanner --------------------------------------------------------
     drawScanner(cx, h - 78, 132, 58, ship, ctx.contacts, config.combat.scanRange)
-    ui.text("SCANNER", cx - 132, h - 146, C.uiDim, "small")
+    ui.text(L("SCANNER"), cx - 132, h - 146, C.uiDim, "small")
 
     -- ---- landing gear / status flags ------------------------------------
     local flags = {}
-    if ctx.gearDown then flags[#flags + 1] = { "GEAR", C.uiWarn } end
-    if ctx.boosting then flags[#flags + 1] = { "BOOST", C.cyan } end
-    if ctx.massLocked then flags[#flags + 1] = { "MASS LOCK", C.uiWarn } end
-    if ctx.overheating then flags[#flags + 1] = { "HEAT", C.uiDanger } end
-    if player:totalBounty() > 0 then flags[#flags + 1] = { "WANTED", C.uiDanger } end
+    if ctx.gearDown then flags[#flags + 1] = { L("GEAR"), C.uiWarn } end
+    if ctx.boosting then flags[#flags + 1] = { L("BOOST"), C.cyan } end
+    if ctx.massLocked then flags[#flags + 1] = { L("MASS LOCK"), C.uiWarn } end
+    if ctx.overheating then flags[#flags + 1] = { L("HEAT"), C.uiDanger } end
+    if player:totalBounty() > 0 then flags[#flags + 1] = { L("WANTED"), C.uiDanger } end
     for i, f in ipairs(flags) do
         local fx = cx - (#flags * 46) * 0.5 + (i - 1) * 92
         if not (f[2] == C.uiDanger) or ui.blink(0.4) then
@@ -315,14 +317,18 @@ function hud.draw(ctx, w, h)
     end
 
     -- ---- target panel ---------------------------------------------------
+    if ctx.autopilot then
+        flags[#flags + 1] = { L("AUTOPILOT"), C.uiPrimary }
+    end
+
     if ctx.target then
         local t = ctx.target
         local px, py = 26, 26
         ui.panel(px, py, 250, t.detail and 118 or 78, "TARGET", accent)
-        ui.text(t.label or "Unknown", px + 14, py + 12, C.uiText, "small")
+        ui.text(t.label or L("Unknown"), px + 14, py + 12, C.uiText, "small")
         ui.text(util.distance(t.distance or 0), px + 14, py + 30, C.uiDim, "small")
         if t.hull then
-            ui.text("HULL", px + 14, py + 48, C.uiDim, "small")
+            ui.text(L("HULL"), px + 14, py + 48, C.uiDim, "small")
             ui.bar(px + 60, py + 50, 170, 7, t.hull, t.hostile and C.uiDanger or C.uiPrimary)
         end
         if t.shield then
@@ -345,7 +351,7 @@ function hud.draw(ctx, w, h)
         ui.textRight(faction.name, w - 34, 48, { faction.color[1], faction.color[2], faction.color[3], 1 }, "small")
         ui.textRight(ctx.world:dateString() .. "   " .. sys.economyName, w - 34, 64, C.uiDim, "small")
         if sys.conflict and sys.conflict > 0.2 and ui.blink(0.7) then
-            ui.textRight("CONFLICT ZONE", w - 34, 88, C.uiDanger, "small")
+            ui.textRight(L("CONFLICT ZONE"), w - 34, 88, C.uiDanger, "small")
         end
     end
 

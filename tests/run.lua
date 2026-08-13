@@ -934,6 +934,125 @@ end)
 
 -- ---------------------------------------------------------------------------
 
+local i18n = require("src.i18n")
+local pois = require("src.procgen.pois")
+
+test("localisation falls back and formats", function(assert_)
+    assert_(i18n.setLocale("ru"), "russian locale failed to load")
+    assert_(i18n.translate("FUEL") == "ТОПЛИВО", "known string not translated")
+    assert_(i18n.translate("a string nobody translated") == "a string nobody translated",
+        "unknown string did not fall back")
+    -- a translation with broken placeholders must not crash the game.
+    -- setLocale points i18n.strings at the shared locale table, so anything
+    -- injected here has to be taken back out again.
+    local injected = i18n.strings
+    injected["Docked at %s"] = "Стыковка с %s"
+    assert_(i18n.format("Docked at %s", "Lave") == "Стыковка с Lave", "format failed")
+    injected["bad %d"] = "плохо %s %s"
+    local ok = pcall(i18n.format, "bad %d", 3)
+    assert_(ok, "a malformed translation crashed instead of falling back")
+    injected["Docked at %s"] = nil
+    injected["bad %d"] = nil
+    assert_(i18n.setLocale("en"), "english locale failed")
+    assert_(i18n.translate("FUEL") == "FUEL", "english should be the identity")
+end)
+
+test("every russian translation is a non-empty string", function(assert_)
+    local ru = require("src.locale.ru")
+    local n = 0
+    for k, v in pairs(ru) do
+        check("every russian translation is a non-empty string",
+            type(k) == "string" and type(v) == "string" and #v > 0,
+            "bad entry for " .. tostring(k))
+        -- placeholders must survive translation
+        local srcCount = select(2, k:gsub("%%[sd]", ""))
+        local dstCount = select(2, v:gsub("%%[sd]", ""))
+        check("every russian translation is a non-empty string", srcCount == dstCount,
+            string.format("placeholder mismatch in %q -> %q", k, v))
+        n = n + 1
+    end
+    assert_(n > 100, "only " .. n .. " strings translated")
+end)
+
+test("points of interest are deterministic and spread out", function(assert_)
+    local a = pois.spaceAt(4242, 3, 0, -7)
+    local b = pois.spaceAt(4242, 3, 0, -7)
+    if a then
+        assert_(b ~= nil and a.kind == b.kind and a.x == b.x, "space POI is not deterministic")
+    end
+    local found, cells = 0, 0
+    for cx = -12, 12 do
+        for cz = -12, 12 do
+            cells = cells + 1
+            if pois.spaceAt(4242, cx, 0, cz) then found = found + 1 end
+        end
+    end
+    assert_(found > 0, "no points of interest anywhere")
+    local density = found / cells
+    assert_(density > 0.15 and density < 0.5,
+        string.format("density %.2f is not a sensible scatter", density))
+
+    -- every kind must produce a mesh
+    for _, kind in ipairs(pois.SPACE_KINDS) do
+        local p = { kind = kind.id, seed = 7, scale = 1 }
+        local model = pois.spaceMesh(p)
+        check("points of interest are deterministic and spread out", model ~= nil,
+            kind.id .. " produced no mesh")
+        if model then
+            check("points of interest are deterministic and spread out", model.triangles > 4,
+                kind.id .. " mesh is nearly empty")
+        end
+    end
+end)
+
+test("surface points of interest build", function(assert_)
+    local found = 0
+    for cx = -8, 8 do
+        for cz = -8, 8 do
+            if pois.surfaceAt(991, cx, cz) then found = found + 1 end
+        end
+    end
+    assert_(found > 0, "no surface features anywhere")
+
+    for _, kind in ipairs(pois.SURFACE_KINDS) do
+        local p = { kind = kind.id, seed = 31, rot = 0, radius = 60 }
+        local built = pois.surfaceMesh(p)
+        check("surface points of interest build", built and built.model ~= nil,
+            kind.id .. " produced no mesh")
+        if built and built.model then
+            check("surface points of interest build", built.model.triangles > 8,
+                kind.id .. " is nearly empty")
+            -- must not sink far below the ground it stands on
+            check("surface points of interest build", built.model.min[2] > -12,
+                kind.id .. " sinks to " .. built.model.min[2])
+        end
+    end
+end)
+
+test("hints react to context", function(assert_)
+    local hints = require("src.render.hints")
+    local plain = hints.flight({})
+    local landing = hints.flight({ hoverMode = true })
+    assert_(#plain > 3, "no hints produced")
+
+    local function has(list, label)
+        for _, h in ipairs(list) do if h.label:find(label, 1, true) then return true end end
+        return false
+    end
+    -- landing mode swaps combat hints for translation thrusters
+    assert_(has(landing, "Strafe") or has(landing, "Смещение"), "landing hints lack strafe")
+    assert_(not (has(landing, "Fire") or has(landing, "Огонь")), "landing hints still show weapons")
+    -- the dock hint only appears when there is something to dock with
+    assert_(not (has(plain, "Dock") or has(plain, "Стыковка")), "dock hint shown with nothing to dock")
+    local docking = hints.flight({ dockPrompt = true })
+    assert_(has(docking, "Dock") or has(docking, "Стыковка"), "dock hint missing when docking")
+
+    local foot = hints.onFoot({ canBoard = true })
+    assert_(#foot > 3, "no on-foot hints")
+end)
+
+-- ---------------------------------------------------------------------------
+
 io.write("\n", string.rep("-", 52), "\n")
 io.write(string.format("%d passed, %d failed\n", passed, failed))
 if failed > 0 then

@@ -32,6 +32,9 @@ local equipment = require("src.sim.equipment")
 local hud = require("src.render.hud")
 local ui = require("src.ui.widgets")
 local settings = require("src.settings")
+local i18n = require("src.i18n")
+local hints = require("src.render.hints")
+local pois = require("src.procgen.pois")
 
 local Flight = class("FlightState")
 
@@ -93,6 +96,9 @@ function Flight:enter(spawnOpts)
     self.stationMeshes = {}
     self.time = 0
     self.local_ = { pos = vec3(), vel = vec3(), right = vec3(1, 0, 0), up = vec3(0, 1, 0), fwd = vec3(0, 0, -1) }
+    self.autopilot = nil
+    self.pois = {}
+    self.surfacePois = {}
 
     self:spawn(spawnOpts)
     -- chase view by default: it is far easier to judge attitude and altitude
@@ -350,6 +356,121 @@ function Flight:attitude()
     return { roll = roll, pitch = pitch, landable = landable }
 end
 
+-- ---------------------------------------------------------------------------
+-- Autopilot
+-- ---------------------------------------------------------------------------
+
+--- Flies to the selected target and stops there.
+--
+-- This is the answer to "getting to a planet takes forever". Manual frame
+-- shift already scales speed with distance to mass, but it still asks the
+-- pilot to hold a heading for a minute and to judge the deceleration. The
+-- autopilot does both: it aligns the nose, engages cruise, and drops out at a
+-- sensible standoff distance -- close enough to see the place, far enough not
+-- to be inside it.
+--
+-- It refuses to fly into a surface, and any manual input cancels it, so it is
+-- a convenience rather than a mode you can get trapped in.
+function Flight:toggleAutopilot()
+    if self.autopilot then
+        self:cancelAutopilot("Autopilot disengaged")
+        return
+    end
+    if not self.target then
+        hud.message(i18n.translate("Autopilot needs a target"), "warn")
+        return
+    end
+    if self.landedOn then
+        hud.message(i18n.translate("Autopilot cannot fly you into the ground"), "warn")
+        return
+    end
+    self.autopilot = { target = self.target }
+    hud.message(i18n.translate("Autopilot engaged"), "good")
+end
+
+function Flight:cancelAutopilot(message)
+    if not self.autopilot then return end
+    self.autopilot = nil
+    self.pois = {}
+    self.surfacePois = {}
+    self.warpState = "off"
+    self.warpSpeed = 0
+    self.throttle = 0
+    if message then hud.message(i18n.translate(message), "info") end
+end
+
+--- Standoff distance for a contact: far enough out to see it whole.
+local function standoffFor(contact)
+    if contact.body then
+        return contact.body.radius * 1.9 + 20000
+    elseif contact.station then
+        return (contact.station.size or 600) * 2.2
+    elseif contact.place then
+        -- a settlement: aim for a low approach over its site
+        return 9000
+    end
+    return 1200
+end
+
+function Flight:updateAutopilot(dt)
+    local ap = self.autopilot
+    if not ap then return end
+
+    -- the target may have gone (destroyed, out of the contact list)
+    local t = self.target
+    if not t then self:cancelAutopilot("Autopilot disengaged") return end
+
+    local tx, ty, tz = t.pos.x, t.pos.y, t.pos.z
+    local dx, dy, dz = tx - self.ship.pos.x, ty - self.ship.pos.y, tz - self.ship.pos.z
+    local dist = sqrt(dx * dx + dy * dy + dz * dz)
+    local standoff = standoffFor(t)
+
+    if dist <= standoff then
+        self:cancelAutopilot()
+        hud.message(i18n.translate("Autopilot: arrived"), "good")
+        return
+    end
+
+    -- align the nose with the target
+    local basis = self.surface and self.local_ or self.ship
+    local ax, ay, az = dx / dist, dy / dist, dz / dist
+    if self.surface then
+        ax, ay, az = self.surface:dirToLocal(ax, ay, az)
+    end
+    local dot = ax * basis.fwd.x + ay * basis.fwd.y + az * basis.fwd.z
+    -- steer: pitch and yaw towards the bearing, roll left alone
+    local ex = ax * basis.right.x + ay * basis.right.y + az * basis.right.z
+    local ey = ax * basis.up.x + ay * basis.up.y + az * basis.up.z
+    local turn = 2.2 * dt
+    basis.fwd:addScaled(basis.right, util.clamp(ex * 3, -1, 1) * turn)
+    basis.fwd:addScaled(basis.up, util.clamp(ey * 3, -1, 1) * turn)
+    basis.fwd:normalize()
+    mat4.orthonormalize(basis.right, basis.up, basis.fwd)
+
+    -- throttle: full while lined up and far, easing off on approach
+    local aligned = util.clamp((dot - 0.9) / 0.1, 0, 1)
+    local remaining = dist - standoff
+    self.throttle = aligned * util.clamp(remaining / (standoff * 2 + 1000), 0.15, 1)
+
+    -- cruise once pointed the right way and far enough out to be worth it
+    local _, clearance = self:warpCeiling()
+    local canCruise = remaining > 12000 and clearance > FL.warpMinAltitude and aligned > 0.6
+    if canCruise then
+        if self.warpState == "off" then
+            self.warpState = "spool"
+            self.warpSpool = 0
+        elseif self.warpState == "spool" then
+            self.warpSpool = self.warpSpool + dt
+            if self.warpSpool >= FL.warpSpoolTime then self.warpState = "cruise" end
+        end
+    elseif self.warpState ~= "off" then
+        self.warpState = "off"
+        self.warpSpeed = 0
+    end
+    ap.distance = dist
+    ap.remaining = remaining
+end
+
 --- The nebula hue for the current system, cached per system id.
 function Flight:nebulaHue()
     local id = self.world.stub and self.world.stub.id
@@ -426,6 +547,13 @@ function Flight:readRotation(dt, basis, agility)
     if config.down("rollLeft") then roll = roll - 1 end
     if config.down("rollRight") then roll = roll + 1 end
 
+    -- any manual input takes the ship back: an autopilot you cannot override
+    -- instantly is a trap, not a convenience
+    if self.autopilot and (pitch ~= 0 or yaw ~= 0 or roll ~= 0
+        or math.abs(self.mouseDx or 0) > 0.05 or math.abs(self.mouseDy or 0) > 0.05) then
+        self:cancelAutopilot("Autopilot disengaged")
+    end
+
     if self.mouseSteer then
         -- accumulated mouse motion, decayed so the ship settles when the hand
         -- stops rather than drifting on
@@ -488,6 +616,16 @@ function Flight:warpCeiling()
 end
 
 function Flight:updateWarp(dt)
+    -- the autopilot drives the warp state itself
+    if self.autopilot then
+        local ceiling = self:warpCeiling()
+        if self.warpState == "cruise" then
+            local target = ceiling * util.clamp(self.throttle, 0.1, 1)
+            self.warpSpeed = self.warpSpeed + (target - self.warpSpeed) * util.clamp(FL.warpAccel * dt, 0, 1)
+        end
+        self.warpFraction = ceiling > 0 and util.clamp(self.warpSpeed / ceiling, 0, 1) or 0
+        return
+    end
     local wants = config.down("warp")
     local ceiling, clearance = self:warpCeiling()
     self.massLocked = clearance < FL.warpMinAltitude
@@ -768,6 +906,10 @@ function Flight:updateContacts()
             end
         end
     end
+    for _, p in ipairs(self.pois) do
+        add({ pos = { x = p.x, y = p.y, z = p.z }, poi = p, kind = "poi",
+              label = i18n.translate(p.name), color = C.uiDim, marker = true })
+    end
     for _, s in ipairs(sys.settlements) do
         add({ pos = s.pos, place = s, kind = "settlement", label = s.name,
               color = s.player and C.uiPrimary or C.amber, marker = true })
@@ -784,7 +926,8 @@ function Flight:updateContacts()
             if (c.entity and c.entity == self.target.entity)
                 or (c.station and c.station == self.target.station)
                 or (c.body and c.body == self.target.body)
-                or (c.place and c.place == self.target.place) then
+                or (c.place and c.place == self.target.place)
+                or (c.poi and c.poi == self.target.poi) then
                 self.target = c
                 found = true
                 break
@@ -969,6 +1112,7 @@ function Flight:update(dt, background)
     end
 
     self:updateEnvironment()
+    self:updateAutopilot(dt)
     self:updateShip(dt)
     self:updateWeapons(dt)
 
@@ -1127,6 +1271,65 @@ function Flight:bodyBasis(body)
     return b
 end
 
+--- Draws the drifting things that make space feel occupied.
+function Flight:submitPois(renderer)
+    local seed = self.world.system.seed
+    pois.near(seed, self.ship.pos.x, self.ship.pos.y, self.ship.pos.z, self.pois)
+    local basis = self._poiBasis or { right = vec3(), up = vec3(0, 1, 0), fwd = vec3() }
+    self._poiBasis = basis
+    local pos = self._poiPos or vec3()
+    self._poiPos = pos
+
+    for _, p in ipairs(self.pois) do
+        local model, glow = pois.spaceMesh(p)
+        if model then
+            local a = p.spin + self.time * p.spinRate
+            basis.right:set(math.cos(a), 0, -math.sin(a))
+            basis.up:set(0, 1, 0)
+            basis.fwd:set(-math.sin(a), 0, -math.cos(a))
+            mat4.orthonormalize(basis.right, basis.up, basis.fwd)
+            pos:set(p.x, p.y, p.z)
+            renderer:draw(model, pos, basis, { scale = p.scale })
+            if glow then
+                renderer:draw(glow, pos, basis, { scale = p.scale, emissive = 1 })
+            end
+        end
+    end
+
+    -- surface features, in the ground frame
+    if self.surface then
+        local s = self.surface
+        pois.surfaceNear(self.surface.body.seed, self.local_.pos.x, self.local_.pos.z, self.surfacePois)
+        local sbasis = self._spoiBasis or { right = vec3(), up = vec3(), fwd = vec3() }
+        self._spoiBasis = sbasis
+        for _, p in ipairs(self.surfacePois) do
+            local dx = p.x - self.local_.pos.x
+            local dz = p.z - self.local_.pos.z
+            if dx * dx + dz * dz < 9e6 then       -- within 3 km
+                local built = pois.surfaceMesh(p)
+                if built and built.model then
+                    local h = s:groundHeight(p.x, p.z)
+                    local c, sn = math.cos(p.rot), math.sin(p.rot)
+                    sbasis.right:set(s.east.x * c - s.north.x * sn,
+                                     s.east.y * c - s.north.y * sn,
+                                     s.east.z * c - s.north.z * sn)
+                    sbasis.up:set(s.up.x, s.up.y, s.up.z)
+                    sbasis.fwd:set(-(s.east.x * sn + s.north.x * c),
+                                   -(s.east.y * sn + s.north.y * c),
+                                   -(s.east.z * sn + s.north.z * c))
+                    mat4.orthonormalize(sbasis.right, sbasis.up, sbasis.fwd)
+                    s:toWorld(p.x, h, p.z, pos)
+                    renderer:draw(built.model, pos, sbasis, { layer = renderer.LAYER_NEAR })
+                    if built.glowModel then
+                        renderer:draw(built.glowModel, pos, sbasis,
+                            { layer = renderer.LAYER_NEAR, emissive = 1 })
+                    end
+                end
+            end
+        end
+    end
+end
+
 function Flight:submitStations(renderer)
     local IDENT = self._identBasis
     for _, st in ipairs(self.world.system.stations) do
@@ -1233,6 +1436,7 @@ function Flight:draw(background)
     renderer:beginFrame(camera)
     self:submitBodies(renderer)
     self:submitStations(renderer)
+    self:submitPois(renderer)
     if self.surface then
         self.surface:draw(renderer, { nightGlow = self.nightGlow, eye = self.local_.pos })
     end
@@ -1272,8 +1476,23 @@ function Flight:draw(background)
         warpFraction = self.warpFraction,
         hoverMode = self.hoverMode,
         horizon = self:attitude(),
+        autopilot = self.autopilot ~= nil,
+        landed = self.landedOn ~= nil,
+        gearDown = self.gearDown,
+        dockPrompt = self.dockPrompt ~= nil,
+        dockPromptIsPlace = self.dockPrompt and self.dockPrompt.place ~= nil,
         prompt = self.dockPrompt and self.dockPrompt.text or nil,
     }, w, h)
+
+    if settings.get("showHints") and not self.game.showHelp then
+        local ctx = {
+            hoverMode = self.hoverMode, target = self.target, autopilot = self.autopilot,
+            warpState = self.warpState, gearDown = self.gearDown,
+            dockPrompt = self.dockPrompt, landed = self.landedOn ~= nil,
+            dockPromptIsPlace = self.dockPrompt and self.dockPrompt.place ~= nil,
+        }
+        hints.draw(hints.flight(ctx), 26, 26)
+    end
 
     if self.game.showHelp then self:drawHelp(w, h) end
 end
@@ -1345,6 +1564,10 @@ function Flight:keypressed(key)
     if config.is("mouseFlight", key) then
         self:setMouseFlight(not self.mouseSteer)
         hud.message(self.mouseSteer and "Mouse flight on" or "Mouse flight off", "info")
+        return
+    end
+    if config.is("autopilot", key) then
+        self:toggleAutopilot()
         return
     end
     if config.is("levelOut", key) then

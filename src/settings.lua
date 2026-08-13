@@ -15,6 +15,14 @@ local FILE = "cosmolife-settings.lua"
 --- option in one place makes it appear, persist and validate everywhere.
 settings.schema = {
     {
+        section = "Language",
+        items = {
+            { id = "language", name = "Language", type = "choice", default = "ru",
+              choices = { "ru", "en" },
+              help = "Interface language. Missing translations fall back to English." },
+        },
+    },
+    {
         section = "Flight",
         items = {
             { id = "mouseFlight", name = "Mouse flight", type = "bool", default = true,
@@ -29,6 +37,8 @@ settings.schema = {
             { id = "landingAssist", name = "Landing mode", type = "bool", default = true,
               help = "Gear down near the ground: holds level and hovers." },
             { id = "throttleWheel", name = "Wheel controls throttle", type = "bool", default = true },
+            { id = "showHints", name = "Show control hints", type = "bool", default = true,
+              help = "The contextual key list in the corner of the screen." },
         },
     },
     {

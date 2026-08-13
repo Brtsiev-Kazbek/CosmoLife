@@ -14,12 +14,14 @@ local settings = require("src.settings")
 local input = require("src.input")
 local lighting = require("src.render.lighting")
 local flux = require("lib.flux")
+local i18n = require("src.i18n")
 
 local Game = class("Game")
 
 function Game:init()
-    ui.load()
     settings.load()
+    i18n.setLocale(settings.get("language"))
+    ui.load()
     input.load()
     self.renderer = Renderer.new()
     self.camera = Camera.new()
@@ -69,6 +71,7 @@ end
 --- whenever the settings screen changes something.
 function Game:applySettings()
     local r = self.renderer
+    i18n.setLocale(settings.get("language"))
     r.settings.post = settings.get("post") and settings.q().post
     r.settings.scanline = settings.get("scanline")
     r.settings.vignette = settings.get("vignette")

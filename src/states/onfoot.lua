@@ -14,6 +14,8 @@ local hud = require("src.render.hud")
 local ui = require("src.ui.widgets")
 local settlementGen = require("src.procgen.settlement")
 local combat = require("src.sim.combat")
+local settings = require("src.settings")
+local hints = require("src.render.hints")
 
 local OnFoot = class("OnFootState")
 
@@ -253,6 +255,13 @@ function OnFoot:draw(background)
             or string.format("gravity %.1f m/s2", self.surface.body.gravity or 0),
         prompt = self.prompt,
     }, w, h)
+
+    if settings.get("showHints") and not self.game.showHelp then
+        hints.draw(hints.onFoot({
+            canInteract = self.action and self.action.kind == "enter",
+            canBoard = self.action and self.action.kind == "board",
+        }), 26, 26)
+    end
 
     if self.game.showHelp then
         local lines = {

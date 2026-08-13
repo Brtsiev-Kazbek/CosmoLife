@@ -40,7 +40,8 @@ input.defaults = {
     boost        = { "key:lshift", "key:rshift", "button:leftstick" },
     warp         = { "key:lctrl", "key:rctrl", "button:x" },
     levelOut     = { "key:h" },
-    mouseFlight  = { "key:tab" },
+    autopilot    = { "key:tab", "button:dpup" },
+    mouseFlight  = { "key:backspace" },
 
     -- combat and systems
     fire         = { "key:space", "mouse:1", "axis:triggerright" },
@@ -78,7 +79,7 @@ input.actionOrder = {
                   "pitchUp", "pitchDown", "yawLeft", "yawRight",
                   "strafeLeft", "strafeRight", "thrustUp", "thrustDown",
                   "throttleFull", "throttleZero", "boost", "warp",
-                  "levelOut", "mouseFlight" } },
+                  "levelOut", "mouseFlight", "autopilot" } },
     { "Combat", { "fire", "missile", "target", "nextTarget", "scan" } },
     { "Ship",   { "landingGear", "view", "dock", "disembark" } },
     { "Screens", { "map", "missions", "colony", "ship", "settings", "pause", "help" } },
@@ -95,6 +96,7 @@ input.labels = {
     throttleFull = "Full throttle", throttleZero = "Cut throttle",
     boost = "Boost", warp = "Frame shift (hold)",
     levelOut = "Toggle auto-level", mouseFlight = "Toggle mouse flight",
+    autopilot = "Autopilot to target",
     fire = "Fire", missile = "Missile", target = "Next target",
     nextTarget = "Next hostile", scan = "Scan target",
     landingGear = "Landing gear", view = "Change view",
