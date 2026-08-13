@@ -12,7 +12,7 @@ local palette = require("src.render.palette")
 local ui = require("src.ui.widgets")
 local factions = require("src.sim.factions")
 local i18n = require("src.i18n")
-local L = i18n.translate
+local L = i18n.format
 
 local hud = {}
 
@@ -348,8 +348,9 @@ function hud.draw(ctx, w, h)
         local bx = w - 300
         ui.brackets(bx, 22, 274, 62, 10, accent, 0.4)
         ui.textRight(sys.name, w - 34, 28, C.uiText, "normal")
-        ui.textRight(faction.name, w - 34, 48, { faction.color[1], faction.color[2], faction.color[3], 1 }, "small")
-        ui.textRight(ctx.world:dateString() .. "   " .. sys.economyName, w - 34, 64, C.uiDim, "small")
+        ui.textRight(L(faction.name), w - 34, 48,
+            { faction.color[1], faction.color[2], faction.color[3], 1 }, "small")
+        ui.textRight(ctx.world:dateString() .. "   " .. L(sys.economyName), w - 34, 64, C.uiDim, "small")
         if sys.conflict and sys.conflict > 0.2 and ui.blink(0.7) then
             ui.textRight(L("CONFLICT ZONE"), w - 34, 88, C.uiDanger, "small")
         end
@@ -391,7 +392,7 @@ function hud.drawWalking(ctx, w, h)
     ui.brackets(20, h - 76, 230, 56, 10, C.uiPrimary, 0.45)
     ui.text(ctx.locationName or "", 32, h - 68, C.uiText, "small")
     ui.text(ctx.subtitle or "", 32, h - 50, C.uiDim, "small")
-    ui.textRight(util.money(ctx.player.credits) .. " cr", 240, h - 32, C.amber, "small")
+    ui.textRight(util.money(ctx.player.credits) .. " " .. L("cr"), 240, h - 32, C.amber, "small")
 
     if ctx.prompt then
         ui.setColor(C.uiPanel, 1)

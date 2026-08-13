@@ -237,6 +237,15 @@ local function sweepData()
 
     local interior = require("src.procgen.interior")
     for _, r in pairs(interior.kinds or {}) do emit(r.name, "src/procgen/interior.lua") end
+
+    for _, t in ipairs(systemGen.PLANET_TYPES or {}) do
+        emit(t.name, "src/procgen/system.lua (planet type)")
+    end
+
+    local pois = require("src.procgen.pois")
+    for _, list in ipairs({ pois.SPACE_KINDS or {}, pois.SURFACE_KINDS or {} }) do
+        for _, k in ipairs(list) do emit(k.name, "src/procgen/pois.lua") end
+    end
 end
 
 local okSweep, sweepErr = pcall(sweepData)

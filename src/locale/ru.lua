@@ -593,7 +593,49 @@ local strings = {
     ["Garrison Post"] = "Гарнизонный пост",
     ["Research Wing"] = "Исследовательское крыло",
 
+    -- ---------------------------------------------------------------- полёт
+    ["Launched from {name}"] = "Взлёт с {name}",
+    ["On the pad at {name}"] = "На площадке: {name}",
+    ["Approaching {name}"] = "Подлёт к {name}",
+    ["Docked at {name}"] = "Стыковка: {name}",
+    ["Entered {name}"] = "Вход: {name}",
+    ["Touchdown  -  {key} to disembark"] = "Посадка  -  {key} выйти наружу",
+    ["Landed at {name}  -  {enter} to enter, {out} to disembark"] =
+        "Сели: {name}  -  {enter} войти, {out} выйти наружу",
+    ["Impact! -{n} hull"] = "Удар! -{n} корпуса",
+    ["HULL OVERHEATING"] = "ПЕРЕГРЕВ КОРПУСА",
+    ["Target: {name}"] = "Цель: {name}",
+    ["Surveyed {name}"] = "Разведано: {name}",
+    ["Bounty claimed: {cash} cr"] = "Награда получена: {cash} кр",
+    ["Bounty issued against you: {cash} cr"] = "Против вас объявлена награда: {cash} кр",
+    ["Missile away ({n} left)"] = "Ракета пошла (осталось {n})",
+    ["{pilot} scanned - {faction}, {cash} cr cargo"] =
+        "{pilot} просканирован — {faction}, груз на {cash} кр",
+    ["{name}: {kind}, gravity {g} m/s2, atmosphere {atm} atm"] =
+        "{name}: {kind}, тяготение {g} м/с², атмосфера {atm} атм",
+    ["cargo ~{cash} cr"] = "груз ~{cash} кр",
+    ["cargo ~{cash} cr  -  bounty {bounty}"] = "груз ~{cash} кр  -  награда {bounty}",
+    ["settlement on {body}"] = "поселение на {body}",
+    ["pop {pop}"] = "насел. {pop}",
+    ["landable"] = "есть посадка",
+    ["no surface"] = "без поверхности",
+
+    -- ------------------------------------------------------------ типы планет
+    ["Rocky"] = "Каменистая",
+    ["Terrestrial"] = "Землеподобная",
+    ["Desert"] = "Пустынная",
+    ["Ocean"] = "Океаническая",
+    ["Ice"] = "Ледяная",
+    ["Volcanic"] = "Вулканическая",
+    ["Toxic Greenhouse"] = "Ядовитая парниковая",
+    ["Gas Giant"] = "Газовый гигант",
+    ["Ice Giant"] = "Ледяной гигант",
+    ["moon"] = "луна",
+
     -- космос
+    ["Asteroid cluster"] = "Скопление астероидов",
+    ["Debris field"] = "Поле обломков",
+    ["Rock arch"] = "Каменная арка",
     ["Derelict"] = "Обломок",
     ["Cargo canister"] = "Грузовой контейнер",
     ["Nav beacon"] = "Навигационный маяк",

@@ -42,6 +42,7 @@ local sqrt, min, max, abs, floor = math.sqrt, math.min, math.max, math.abs, math
 local FL = config.flight
 local S = config.scale
 local C = palette.colors
+local L = i18n.format
 
 -- ---------------------------------------------------------------------------
 -- Setup
@@ -123,7 +124,7 @@ function Flight:spawn(opts)
         mat4.orthonormalize(ship.right, ship.up, ship.fwd)
         ship.vel:set(0, 0, 0)
         self.throttle = 0
-        hud.message("Launched from " .. opts.atPort.name, "info")
+        hud.message(L("Launched from {name}", { name = opts.atPort.name }), "info")
         return
     end
 
@@ -143,7 +144,7 @@ function Flight:spawn(opts)
         self.landedOn = body
         self.landedPlace = place
         self:syncFromLocal()
-        hud.message("On the pad at " .. place.name, "info")
+        hud.message(L("On the pad at {name}", { name = place.name }), "info")
         return
     end
 
@@ -183,7 +184,7 @@ function Flight:enterSurface(body, lat, lon)
     local allSettlements = body.settlements or {}
     self.surface:setOrigin(lat, lon, allSettlements)
     self:syncToLocal()
-    hud.message(string.format("Approaching %s", body.name), "info")
+    hud.message(L("Approaching {name}", { name = body.name }), "info")
 end
 
 function Flight:leaveSurface()
@@ -377,15 +378,15 @@ function Flight:toggleAutopilot()
         return
     end
     if not self.target then
-        hud.message(i18n.translate("Autopilot needs a target"), "warn")
+        hud.message(L("Autopilot needs a target"), "warn")
         return
     end
     if self.landedOn then
-        hud.message(i18n.translate("Autopilot cannot fly you into the ground"), "warn")
+        hud.message(L("Autopilot cannot fly you into the ground"), "warn")
         return
     end
     self.autopilot = { target = self.target }
-    hud.message(i18n.translate("Autopilot engaged"), "good")
+    hud.message(L("Autopilot engaged"), "good")
 end
 
 function Flight:cancelAutopilot(message)
@@ -396,7 +397,7 @@ function Flight:cancelAutopilot(message)
     self.warpState = "off"
     self.warpSpeed = 0
     self.throttle = 0
-    if message then hud.message(i18n.translate(message), "info") end
+    if message then hud.message(L(message), "info") end
 end
 
 --- Standoff distance for a contact: far enough out to see it whole.
@@ -427,7 +428,7 @@ function Flight:updateAutopilot(dt)
 
     if dist <= standoff then
         self:cancelAutopilot()
-        hud.message(i18n.translate("Autopilot: arrived"), "good")
+        hud.message(L("Autopilot: arrived"), "good")
         return
     end
 
@@ -633,7 +634,7 @@ function Flight:updateWarp(dt)
     if self.warpState == "off" then
         if wants and not self.landedOn then
             if self.massLocked then
-                hud.message("Mass locked - too close to a surface", "warn")
+                hud.message(L("Mass locked - too close to a surface"), "warn")
                 self.warpState = "off"
             else
                 self.warpState = "spool"
@@ -647,13 +648,13 @@ function Flight:updateWarp(dt)
         elseif self.warpSpool >= FL.warpSpoolTime then
             self.warpState = "cruise"
             self.warpSpeed = max(self.warpSpeed, FL.warpMinSpeed)
-            hud.message("Frame shift engaged", "good")
+            hud.message(L("Frame shift engaged"), "good")
         end
     else
         if not wants or self.massLocked then
             self.warpState = "off"
             self.warpSpeed = 0
-            if self.massLocked then hud.message("Frame shift dropped - mass lock", "warn") end
+            if self.massLocked then hud.message(L("Frame shift dropped - mass lock"), "warn") end
         else
             local target = ceiling * util.clamp(self.throttle, 0, 1)
             target = max(target, FL.warpMinSpeed * 0.5)
@@ -791,7 +792,7 @@ function Flight:updateHeat(dt)
     if self.heat > cap then
         local over = (self.heat - cap) / cap
         self.ship.hull = self.ship.hull - over * 14 * dt
-        if ui.blink(0.35) then hud.message("HULL OVERHEATING", "alert") end
+        if ui.blink(0.35) then hud.message(L("HULL OVERHEATING"), "alert") end
         if self.ship.hull <= 0 then self:destroyed("burned up") end
     end
 end
@@ -831,11 +832,14 @@ function Flight:collideGround(dt)
             local pad = s:padNear(l.pos.x, l.pos.z, FL.landingPadRadius * 3)
             if pad then
                 self.landedPlace = pad.settlement.place
-                hud.message("Landed at " .. pad.settlement.place.name .. "  -  " ..
-                    config.keyName("dock") .. " to enter, " .. config.keyName("disembark") .. " to disembark", "good")
+                hud.message(L("Landed at {name}  -  {enter} to enter, {out} to disembark", {
+                    name = pad.settlement.place.name,
+                    enter = config.keyName("dock"),
+                    out = config.keyName("disembark"),
+                }), "good")
             else
                 self.landedPlace = nil
-                hud.message("Touchdown  -  " .. config.keyName("disembark") .. " to disembark", "good")
+                hud.message(L("Touchdown  -  {key} to disembark", { key = config.keyName("disembark") }), "good")
             end
         end
     else
@@ -844,7 +848,7 @@ function Flight:collideGround(dt)
         if damage > 1 then
             combat.damage(self.ship, damage, true, nil)
             self.game.camera:addShake(util.clamp(damage / 40, 0.1, 1.2))
-            hud.message(string.format("Impact! -%d hull", floor(damage)), "alert")
+            hud.message(L("Impact! -{n} hull", { n = floor(damage) }), "alert")
             if self.ship.hull <= 0 then self:destroyed("crashed") end
         end
         -- bounce along the surface normal, losing most of the energy
@@ -887,7 +891,7 @@ function Flight:updateContacts()
             local faction = factions.get(e.faction)
             add({
                 pos = e.pos, entity = e, kind = "ship",
-                label = e.shipDef.roleName .. " [" .. faction.short .. "]",
+                label = L(e.shipDef.roleName) .. " [" .. faction.short .. "]",
                 color = e.hostileToPlayer and C.uiDanger or
                         (e.faction == "pirates" and C.orange or { faction.color[1], faction.color[2], faction.color[3], 1 }),
                 hostile = e.hostileToPlayer,
@@ -942,22 +946,27 @@ function Flight:updateContacts()
             t.hull = (t.entity.hull or 0) / max(t.entity.stats.maxHull, 1)
             t.shield = (t.entity.shield or 0) / max(t.entity.stats.maxShield, 1)
             t.detail = t.entity.pilot
-            t.detail2 = t.entity.scanned
-                and string.format("cargo ~%s cr%s", util.money(t.entity.cargoValue),
-                    t.entity.bounty > 0 and ("  -  bounty " .. util.money(t.entity.bounty)) or "")
-                or "unscanned"
+            if not t.entity.scanned then
+                t.detail2 = L("unscanned")
+            elseif t.entity.bounty > 0 then
+                t.detail2 = L("cargo ~{cash} cr  -  bounty {bounty}", {
+                    cash = util.money(t.entity.cargoValue),
+                    bounty = util.money(t.entity.bounty) })
+            else
+                t.detail2 = L("cargo ~{cash} cr", { cash = util.money(t.entity.cargoValue) })
+            end
         elseif t.station then
             t.hull, t.shield = nil, nil
-            t.detail = t.station.stationKindName .. " station"
-            t.detail2 = factions.get(t.station.factionId).name
+            t.detail = L("{kind} station", { kind = L(t.station.stationKindName) })
+            t.detail2 = L(factions.get(t.station.factionId).name)
         elseif t.body then
             t.hull, t.shield = nil, nil
-            t.detail = t.body.typeName or "moon"
-            t.detail2 = t.body.landable and "landable" or "no surface"
+            t.detail = L(t.body.typeName or "moon")
+            t.detail2 = t.body.landable and L("landable") or L("no surface")
         elseif t.place then
             t.hull, t.shield = nil, nil
-            t.detail = "settlement on " .. (t.place.bodyName or "?")
-            t.detail2 = string.format("pop %s", util.money(t.place.population))
+            t.detail = L("settlement on {body}", { body = t.place.bodyName or "?" })
+            t.detail2 = L("pop {pop}", { pop = util.money(t.place.population) })
         end
     end
 end
@@ -980,27 +989,31 @@ function Flight:cycleTarget(hostileOnly)
         end
     end
     self.target = best
-    if best then hud.message("Target: " .. (best.label or "?"), "info") end
+    if best then hud.message(L("Target: {name}", { name = best.label or "?" }), "info") end
 end
 
 function Flight:scanTarget()
     local t = self.target
-    if not t then hud.message("No target", "warn") return end
+    if not t then hud.message(L("No target"), "warn") return end
     if t.distance > (self.player.stats.scanRange or config.combat.scanRange) then
-        hud.message("Out of scanner range", "warn")
+        hud.message(L("Out of scanner range"), "warn")
         return
     end
     if t.entity then
         t.entity.scanned = true
         self.player.record.scanned = self.player.record.scanned + 1
-        hud.message(string.format("%s scanned - %s, %s cr cargo", t.entity.pilot,
-            factions.get(t.entity.faction).name, util.money(t.entity.cargoValue)), "good")
+        hud.message(L("{pilot} scanned - {faction}, {cash} cr cargo", {
+            pilot = t.entity.pilot,
+            faction = L(factions.get(t.entity.faction).name),
+            cash = util.money(t.entity.cargoValue) }), "good")
     elseif t.body then
-        self.world.player:addLog("Surveyed " .. t.body.name, self.world.day, "nav")
-        hud.message(string.format("%s: %s, gravity %.1f m/s2, atmosphere %.2f atm",
-            t.body.name, t.body.typeName or "moon", t.body.gravity or 0, t.body.atmosphere or 0), "good")
+        self.world.player:addLog(L("Surveyed {name}", { name = t.body.name }), self.world.day, "nav")
+        hud.message(L("{name}: {kind}, gravity {g} m/s2, atmosphere {atm} atm", {
+            name = t.body.name, kind = L(t.body.typeName or "moon"),
+            g = string.format("%.1f", t.body.gravity or 0),
+            atm = string.format("%.2f", t.body.atmosphere or 0) }), "good")
     else
-        hud.message("Nothing to scan", "warn")
+        hud.message(L("Nothing to scan"), "warn")
     end
 end
 
@@ -1059,13 +1072,14 @@ function Flight:dock()
     -- Port itself files the arrival, so missions and fees are counted once
     self.player.hull = self.ship.hull
     self.player.shield = self.ship.shield
-    hud.message((p.station and "Docked at " or "Entered ") .. place.name, "good")
+    hud.message(p.station and L("Docked at {name}", { name = place.name })
+        or L("Entered {name}", { name = place.name }), "good")
     self.manager:push(Port.new(), place, { flight = self, docked = true })
 end
 
 function Flight:disembark()
     if not self.landedOn or not self.surface then
-        hud.message("Land first", "warn")
+        hud.message(L("Land first"), "warn")
         return
     end
     local OnFoot = require("src.states.onfoot")
@@ -1179,13 +1193,13 @@ function Flight:onKill(victim, killer)
         if faction == "pirates" then
             local bounty = victim.bounty or config.combat.bountyPerKill
             self.player:earn(bounty)
-            hud.message(string.format("Bounty claimed: %s cr", util.money(bounty)), "good")
+            hud.message(L("Bounty claimed: {cash} cr", { cash = util.money(bounty) }), "good")
             self.player:addReputation(self.world.system.factionId, 0.02)
         else
             -- killing a lawful ship is a crime where its owners have authority
             local fine = math.floor(1200 + (victim.stats.maxHull or 100) * 6)
             self.player:addBounty(faction, fine)
-            hud.message(string.format("Bounty issued against you: %s cr", util.money(fine)), "alert")
+            hud.message(L("Bounty issued against you: {cash} cr", { cash = util.money(fine) }), "alert")
             npcMod.alert(self.npcs, faction, self.ship.pos, 14000)
         end
         local missionsMod = require("src.sim.missions")
@@ -1549,13 +1563,13 @@ function Flight:keypressed(key)
             self.boostTimer = FL.boostDuration
             self.boostCooldown = FL.boostCooldown
             self.game.camera:addShake(0.25)
-            hud.message("Boost", "info")
+            hud.message(L("Boost"), "info")
         end
         return
     end
     if config.is("landingGear", key) then
         self.gearDown = not self.gearDown
-        hud.message(self.gearDown and "Landing gear down" or "Landing gear up", "info")
+        hud.message(self.gearDown and L("Landing gear down") or L("Landing gear up"), "info")
         return
     end
     if config.is("target", key) then self:cycleTarget(false) return end
@@ -1563,7 +1577,7 @@ function Flight:keypressed(key)
     if config.is("scan", key) then self:scanTarget() return end
     if config.is("mouseFlight", key) then
         self:setMouseFlight(not self.mouseSteer)
-        hud.message(self.mouseSteer and "Mouse flight on" or "Mouse flight off", "info")
+        hud.message(self.mouseSteer and L("Mouse flight on") or L("Mouse flight off"), "info")
         return
     end
     if config.is("autopilot", key) then
@@ -1572,7 +1586,7 @@ function Flight:keypressed(key)
     end
     if config.is("levelOut", key) then
         self.autoLevel = not self.autoLevel
-        hud.message(self.autoLevel and "Auto-level on" or "Auto-level off", "info")
+        hud.message(self.autoLevel and L("Auto-level on") or L("Auto-level off"), "info")
         return
     end
     if config.is("view", key) then
@@ -1598,7 +1612,8 @@ function Flight:keypressed(key)
     end
     if config.is("save", key) then
         local ok, err = self.game:saveGame()
-        hud.message(ok and "Game saved" or ("Save failed: " .. tostring(err)), ok and "good" or "alert")
+        hud.message(ok and L("Game saved") or L("Save failed: {reason}", { reason = tostring(err) }),
+            ok and "good" or "alert")
         return
     end
     if config.is("load", key) then
@@ -1606,7 +1621,7 @@ function Flight:keypressed(key)
         if ok then
             self.manager:switch(Flight.new())
         else
-            hud.message("Load failed: " .. tostring(err), "alert")
+            hud.message(L("Load failed: {reason}", { reason = tostring(err) }), "alert")
         end
         return
     end
@@ -1615,7 +1630,7 @@ function Flight:keypressed(key)
         local w = { weapon = { damage = 140, rate = 1, energy = 0, speed = config.combat.missileSpeed,
                                color = { 1, 0.8, 0.4 } } }
         combat.fire(self.arena, self.ship, w, self.ship.fwd.x, self.ship.fwd.y, self.ship.fwd.z, 0)
-        hud.message("Missile away (" .. self.player.missiles .. " left)", "info")
+        hud.message(L("Missile away ({n} left)", { n = self.player.missiles }), "info")
     end
 end
 
@@ -1628,7 +1643,7 @@ end
 function Flight:mousepressed(x, y, button)
     if button == 2 then
         self:setMouseFlight(not self.mouseSteer)
-        hud.message(self.mouseSteer and "Mouse flight on" or "Mouse flight off", "info")
+        hud.message(self.mouseSteer and L("Mouse flight on") or L("Mouse flight off"), "info")
     end
 end
 

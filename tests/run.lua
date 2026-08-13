@@ -1107,6 +1107,62 @@ test("contract text renders in russian without stray placeholders", function(ass
     i18n.setLocale("en")
 end)
 
+test("generated names follow the locale and agree in gender", function(assert_)
+    local names = require("src.procgen.names")
+
+    i18n.setLocale("en")
+    local enSystem, enShip = names.system(4242), names.ship(313)
+    assert_(not enSystem:find("[\208\209]"), "english system name is not latin: " .. enSystem)
+
+    i18n.setLocale("ru")
+    local ruSystem, ruShip = names.system(4242), names.ship(313)
+    assert_(ruSystem:find("[\208\209]") ~= nil, "russian system name is not cyrillic: " .. ruSystem)
+    assert_(ruSystem ~= enSystem, "the locale did not change the name")
+
+    -- the same seed must pick the same entry in both banks, so a system keeps
+    -- its identity across languages even though it changes spelling
+    local bank = names.banks
+    assert_(#bank.en.digrams == #bank.ru.digrams, "digram banks differ in size")
+    assert_(#bank.en.stationNames == #bank.ru.stationNames, "station banks differ in size")
+    assert_(#bank.en.settlementBody == #bank.ru.settlementBody, "settlement banks differ in size")
+    assert_(#bank.en.shipNoun == #bank.ru.shipNoun, "ship noun banks differ in size")
+    assert_(#bank.en.shipAdjective == #bank.ru.shipAdjective, "ship adjective banks differ")
+
+    -- adjective agreement: sample widely and check that every qualifier that
+    -- can inflect actually matches its noun's gender
+    local ADJ = {}
+    for _, adj in ipairs(bank.ru.shipAdjective) do
+        ADJ[adj[1]] = "m"; ADJ[adj[2]] = "f"; ADJ[adj[3]] = "n"
+    end
+    local GENDER = {}
+    for _, n in ipairs(bank.ru.shipNoun) do GENDER[n[1]] = n[2] end
+    local checked = 0
+    for seed = 1, 300 do
+        local name = names.ship(seed * 13)
+        local adj, noun = name:match("^(%S+) (.+)$")
+        if adj and GENDER[noun] and ADJ[adj] then
+            check("generated names follow the locale and agree in gender",
+                ADJ[adj] == GENDER[noun],
+                string.format("%s: %s is %s but %s is %s", name, adj, ADJ[adj], noun, GENDER[noun]))
+            checked = checked + 1
+        end
+    end
+    assert_(checked > 200, "only " .. checked .. " ship names were checkable")
+
+    -- Russian station names are always "<prefix> <name-in-genitive>"; the
+    -- English order swap would produce ungrammatical Russian
+    local prefixes = {}
+    for _, p in ipairs(bank.ru.stationPrefix) do prefixes[p] = true end
+    for seed = 1, 120 do
+        local st = names.station(seed * 7)
+        local head = st:match("^(%S+)")
+        check("generated names follow the locale and agree in gender",
+            prefixes[head] == true, "station does not lead with a prefix: " .. st)
+    end
+
+    i18n.setLocale("en")
+end)
+
 test("letter case helpers handle cyrillic", function(assert_)
     assert_(i18n.lcFirst("Зерно") == "зерно", "lc cyrillic")
     assert_(i18n.lcFirst("Руда") == "руда", "lc cyrillic р-я range")
