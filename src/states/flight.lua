@@ -36,6 +36,8 @@ local i18n = require("src.i18n")
 local hints = require("src.render.hints")
 local pois = require("src.procgen.pois")
 local mining = require("src.sim.mining")
+local tutorial = require("src.sim.tutorial")
+local objectives = require("src.sim.objectives")
 local commodities = require("src.sim.commodities")
 
 local Flight = class("FlightState")
@@ -102,6 +104,16 @@ function Flight:enter(spawnOpts)
     self.autopilot = nil
     self.pois = {}
     self.surfacePois = {}
+
+    -- Objectives. One line and one marker serve the tutorial, contracts and
+    -- the next rank, in that priority: a screen with three competing arrows
+    -- points at nothing.
+    self.player.tutorial = self.player.tutorial or tutorial.newState()
+    self.objectives = objectives.tracker()
+    self.objectives:addSource("tutorial", 1,
+        tutorial.source(self.player.tutorial, config.keyName))
+    self.objectives:addSource("contract", 2, objectives.contractSource)
+    self.objectives:addSource("rank", 3, objectives.rankSource)
 
     self:spawn(spawnOpts)
     -- chase view by default: it is far easier to judge attitude and altitude
@@ -1130,6 +1142,8 @@ function Flight:disembark()
         hud.message(L("Land first"), "warn")
         return
     end
+    local rec = self.player.record
+    rec.walked = (rec.walked or 0) + 1
     local OnFoot = require("src.states.onfoot")
     self.manager:push(OnFoot.new(), {
         surface = self.surface,
@@ -1161,6 +1175,7 @@ end
 function Flight:update(dt, background)
     if background then return end
     self.time = self.time + dt
+    self.lastDt = dt
     self.world:update(dt)
     if self.dying then return end
 
@@ -1219,6 +1234,7 @@ function Flight:update(dt, background)
 
     self:updateMining()
     self:updateContacts()
+    self:updateObjective()
     -- spawn() cannot pick a target because the contact list does not exist
     -- until the first update; this hands the new arrival something to fly to
     if self.pendingArrivalTarget then
@@ -1373,6 +1389,58 @@ function Flight:submitRocks(renderer)
         local wear = 0.55 + 0.45 * (r.health / max(r.maxHealth, 1))
         renderer:draw(set[r.variant], pos, basis, { scale = r.radius * wear })
     end
+end
+
+--- Re-evaluates what the player should be doing, and says so when it changes.
+function Flight:updateObjective()
+    if not self.objectives then return end
+    local ctx = self._objCtx or {}
+    self._objCtx = ctx
+    ctx.player = self.player
+    ctx.flight = self
+    ctx.systemId = self.world.stub and self.world.stub.id
+    ctx.sawMap = self.sawMap
+    ctx.findPort = function(name)
+        for _, c in ipairs(self.contacts) do
+            if (c.station and c.station.name == name) or (c.place and c.place.name == name) then
+                return c
+            end
+        end
+        return nil
+    end
+
+    local before = self.objective and self.objective.id
+    local obj = self.objectives:update(ctx)
+    self.objective = obj
+    -- A change flashes the banner rather than pushing three lines into the
+    -- message log: the banner already says the same words, and printing them
+    -- twice buried the messages that were actually news.
+    if obj and obj.id ~= before then
+        self.objectiveFlash = 2.5
+    elseif not obj and before then
+        hud.message(L("All objectives complete. The galaxy is yours."), "good")
+    end
+    if self.objectiveFlash then
+        self.objectiveFlash = self.objectiveFlash - (self.lastDt or 0)
+        if self.objectiveFlash <= 0 then self.objectiveFlash = nil end
+    end
+end
+
+--- The objective line, translated and with its arguments filled in.
+function Flight:objectiveText(obj)
+    if not obj then return "" end
+    if obj.textArgs then
+        local args = {}
+        for k, v in pairs(obj.textArgs) do args[k] = i18n.term(v) end
+        return L(obj.text, args)
+    end
+    return L(obj.text)
+end
+
+function Flight:objectiveHint(obj)
+    if not obj or not obj.hint then return "" end
+    if obj.hintArgs then return L(obj.hint, obj.hintArgs) end
+    return L(obj.hint)
 end
 
 --- The nearest live rock to a point, for an NPC miner to work.
@@ -1637,6 +1705,11 @@ function Flight:draw(background)
         dockPrompt = self.dockPrompt ~= nil,
         dockPromptIsPlace = self.dockPrompt and self.dockPrompt.place ~= nil,
         prompt = self.dockPrompt and self.dockPrompt.text or nil,
+        objective = self.objective and self:objectiveText(self.objective) or nil,
+        objectiveFlash = self.objectiveFlash,
+        objectiveHint = self.objective and self:objectiveHint(self.objective) or nil,
+        objectiveMarker = self.objectives and select(1, self.objectives:markerPos(self._objCtx)) and
+            { self.objectives:markerPos(self._objCtx) } or nil,
     }, w, h)
 
     if settings.get("showHints") and not self.game.showHelp then
@@ -1743,6 +1816,7 @@ function Flight:keypressed(key)
     if config.is("disembark", key) then self:disembark() return end
     if config.is("map", key) then
         local Map = require("src.states.galaxymap")
+        self.sawMap = true
         self.manager:push(Map.new(), self)
         return
     end

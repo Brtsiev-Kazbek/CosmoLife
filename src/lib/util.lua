@@ -54,20 +54,30 @@ function util.money(n)
 end
 
 --- Human readable distance: metres -> m / km / Mm / Gm / AU
+-- Unit abbreviations, so a localisation can write them in its own alphabet.
+-- Kept as a table rather than going through i18n directly because util is a
+-- leaf module the head-less tests load without any locale at all.
+util.units = {
+    m = "m", km = "km", Mm = "Mm", Gm = "Gm", AU = "AU",
+    mps = "m/s", kmps = "km/s", c = "c",
+}
+
 function util.distance(m)
     local a = abs(m)
-    if a < 1000 then return string.format("%.0f m", m) end
-    if a < 1e6 then return string.format("%.1f km", m / 1e3) end
-    if a < 1e9 then return string.format("%.1f Mm", m / 1e6) end
-    if a < 1.5e11 then return string.format("%.2f Gm", m / 1e9) end
-    return string.format("%.2f AU", m / 1.495978707e11)
+    local u = util.units
+    if a < 1000 then return string.format("%.0f %s", m, u.m) end
+    if a < 1e6 then return string.format("%.1f %s", m / 1e3, u.km) end
+    if a < 1e9 then return string.format("%.1f %s", m / 1e6, u.Mm) end
+    if a < 1.5e11 then return string.format("%.2f %s", m / 1e9, u.Gm) end
+    return string.format("%.2f %s", m / 1.495978707e11, u.AU)
 end
 
 function util.speed(v)
     local a = abs(v)
-    if a < 10000 then return string.format("%.0f m/s", v) end
-    if a < 1e7 then return string.format("%.1f km/s", v / 1e3) end
-    return string.format("%.2f c", v / 299792458)
+    local u = util.units
+    if a < 10000 then return string.format("%.0f %s", v, u.mps) end
+    if a < 1e7 then return string.format("%.1f %s", v / 1e3, u.kmps) end
+    return string.format("%.2f %s", v / 299792458, u.c)
 end
 
 --- Days since epoch -> in-game date string.

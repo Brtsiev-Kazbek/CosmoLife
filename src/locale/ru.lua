@@ -553,6 +553,45 @@ local strings = {
     ["Twelve tonnes that a routine scan does not find."] =
         "Двенадцать тонн, которых обычный досмотр не находит.",
 
+    -- ------------------------------------------------------------- обучение
+    ["Get your bearings"] = "Осмотритесь",
+    ["Mouse aims. {throttleUp}/{throttleDown} set throttle."] =
+        "Мышь ведёт нос. {throttleUp}/{throttleDown} — тяга.",
+    ["Select the station"] = "Возьмите станцию на прицел",
+    ["{target} cycles targets. Pick the station ahead."] =
+        "{target} перебирает цели. Выберите станцию впереди.",
+    ["Let the autopilot fly you there"] = "Пусть автопилот довезёт вас",
+    ["{autopilot} engages it. {warp} is manual cruise."] =
+        "{autopilot} включает его. {warp} — ручной сверхсвет.",
+    ["Dock at the station"] = "Состыкуйтесь со станцией",
+    ["Slow to under 120 m/s and fly into the lit mouth. {dock} to dock."] =
+        "Сбросьте скорость ниже 120 м/с и войдите в освещённый зев. {dock} — стыковка.",
+    ["Buy something to sell elsewhere"] = "Купите то, что продадите в другом месте",
+    ["MARKET tab. B buys, N sells. Cheap here is dear somewhere else."] =
+        "Вкладка РЫНОК. B — купить, N — продать. Что дёшево здесь, дорого в другом месте.",
+    ["Open the galaxy map"] = "Откройте карту галактики",
+    ["{map} opens it. The ring is your jump range."] =
+        "{map} открывает её. Кольцо — дальность вашего прыжка.",
+    ["Jump to another system"] = "Прыгните в другую систему",
+    ["Select a system inside the ring and press ENTER."] =
+        "Выберите систему внутри кольца и нажмите ENTER.",
+    ["Sell your cargo at a profit"] = "Продайте груз с прибылью",
+    ["Dock again and check the MARKET tab."] = "Состыкуйтесь снова и посмотрите вкладку РЫНОК.",
+    ["Take a contract"] = "Возьмите контракт",
+    ["CONTRACTS tab at any station with a board."] =
+        "Вкладка КОНТРАКТЫ на любой станции с доской.",
+    ["Land on a planet"] = "Сядьте на планету",
+    ["{landingGear} lowers the gear. Approach slowly and level."] =
+        "{landingGear} выпускает шасси. Подходите медленно и ровно.",
+    ["Step outside"] = "Выйдите наружу",
+    ["{disembark} leaves the ship once you are down."] =
+        "{disembark} выпускает вас из корабля после посадки.",
+    ["All objectives complete. The galaxy is yours."] =
+        "Все задачи выполнены. Галактика ваша.",
+    ["Deliver it at {dest}"] = "Сдать груз: {dest}",
+    ["Jump to {dest}"] = "Прыжок в {dest}",
+    ["Reach {rank}"] = "Дорасти до ранга «{rank}»",
+
     -- ------------------------------------------------------------ прогрессия
     ["Rank"] = "Ранг",
     ["Rank: {rank}"] = "Ранг: {rank}",
@@ -710,8 +749,15 @@ local units = {
     unit      = { one = "единица",   few = "единицы",   many = "единиц" },
 }
 
+-- Сокращения единиц для util.distance / util.speed.
+local abbrev = {
+    m = "м", km = "км", Mm = "Мм", Gm = "Гм", AU = "а.е.",
+    mps = "м/с", kmps = "км/с", c = "c",
+}
+
 return {
     strings = strings,
+    abbrev = abbrev,
     nouns = require("src.locale.ru_nouns"),
     units = units,
 }

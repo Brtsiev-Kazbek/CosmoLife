@@ -44,7 +44,7 @@ function Player:init(opts)
     self.record = {
         kills = 0, deaths = 0, jumps = 0, trades = 0, profit = 0,
         distanceLy = 0, missionsDone = 0, missionsFailed = 0, coloniesFounded = 0,
-        landings = 0, scanned = 0,
+        landings = 0, scanned = 0, dockings = 0, walked = 0,
     }
 end
 
@@ -257,6 +257,7 @@ function Player:save()
         missiles = self.missiles,
         shieldCells = self.shieldCells,
         rankSeen = self.rankSeen,
+        tutorial = self.tutorial,
         reputations = self.reputations,
         bounties = self.bounties,
         missions = self.missions,
@@ -285,6 +286,7 @@ function Player:load(data)
     self.missiles = data.missiles or 0
     self.shieldCells = data.shieldCells or 0
     self.rankSeen = data.rankSeen
+    self.tutorial = data.tutorial
     self.reputations = data.reputations or {}
     self.bounties = data.bounties or {}
     self.missions = data.missions or {}

@@ -46,6 +46,43 @@ step(40, "target and scan", function(game)
     f:scanTarget()
 end)
 
+step(43, "the tutorial gives a first objective", function(game)
+    -- A new commander used to be given nothing at all: no target, no prompt,
+    -- no goal. The chain must produce a step immediately and advance as the
+    -- player does the thing it asks for.
+    local f = game.manager:current()
+    assert(f.objectives, "flight has no objective tracker")
+    local obj = f.objective
+    assert(obj, "no objective was offered to a new commander")
+    assert(obj.source == "tutorial", "the first objective is not from the tutorial")
+
+    local tutorial = require("src.sim.tutorial")
+    local state = game.world.player.tutorial
+    assert(state, "tutorial state was not created")
+
+    -- Earlier steps of this run already set throttle and picked a target, so
+    -- the chain should have skipped those rather than replaying them -- that
+    -- skipping is the behaviour being checked here.
+    assert(state.index > 1, "the chain replayed a step the player had already done")
+
+    -- satisfying the current step must advance the chain
+    local step = tutorial.STEPS[state.index]
+    local before = state.index
+    if step.id == "autopilot" then
+        f:targetNearestPort()
+        f:toggleAutopilot()
+        f:updateObjective()
+        f:toggleAutopilot()          -- leave it off for the next step
+    elseif step.id == "look" then
+        f.throttle = 1
+    elseif step.id == "target" then
+        f:targetNearestPort()
+    end
+    f:updateObjective()
+    assert(state.index > before,
+        "the chain did not advance after doing what step '" .. step.id .. "' asked")
+end)
+
 step(44, "a new arrival can reach a port", function(game)
     -- The whole opening of the game depends on this: from the spawn point the
     -- player must be able to select a station and hand it to the autopilot.

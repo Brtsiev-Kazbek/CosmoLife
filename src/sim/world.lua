@@ -258,6 +258,8 @@ end
 --- Called when the player lands or docks anywhere.
 function World:onDock(port)
     self.player.dockedAt = port.name
+    local rec = self.player.record
+    rec.dockings = (rec.dockings or 0) + 1
     local completed = missionsMod.checkArrival(self.player, self.stub.id, port, self.day)
     for _, m in ipairs(completed) do
         local title = missionsMod.title(m)

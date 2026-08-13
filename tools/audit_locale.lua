@@ -246,6 +246,18 @@ local function sweepData()
     for _, r in ipairs(progression.RANKS) do emit(r.name, "src/sim/progression.lua (rank)") end
     for _, u in pairs(progression.UNLOCKS) do emit(u, "src/sim/progression.lua (unlock)") end
 
+    local tutorial = require("src.sim.tutorial")
+    for _, step in ipairs(tutorial.STEPS) do
+        emit(step.text, "src/sim/tutorial.lua (step)")
+        emit(step.hint, "src/sim/tutorial.lua (hint)")
+    end
+
+    local objectives = require("src.sim.objectives")
+    -- the two built-in sources' template strings
+    for _, t in ipairs({ "Deliver it at {dest}", "Jump to {dest}", "Reach {rank}", "{cash} cr more" }) do
+        emit(t, "src/sim/objectives.lua")
+    end
+
     local pois = require("src.procgen.pois")
     for _, list in ipairs({ pois.SPACE_KINDS or {}, pois.SURFACE_KINDS or {} }) do
         for _, k in ipairs(list) do emit(k.name, "src/procgen/pois.lua") end

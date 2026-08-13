@@ -1393,6 +1393,85 @@ test("rank climbs monotonically and never skips its gates", function(assert_)
     assert_(progression.check(p) == nil, "promotion announced twice for one rank")
 end)
 
+test("the tutorial chain advances, skips and finishes", function(assert_)
+    local tutorial = require("src.sim.tutorial")
+    local p = Player.new({ seed = 5 })
+    local state = tutorial.newState()
+    local ctx = { player = p, flight = { throttle = 0 } }
+
+    local first = tutorial.current(state, ctx)
+    assert_(first ~= nil and first.id == "look", "the chain did not start at the first step")
+
+    -- doing what a step asks advances exactly one step
+    ctx.flight.throttle = 1
+    local second = tutorial.current(state, ctx)
+    assert_(second ~= nil and second.id == "target", "did not advance to the target step")
+
+    -- a step already satisfied is skipped rather than replayed: satisfy the
+    -- next three at once and the chain should land past all of them
+    ctx.flight.target = { station = {} }
+    ctx.flight.autopilot = true
+    p.record.dockings = 1
+    local after = tutorial.current(state, ctx)
+    assert_(after ~= nil and after.id == "buy",
+        "expected to skip to 'buy', landed on " .. tostring(after and after.id))
+
+    -- the whole chain completes and stays completed
+    p.cargo = { grain = 3 }
+    p.record.jumps = 2
+    p.record.trades = 5
+    p.missions = { {} }
+    p.record.landings = 1
+    p.record.walked = 1
+    assert_(tutorial.current(state, ctx) == nil, "the chain did not finish")
+    assert_(state.done == true, "the chain did not mark itself done")
+    assert_(tutorial.current(state, ctx) == nil, "a finished chain produced a step again")
+
+    -- every step must declare the fields the UI reads
+    for _, step in ipairs(tutorial.STEPS) do
+        check("the tutorial chain advances, skips and finishes",
+            type(step.id) == "string" and #step.id > 0, "a step has no id")
+        check("the tutorial chain advances, skips and finishes",
+            type(step.text) == "string" and #step.text > 0, step.id .. " has no text")
+        check("the tutorial chain advances, skips and finishes",
+            type(step.done) == "function", step.id .. " has no completion test")
+        -- a hint that names a key must declare which action it means, or the
+        -- placeholder will print itself to the player
+        if step.hint then
+            for name in step.hint:gmatch("{([%w_]+)}") do
+                local declared = false
+                for _, k in ipairs(step.keys or {}) do
+                    if k == name then declared = true end
+                end
+                check("the tutorial chain advances, skips and finishes", declared,
+                    string.format("%s uses {%s} but does not list it in keys", step.id, name))
+            end
+        end
+    end
+end)
+
+test("objectives pick one source by priority", function(assert_)
+    local objectives = require("src.sim.objectives")
+    local tracker = objectives.tracker()
+    tracker:addSource("low", 9, function() return { id = "low", text = "low" } end)
+    tracker:addSource("high", 1, function() return { id = "high", text = "high" } end)
+    local obj = tracker:update({})
+    assert_(obj ~= nil and obj.id == "high", "priority was not respected")
+    assert_(obj.source == "high", "the source name was not attached")
+
+    -- a source that errors must not take the tracker down with it
+    local t2 = objectives.tracker()
+    t2:addSource("broken", 1, function() error("boom") end)
+    t2:addSource("ok", 2, function() return { id = "ok", text = "ok" } end)
+    local obj2 = t2:update({})
+    assert_(obj2 ~= nil and obj2.id == "ok", "a broken source blocked the rest")
+
+    -- nothing to do is a valid answer
+    local t3 = objectives.tracker()
+    t3:addSource("none", 1, function() return nil end)
+    assert_(t3:update({}) == nil, "an empty tracker invented an objective")
+end)
+
 test("letter case helpers handle cyrillic", function(assert_)
     assert_(i18n.lcFirst("Зерно") == "зерно", "lc cyrillic")
     assert_(i18n.lcFirst("Руда") == "руда", "lc cyrillic р-я range")

@@ -155,9 +155,18 @@ local function drawContactMarker(camera, w, h, c, selected)
         -- boxes with no way to tell a station from a moon.
         local navigable = c.station or c.place or c.body or c.poi
         if c.label and (selected or navigable or dist < 6000) then
-            ui.text(c.label, x + s + 6, y - 8, col, "small")
-            if selected or navigable then
-                ui.text(util.distance(dist), x + s + 6, y + 6, col, "small")
+            -- The HUD owns the corners: the target panel top left, the system
+            -- banner top right, the gauges along the bottom. A world label
+            -- landing in one of those bands is unreadable and makes the panel
+            -- underneath unreadable too, so it is simply dropped.
+            local lx, ly = x + s + 6, y - 8
+            local free = not (ly < 110 and (lx < 300 or lx > w - 330))
+                and ly < h - 170
+            if free then
+                ui.text(c.label, lx, ly, col, "small")
+                if selected or navigable then
+                    ui.text(util.distance(dist), lx, y + 6, col, "small")
+                end
             end
         end
     elseif selected then
@@ -438,6 +447,36 @@ function hud.draw(ctx, w, h)
     local msgBottom = h - 152
     local msgTop = math.max(h * 0.30, math.min(h * 0.5 + 60, msgBottom - 140))
     drawMessages(cx, msgTop, msgBottom, w)
+
+    -- ---- objective ------------------------------------------------------
+    --
+    -- Top centre, under the system banner: the game never told anyone what to
+    -- do next, and a player who does not know what to do next stops playing.
+    if ctx.objective then
+        local f = ui.font("normal")
+        local fs = ui.font("small")
+        local tw = math.max(f:getWidth(ctx.objective),
+            ctx.objectiveHint and fs:getWidth(ctx.objectiveHint) or 0) + 40
+        tw = math.min(tw, w - 620)
+        if tw > 120 then
+            local oy = 26
+            local oh = ctx.objectiveHint and 50 or 32
+            ui.setColor(C.uiPanel, 0.9)
+            love.graphics.rectangle("fill", cx - tw * 0.5, oy, tw, oh)
+            -- a newly set objective pulses its border for a couple of seconds,
+            -- which is enough to notice without another line in the message log
+            local edge = 0.55
+            if ctx.objectiveFlash then edge = ui.blink(0.25) and 1.0 or 0.4 end
+            ui.setColor(accent, edge)
+            love.graphics.setLineWidth(ctx.objectiveFlash and 2 or 1)
+            love.graphics.rectangle("line", cx - tw * 0.5, oy, tw, oh)
+            love.graphics.setLineWidth(1)
+            ui.textCenter(ui.fit(ctx.objective, tw - 20, "normal"), cx, oy + 6, C.uiPrimary, "normal")
+            if ctx.objectiveHint then
+                ui.textCenter(ui.fit(ctx.objectiveHint, tw - 20, "small"), cx, oy + 28, C.uiDim, "small")
+            end
+        end
+    end
 
     -- ---- prompts --------------------------------------------------------
     if ctx.prompt then

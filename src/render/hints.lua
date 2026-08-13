@@ -41,6 +41,8 @@ function hints.flight(ctx)
     end
 
     -- situational
+    -- the autopilot line used to sit behind `ctx.target`, which before the
+    -- targeting clamp was lifted could never be set at travel range
     if ctx.target and not ctx.hoverMode then
         add(input.keyName("autopilot"), "Autopilot to target", ctx.autopilot)
     end

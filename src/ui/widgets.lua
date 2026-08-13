@@ -162,17 +162,30 @@ function ui.fit(str, maxW, font)
     local ellipsis = "..."
     local room = maxW - f:getWidth(ellipsis)
     if room <= 0 then return "" end
-    -- binary search on byte length, then walk back off any UTF-8 continuation
-    -- byte so a multi-byte character is never cut in half
-    local lo, hi = 0, #str
+
+    -- Cut points must be character boundaries, not byte offsets: `getWidth`
+    -- decodes UTF-8 and raises on a half-finished sequence, so measuring an
+    -- arbitrary byte prefix of a Cyrillic string crashes rather than returning
+    -- a wrong number.
+    local bounds = { 0 }
+    local i = 1
+    while i <= #str do
+        local b = str:byte(i)
+        local size = 1
+        if b >= 0xF0 then size = 4
+        elseif b >= 0xE0 then size = 3
+        elseif b >= 0xC0 then size = 2 end
+        i = i + size
+        bounds[#bounds + 1] = math.min(i - 1, #str)
+    end
+
+    -- binary search over boundaries
+    local lo, hi = 1, #bounds
     while lo < hi do
         local mid = math.floor((lo + hi + 1) * 0.5)
-        if f:getWidth(str:sub(1, mid)) <= room then lo = mid else hi = mid - 1 end
+        if f:getWidth(str:sub(1, bounds[mid])) <= room then lo = mid else hi = mid - 1 end
     end
-    while lo > 0 and str:byte(lo + 1) and str:byte(lo + 1) >= 0x80 and str:byte(lo + 1) < 0xC0 do
-        lo = lo - 1
-    end
-    return str:sub(1, lo) .. ellipsis
+    return str:sub(1, bounds[lo]) .. ellipsis
 end
 
 --- Left aligned text, truncated to `maxW`.

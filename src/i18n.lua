@@ -400,6 +400,9 @@ function i18n.setLocale(code)
     if code == i18n.locale and i18n.loaded then return true end
     if code == "en" then
         i18n.strings, i18n.nouns, i18n.units = {}, {}, {}
+        local util = require("src.lib.util")
+        util.units = { m = "m", km = "km", Mm = "Mm", Gm = "Gm", AU = "AU",
+                       mps = "m/s", kmps = "km/s", c = "c" }
         i18n.locale = "en"
         i18n.loaded = true
         if i18n.onLocaleChanged then i18n.onLocaleChanged(code) end
@@ -410,6 +413,12 @@ function i18n.setLocale(code)
     i18n.strings = tbl.strings or tbl
     i18n.nouns = tbl.nouns or {}
     i18n.units = tbl.units or {}
+    -- unit abbreviations live on util, which the head-less tests load without
+    -- a locale; a locale that declares them overwrites the English defaults
+    if tbl.abbrev then
+        local util = require("src.lib.util")
+        for k, v in pairs(util.units) do util.units[k] = tbl.abbrev[k] or v end
+    end
     i18n.locale = code
     i18n.loaded = true
     if i18n.onLocaleChanged then i18n.onLocaleChanged(code) end
