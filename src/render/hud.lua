@@ -160,7 +160,12 @@ local function drawContactMarker(camera, w, h, c, selected)
             -- landing in one of those bands is unreadable and makes the panel
             -- underneath unreadable too, so it is simply dropped.
             local lx, ly = x + s + 6, y - 8
-            local free = not (ly < 110 and (lx < 300 or lx > w - 330))
+            -- measured, not guessed: the label's own width decides whether it
+            -- reaches the banner, and a short one starting left of it still
+            -- does if the name is long
+            local lw = ui.font("small"):getWidth(c.label)
+            local topBand = ly < 112
+            local free = not (topBand and (lx < 300 or lx + lw > w - 310))
                 and ly < h - 170
             if free then
                 ui.text(c.label, lx, ly, col, "small")

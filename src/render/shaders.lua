@@ -193,17 +193,35 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc)
         float grain = fbm(dir.xy * 42.0 + dir.z * 17.0, 2);
         spaceCol += vec3(0.10, 0.11, 0.14) * plane * smoothstep(0.62, 0.95, grain) * u_nebula;
 
-        // two nebula clouds in complementary hues
-        float n1 = fbm(dir.xy * 2.4 + dir.z * 1.7, 4);
-        float n2 = fbm(dir.yz * 3.1 - dir.x * 2.3 + 11.0, 4);
-        float c1 = smoothstep(0.56, 0.92, n1);
-        float c2 = smoothstep(0.60, 0.95, n2);
+        // Two nebula clouds in complementary hues, domain warped.
+        //
+        // Plain fbm gives soft round blobs, which read as fog. Offsetting the
+        // sample point by another fbm bends those blobs into filaments and
+        // sheets -- the shapes a real emission nebula has -- for the cost of
+        // one extra noise lookup per layer.
+        vec2 wq = vec2(fbm(dir.xy * 1.3 + 4.0, 2), fbm(dir.yz * 1.1 - 2.0, 2));
+        vec2 warp = (wq - 0.5) * 1.6;
+
+        float n1 = fbm(dir.xy * 2.4 + dir.z * 1.7 + warp, 4);
+        float n2 = fbm(dir.yz * 3.1 - dir.x * 2.3 + 11.0 - warp * 0.8, 4);
+        float c1 = smoothstep(0.54, 0.90, n1);
+        float c2 = smoothstep(0.58, 0.94, n2);
         vec3 hueA = u_zenith * 1.6 + vec3(0.10, 0.02, 0.16);
         vec3 hueB = vec3(0.06, 0.16, 0.22);
         spaceCol += hueA * c1 * u_nebula * 0.40;
         spaceCol += hueB * c2 * u_nebula * 0.34;
         // bright cores where the two overlap
         spaceCol += vec3(0.22, 0.16, 0.28) * c1 * c2 * u_nebula * 0.5;
+
+        // A third, much finer layer only inside the densest parts: filament
+        // structure at a scale the broad layers cannot resolve, which is what
+        // gives the clouds depth rather than flatness.
+        float dense = c1 * c2 + c1 * 0.35;
+        if (dense > 0.02) {
+            float fil = fbm(dir.xy * 9.0 + dir.z * 5.0 + warp * 2.0, 3);
+            fil = smoothstep(0.55, 0.85, fil);
+            spaceCol += (hueA * 0.5 + vec3(0.10, 0.08, 0.14)) * fil * dense * u_nebula * 0.55;
+        }
     }
 
     // atmospheric sky: zenith -> horizon -> ground haze, warmed towards the sun

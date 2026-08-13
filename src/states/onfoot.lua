@@ -243,7 +243,7 @@ function OnFoot:draw(background)
 
     local sys = self.world.system
     renderer:endFrame(function()
-        self.game.sky:draw(camera, w, h, 1 - (renderer.env.atmos or 0) * 0.95)
+        self.game.sky:draw(camera, w, h, 1 - (renderer.env.atmos or 0) * 0.95, renderer.env.atmos)
         if not flight or flight:sunVisible() then
             self.game.sky:drawSun(camera, sys.star.pos, w, h, sys.star.radius, sys.star.color, false)
         end

@@ -27,7 +27,12 @@ function Sky:init(seed)
         local r = util.lerp(1.0, 0.72, temp)
         local g = util.lerp(0.78, 0.85, temp)
         local bl = util.lerp(0.62, 1.0, temp)
-        self.stars[i] = { x, y, z, r * b, g * b, bl * b, 1 + mag * 2.2 }
+        -- [8] and [9] give each star its own twinkle rate and phase, so the
+        -- field shimmers instead of sitting dead still. Real starlight
+        -- scintillates through an atmosphere and not in vacuum, so the effect
+        -- is scaled by `atmos` at draw time.
+        self.stars[i] = { x, y, z, r * b, g * b, bl * b, 1 + mag * 2.2,
+                          rng:range(0.6, 2.4), rng:range(0, math.pi * 2) }
     end
     self.points = {}
     self:buildConstellations(rng)
@@ -80,9 +85,14 @@ end
 
 --- Draws the starfield for the current camera.  `fade` dims the field as the
 --- atmosphere thickens, which is what makes daytime skies read as daytime.
-function Sky:draw(camera, w, h, fade)
+--- `atmos` is how much air is between the camera and the stars: scintillation
+--- is an atmospheric effect, so in vacuum the field is rock steady.
+function Sky:draw(camera, w, h, fade, atmos)
     fade = fade or 1
     if fade <= 0.01 then return end
+
+    local t = (love and love.timer) and love.timer.getTime() or 0
+    local twinkle = math.min(atmos or 0, 1)
 
     local cam = camera
     local tan = math.tan(cam.fov * 0.5)
@@ -109,7 +119,11 @@ function Sky:draw(camera, w, h, fade)
             if px >= -2 and px <= w + 2 and py >= -2 and py <= h + 2 then
                 local g = s[7] > 2.4 and 3 or (s[7] > 1.6 and 2 or 1)
                 local list = sizeGroups[g]
-                list[#list + 1] = { px, py, s[4], s[5], s[6], fade }
+                local a = fade
+                if twinkle > 0 then
+                    a = a * (1 - twinkle * 0.45 * (0.5 + 0.5 * math.sin(t * s[8] + s[9])))
+                end
+                list[#list + 1] = { px, py, s[4], s[5], s[6], a }
                 n = n + 1
             end
         end

@@ -732,7 +732,9 @@ local strings = {
     ["Ruins"] = "Руины",
     ["Crash site"] = "Место крушения",
     ["Monolith"] = "Монолит",
-    ["Geyser field"] = "Гейзеры",
+    ["Geyser field"] = "Гейзерное поле",
+    ["Lava vent"] = "Лавовое жерло",
+    ["Crystal field"] = "Кристаллическое поле",
     ["Mining claim"] = "Рудная заявка",
 }
 

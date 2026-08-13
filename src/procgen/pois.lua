@@ -45,12 +45,18 @@ pois.SPACE_KINDS = {
     { id = "debris",    weight = 14, name = "Debris field",     scan = "salvage" },
 }
 
+-- Surface features. The first five are built things and wreckage; the last
+-- three are the planet doing something on its own, which is what stops a
+-- landing site far from any settlement from being a plain of noise.
 pois.SURFACE_KINDS = {
-    { id = "crash",    weight = 26, name = "Crash site" },
-    { id = "ruins",    weight = 22, name = "Ruins" },
-    { id = "monolith", weight = 12, name = "Monolith" },
-    { id = "claim",    weight = 24, name = "Mining claim" },
-    { id = "arch",     weight = 16, name = "Rock arch" },
+    { id = "crash",    weight = 22, name = "Crash site" },
+    { id = "ruins",    weight = 18, name = "Ruins" },
+    { id = "monolith", weight = 10, name = "Monolith" },
+    { id = "claim",    weight = 18, name = "Mining claim" },
+    { id = "arch",     weight = 14, name = "Rock arch" },
+    { id = "geyser",   weight = 18, name = "Geyser field" },
+    { id = "volcano",  weight = 12, name = "Lava vent" },
+    { id = "crystals", weight = 14, name = "Crystal field" },
 }
 
 local function pickKind(rng, list)
@@ -319,6 +325,55 @@ function pois.surfaceMesh(p)
                 colors = buildings.colorScheme(rng, { wall = C.rust, trim = C.hullDark }),
             })
             p.radius = math.max(p.radius, info.radius or 60)
+
+        elseif p.kind == "geyser" then
+            -- a cluster of vents: mineral cones with a lit plume above each
+            for _ = 1, rng:int(4, 9) do
+                local x, z = rng:range(-34, 34), rng:range(-34, 34)
+                local r = rng:range(2.0, 5.0)
+                b:push():translate(x, 0, z)
+                geometry.cone(b, r, rng:range(1.2, 3.4), 8, C.rockDry, C.ash)
+                b:pop()
+                -- the plume is emissive, so it reads at night as well as by day
+                local h = rng:range(9, 26)
+                g:push():translate(x, 1.5, z)
+                geometry.cylinder(g, r * 0.32, h, 6, C.cyan, C.cyan, 0.25, false)
+                g:pop()
+            end
+
+        elseif p.kind == "volcano" then
+            -- a spatter cone with a glowing throat and cooled flows
+            local h = rng:range(14, 34)
+            local r = rng:range(16, 30)
+            geometry.cone(b, r, h, 11, C.rockRed, C.ash)
+            g:push():translate(0, h * 0.86, 0)
+            geometry.cylinder(g, r * 0.16, h * 0.2, 8, C.orange, C.orange, 0.8, true)
+            g:pop()
+            for _ = 1, rng:int(3, 6) do
+                local a = rng:range(0, TAU)
+                local len = rng:range(r * 1.2, r * 2.6)
+                b:push():translate(cos(a) * len * 0.5, 0.2, sin(a) * len * 0.5)
+                b:rotateY(a)
+                geometry.box(b, len, 0.5, rng:range(4, 11), C.black)
+                b:pop()
+            end
+
+        elseif p.kind == "crystals" then
+            -- a field of leaning prisms, lit from within
+            local col = rng:pick({ C.cyan, C.plasma, C.magenta })
+            for _ = 1, rng:int(7, 16) do
+                local x, z = rng:range(-30, 30), rng:range(-30, 30)
+                local h = rng:range(5, 22)
+                b:push():translate(x, 0, z)
+                b:rotateY(rng:range(0, TAU))
+                b:rotateZ(rng:range(-0.35, 0.35))
+                geometry.cylinder(b, rng:range(1.0, 3.2), h, 5, col, col, 0.18, true)
+                b:pop()
+                g:push():translate(x, h * 0.45, z)
+                geometry.cylinder(g, rng:range(0.5, 1.6), h * 0.5, 5, col, col, 0.2, true)
+                g:pop()
+            end
+            geometry.extrude(b, geometry.ngon(9, 34), 0, 0.4, C.rockGrey, C.rockDry)
 
         else -- arch
             local span = rng:range(30, 70)

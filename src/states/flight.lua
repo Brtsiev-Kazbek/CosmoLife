@@ -308,7 +308,9 @@ function Flight:updateEnvironment(skipHandover)
     -- sky and fog follow the atmosphere and the sun angle
     local atmos = util.clamp(density * 1.1, 0, 1)
     env.atmos = atmos
-    env.nebula = 1 - atmos
+    -- the preset's nebula weight was declared in all four quality tables and
+    -- read by nothing
+    env.nebula = (1 - atmos) * (settings.q().nebula or 1)
     if body and atmos > 0.01 then
         local sunUp = 0
         if self.upVec then
@@ -1330,6 +1332,7 @@ function Flight:submitBodies(renderer)
             if rings then
                 renderer:draw(rings, b.pos, basis, { scale = b.radius, layer = renderer.LAYER_FAR })
             end
+            self:submitCityLights(renderer, b, basis, dist)
             for _, m in ipairs(b.moons) do
                 renderer:draw(bodies.planet(m, math.max(12, math.floor(settings.q().bodyDetail * 0.4))), m.pos, self:bodyBasis(m),
                     { scale = m.radius, layer = renderer.LAYER_FAR })
@@ -1339,6 +1342,49 @@ function Flight:submitBodies(renderer)
 
     -- give the far layer a near plane that clears whatever we are standing on
     renderer:setFarClearance(self.altitude)
+end
+
+--- Lit settlements on a world's night side, seen from orbit.
+--
+-- bodies.settlementGlow() was written and never called, so an inhabited world
+-- looked exactly like a dead one from space: a planet with two million people
+-- on it went dark the moment the terminator crossed them. This is the single
+-- cheapest thing that makes a system feel lived in.
+function Flight:submitCityLights(renderer, body, basis, dist)
+    local places = body.settlements
+    if not places or #places == 0 then return end
+    -- only worth drawing while the planet is a disc, not a dot
+    if dist > body.radius * 26 or dist < body.radius * 1.02 then return end
+
+    local glow = bodies.settlementGlow()
+    if not glow then return end
+
+    local sun = renderer.env.sunDir
+    local pos = self._glowPos or vec3()
+    self._glowPos = pos
+    local systemGen = require("src.procgen.system")
+
+    for _, place in ipairs(places) do
+        local x, y, z = systemGen.surfacePoint(body, place.latitude, place.longitude, 0)
+        -- night side only: the outward normal must face away from the sun
+        local nx, ny, nz = (x - body.pos.x), (y - body.pos.y), (z - body.pos.z)
+        local len = math.sqrt(nx * nx + ny * ny + nz * nz)
+        if len > 1 then
+            nx, ny, nz = nx / len, ny / len, nz / len
+            local lit = -(nx * sun.x + ny * sun.y + nz * sun.z)
+            if lit < 0.06 then
+                -- brightest deep in the night side, fading through the terminator
+                local night = util.clamp((0.06 - lit) / 0.3, 0, 1)
+                local pop = place.population or 1000
+                local scale = body.radius * 0.012 * (0.6 + math.min(pop / 400000, 1.6))
+                pos:set(x, y, z)
+                renderer:draw(glow, pos, basis, {
+                    scale = scale, emissive = 1, additive = true,
+                    alpha = 0.5 * night, layer = renderer.LAYER_FAR,
+                })
+            end
+        end
+    end
 end
 
 --- Basis for a body, applying its spin about a polar axis tilted by
@@ -1670,7 +1716,7 @@ function Flight:draw(background)
 
     local sys = self.world.system
     renderer:endFrame(function()
-        self.game.sky:draw(camera, w, h, 1 - (renderer.env.atmos or 0) * 0.95)
+        self.game.sky:draw(camera, w, h, 1 - (renderer.env.atmos or 0) * 0.95, renderer.env.atmos)
         -- The sun disc is 2D and has no depth, so it must not be drawn once
         -- the local horizon has swallowed it.
         if self:sunVisible() then
