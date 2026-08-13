@@ -38,7 +38,9 @@ function Menu:enter()
         type = "terran",
         giant = false,
     }
-    self.shipPos = vec3(0, 0, 0)
+    -- offset to the right of the title panel so the two do not fight for the
+    -- same part of the frame
+    self.shipPos = vec3(9, 0, 0)
     self.shipBasis = { right = vec3(1, 0, 0), up = vec3(0, 1, 0), fwd = vec3(0, 0, -1) }
 
     self:buildMenu()
@@ -104,19 +106,34 @@ function Menu:draw()
     env.nebula = 1
     env.worldUp:set(0, 1, 0)
 
-    camera.pos:set(math.sin(t * 0.08) * 26, 7 + math.sin(t * 0.14) * 2.5, 34)
-    local fwd = vec3(-camera.pos.x, -camera.pos.y + 1.5, -camera.pos.z):normalize()
+    -- Framing.
+    --
+    -- The showcase used to sit 34 units from a ship normalised to 18 units
+    -- long, which filled two thirds of the frame; and its yaw swept through
+    -- zero, so at the top of every cycle the camera was staring at a hull's
+    -- flat stern -- a white rectangle with no silhouette to read. It is now
+    -- framed at a distance proportional to the ship, off to the right of the
+    -- title panel, and the yaw is biased so it never presents a flat face.
+    local shipLength = 16
+    local scale = shipLength / math.max(self.showcase.length, 1)
+    local dist = shipLength * 2.9
+
+    local orbit = math.sin(t * 0.08) * 0.35
+    camera.pos:set(math.sin(orbit) * dist, 5.5 + math.sin(t * 0.14) * 1.6, math.cos(orbit) * dist)
+    local fwd = vec3(-camera.pos.x, -camera.pos.y + 1.0, -camera.pos.z):normalize()
     camera.fwd:copyFrom(fwd)
     camera.up:set(0, 1, 0)
     mat4.orthonormalize(camera.right, camera.up, camera.fwd)
 
+    -- three-quarter view: yaw swings around 0.9 rad rather than through zero
+    local yaw = 0.9 + math.sin(t * 0.13) * 0.5
     local b = self.shipBasis
-    b.fwd:set(math.sin(t * 0.16), math.sin(t * 0.07) * 0.12, math.cos(t * 0.16))
+    b.fwd:set(math.sin(yaw), math.sin(t * 0.07) * 0.10, math.cos(yaw))
     b.up:set(math.sin(t * 0.09) * 0.13, 1, 0)
     mat4.orthonormalize(b.right, b.up, b.fwd)
 
     renderer:beginFrame(camera)
-    renderer:draw(self.showcase.model, self.shipPos, b, { scale = 18 / math.max(self.showcase.length, 1) })
+    renderer:draw(self.showcase.model, self.shipPos, b, { scale = scale })
     -- planet far below
     local planetPos = vec3(camera.pos.x * 0.2, -self.body.radius - 900000, -self.body.radius * 0.6)
     renderer:draw(bodies.planet(self.body, 48), planetPos, nil, { scale = self.body.radius })
@@ -132,8 +149,12 @@ function Menu:draw()
     renderer:present()
 
     -- title
+    -- the backdrop has to reach the version and showcase lines at the bottom,
+    -- which at any height above 488 used to sit outside it on the bare 3D view
+    local boxTop = h * 0.5 - 190
+    local boxH = math.max(380, h - 14 - boxTop)
     love.graphics.setColor(0, 0, 0, 0.45)
-    love.graphics.rectangle("fill", 0, h * 0.5 - 190, 460, 380)
+    love.graphics.rectangle("fill", 0, boxTop, 480, boxH)
     love.graphics.setColor(1, 1, 1, 1)
 
     ui.text("COSMOLIFE", 60, h * 0.5 - 170, C.uiPrimary, "title")
@@ -143,20 +164,21 @@ function Menu:draw()
     if self.menu then self.menu:draw(90, h * 0.5 - 40, 300, 34, "large") end
 
     ui.text("v" .. config.version, 66, h - 54, C.uiDim, "small")
-    ui.text(L("{class} class  -  {name}",
-        { class = L(self.showcase.roleName), name = self.showcase.name }), 66, h - 34, C.uiDim, "small")
+    ui.textFit(L("{class} class  -  {name}",
+        { class = L(self.showcase.roleName), name = self.showcase.name }),
+        66, h - 34, 400, C.uiDim, "small")
 
     if self.error then
-        ui.text(self.error, 66, h * 0.5 + 130, C.uiDanger, "small")
+        ui.paragraph(self.error, 66, h * 0.5 + 130, 400, C.uiDanger, "small")
     end
 
     if self.showHelp then
         -- built from the live bindings, so it cannot drift out of date the way
         -- the hand-written list it replaced had
         local rows = input.controlRows(input.flightHelp)
-        local pw = 460
+        local pw = math.min(460, w - 520)
         local ph = #rows * 18 + 60
-        local px, py = w - pw - 60, (h - ph) * 0.5
+        local px, py = w - pw - 40, (h - ph) * 0.5
         ui.panel(px, py, pw, ph, L("CONTROLS"))
         for i, r in ipairs(rows) do
             local ry = py + 34 + (i - 1) * 18

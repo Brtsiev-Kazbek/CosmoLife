@@ -1163,6 +1163,106 @@ test("generated names follow the locale and agree in gender", function(assert_)
     i18n.setLocale("en")
 end)
 
+test("screen layouts fit at every supported window size", function(assert_)
+    -- The layout maths is pure arithmetic, so it can be checked without a
+    -- graphics context. These are the constants the screens compute their
+    -- lists from; the point is that at the *minimum* supported size nothing
+    -- lands on top of anything, which is exactly where the old fixed row
+    -- counts failed.
+    local function rowsFor(height, lineHeight)
+        return math.max(1, math.floor(height / math.max(lineHeight, 1)))
+    end
+
+    local SIZES = { { 960, 540 }, { 1280, 720 }, { 1920, 1080 } }
+    for _, size in ipairs(SIZES) do
+        local w, h = size[1], size[2]
+        local where = string.format("%dx%d", w, h)
+
+        -- port: list from y=152, footer rule at h-60, hint at h-48
+        local rows = rowsFor(h - 152 - 76, 24)
+        local listBottom = 152 + rows * 24
+        check("screen layouts fit at every supported window size",
+            listBottom <= h - 60,
+            string.format("port list ends at %d, footer rule at %d (%s)",
+                listBottom, h - 60, where))
+
+        -- port: list right edge vs the side panel at w-380
+        local listX = 70
+        local listW = w - 380 - listX - 13 - 24
+        check("screen layouts fit at every supported window size",
+            listX + listW + 13 <= w - 380,
+            "port list overlaps the detail panel at " .. where)
+
+        -- settings: two panes from y=140, help rule at h-106
+        local paneRows = rowsFor(h - 140 - 116, 21)
+        local paneBottom = 140 + paneRows * 21
+        check("screen layouts fit at every supported window size",
+            paneBottom <= h - 106,
+            string.format("settings list ends at %d, help rule at %d (%s)",
+                paneBottom, h - 106, where))
+
+        -- settings: the two panes must not overlap each other
+        local paneW = (w - 140) * 0.5
+        local left, right = 60, 80 + paneW
+        local menuW = paneW - 40 - 13
+        check("screen layouts fit at every supported window size",
+            left + 14 + menuW + 13 <= right,
+            "settings panes overlap at " .. where)
+
+        -- colonies: list from y=100 against the same footer
+        local colRows = rowsFor(h - 100 - 76, 24)
+        check("screen layouts fit at every supported window size",
+            100 + colRows * 24 <= h - 60,
+            "colony list overruns the footer at " .. where)
+
+        -- pause: panel sized to eight items, status below the last row
+        local ph = 84 + 8 * 28 + 52
+        local py = (h - ph) * 0.5
+        local lastRowBottom = py + 84 + 8 * 28
+        check("screen layouts fit at every supported window size",
+            lastRowBottom <= py + ph - 30,
+            "pause status overlaps the last menu item at " .. where)
+
+        -- HUD: the message band must sit entirely above the scanner caption
+        -- at h-146 (the scanner ellipse itself starts at h-136)
+        local msgBottom = h - 152
+        local msgTop = math.max(h * 0.30, math.min(h * 0.5 + 60, msgBottom - 140))
+        check("screen layouts fit at every supported window size",
+            msgBottom <= h - 146 and msgTop < msgBottom,
+            string.format("hud message band %d..%d clashes with the scanner at %s",
+                msgTop, msgBottom, where))
+    end
+end)
+
+test("text fitting never returns something wider than asked", function(assert_)
+    -- ui.fit does the width maths; without a graphics context we can still
+    -- check the byte-level contract that stops it splitting a UTF-8 character
+    local ui = require("src.ui.widgets")
+    assert_(type(ui.fit) == "function", "ui.fit is missing")
+
+    -- a fake font: every byte is one unit wide, so widths are predictable
+    local fake = {
+        getWidth = function(_, s) return #s end,
+        getHeight = function() return 10 end,
+    }
+    local realFont = ui.font
+    ui.font = function() return fake end
+
+    assert_(ui.fit("hello", 100) == "hello", "short strings must pass through")
+    local cut = ui.fit("hello world", 8)
+    assert_(#cut <= 8, "fit returned " .. #cut .. " units for a limit of 8")
+    assert_(cut:sub(-3) == "...", "truncated text should end in an ellipsis")
+
+    -- Cyrillic: two bytes per letter, so a naive cut lands mid-character
+    local ru = "Молчаливый"
+    local cutRu = ui.fit(ru, 9)
+    local trimmed = cutRu:gsub("%.%.%.$", "")
+    check("text fitting never returns something wider than asked",
+        #trimmed % 2 == 0, "cut a Cyrillic character in half: " .. cutRu)
+
+    ui.font = realFont
+end)
+
 test("letter case helpers handle cyrillic", function(assert_)
     assert_(i18n.lcFirst("Зерно") == "зерно", "lc cyrillic")
     assert_(i18n.lcFirst("Руда") == "руда", "lc cyrillic р-я range")

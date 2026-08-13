@@ -127,6 +127,8 @@ end
 
 function Game:resize(w, h)
     self.renderer:resize(w, h)
+    -- fonts are sized from the window, so they have to follow it
+    ui.resize()
     self.manager:resize(w, h)
 end
 

@@ -82,6 +82,54 @@ local function drawScanner(cx, cy, rx, ry, ship, contacts, range)
 end
 
 -- ---------------------------------------------------------------------------
+-- Message strip
+-- ---------------------------------------------------------------------------
+
+--- Draws the message log centred on `cx`, filling the band from `top` to
+--- `bottom` and stopping rather than spilling past it.
+--
+-- Two problems this solves. Messages were printed as single lines, and several
+-- of them name a place and two keys -- at 960px those ran off both edges of
+-- the screen, so they are word wrapped now. And the strip was anchored at a
+-- fixed fraction of the height, which at 540px put the last four messages
+-- inside the scanner ellipse; it is now bounded by what sits below it, and
+-- drops the oldest messages when there is not enough room.
+local function drawMessages(cx, top, bottom, screenW)
+    local f = ui.font("small")
+    local maxW = math.min(screenW - 120, 520)
+    local lineH = f:getHeight() + 2
+
+    -- newest first, so when the band is short the recent messages survive
+    local heights, total = {}, 0
+    for i, m in ipairs(hud.messages) do
+        local _, lines = f:getWrap(m.text, maxW)
+        heights[i] = math.max(#lines, 1) * lineH
+    end
+    local last = 0
+    for i = 1, #hud.messages do
+        if total + heights[i] > (bottom - top) then break end
+        total = total + heights[i]
+        last = i
+    end
+    if last == 0 then return end
+
+    love.graphics.setFont(f)
+    local y = top
+    for i = 1, last do
+        local m = hud.messages[i]
+        local alpha = util.clamp(m.life / 1.5, 0, 1)
+        local col = C.uiText
+        if m.kind == "good" then col = C.uiPrimary
+        elseif m.kind == "alert" then col = C.uiDanger
+        elseif m.kind == "warn" then col = C.uiWarn end
+        love.graphics.setColor(col[1], col[2], col[3], alpha)
+        love.graphics.printf(m.text, floor(cx - maxW * 0.5), floor(y), maxW, "center")
+        y = y + heights[i]
+    end
+    love.graphics.setColor(1, 1, 1, 1)
+end
+
+-- ---------------------------------------------------------------------------
 -- World-space markers
 -- ---------------------------------------------------------------------------
 
@@ -303,41 +351,54 @@ function hud.draw(ctx, w, h)
     ui.text(L("SCANNER"), cx - 132, h - 146, C.uiDim, "small")
 
     -- ---- landing gear / status flags ------------------------------------
+    --
+    -- Measured rather than assumed: the old version centred on a per-item
+    -- width of 46 while stepping by 92, so the row sat 23px per flag to the
+    -- right of centre and ran into the right-hand gauge bracket.
     local flags = {}
     if ctx.gearDown then flags[#flags + 1] = { L("GEAR"), C.uiWarn } end
     if ctx.boosting then flags[#flags + 1] = { L("BOOST"), C.cyan } end
     if ctx.massLocked then flags[#flags + 1] = { L("MASS LOCK"), C.uiWarn } end
     if ctx.overheating then flags[#flags + 1] = { L("HEAT"), C.uiDanger } end
     if player:totalBounty() > 0 then flags[#flags + 1] = { L("WANTED"), C.uiDanger } end
-    for i, f in ipairs(flags) do
-        local fx = cx - (#flags * 46) * 0.5 + (i - 1) * 92
-        if not (f[2] == C.uiDanger) or ui.blink(0.4) then
-            ui.textCenter(f[1], fx + 46, h - 168, f[2], "small")
+    if ctx.autopilot then flags[#flags + 1] = { L("AUTOPILOT"), C.uiPrimary } end
+
+    if #flags > 0 then
+        local font = ui.font("small")
+        local gap = 18
+        local total = -gap
+        for _, f in ipairs(flags) do total = total + font:getWidth(f[1]) + gap end
+        local fx = cx - total * 0.5
+        for _, f in ipairs(flags) do
+            local fw = font:getWidth(f[1])
+            if not (f[2] == C.uiDanger) or ui.blink(0.4) then
+                ui.text(f[1], fx, h - 168, f[2], "small")
+            end
+            fx = fx + fw + gap
         end
     end
 
     -- ---- target panel ---------------------------------------------------
-    if ctx.autopilot then
-        flags[#flags + 1] = { L("AUTOPILOT"), C.uiPrimary }
-    end
 
     if ctx.target then
         local t = ctx.target
         local px, py = 26, 26
-        ui.panel(px, py, 250, t.detail and 118 or 78, "TARGET", accent)
-        ui.text(t.label or L("Unknown"), px + 14, py + 12, C.uiText, "small")
+        local pw = 250
+        local textW = pw - 28
+        ui.panel(px, py, pw, t.detail and 118 or 78, L("TARGET"), accent)
+        ui.textFit(t.label or L("Unknown"), px + 14, py + 12, textW, C.uiText, "small")
         ui.text(util.distance(t.distance or 0), px + 14, py + 30, C.uiDim, "small")
         if t.hull then
             ui.text(L("HULL"), px + 14, py + 48, C.uiDim, "small")
-            ui.bar(px + 60, py + 50, 170, 7, t.hull, t.hostile and C.uiDanger or C.uiPrimary)
+            ui.bar(px + 60, py + 50, pw - 80, 7, t.hull, t.hostile and C.uiDanger or C.uiPrimary)
         end
         if t.shield then
-            ui.text("SHLD", px + 14, py + 62, C.uiDim, "small")
-            ui.bar(px + 60, py + 64, 170, 7, t.shield, C.cyan)
+            ui.text(L("SHLD"), px + 14, py + 62, C.uiDim, "small")
+            ui.bar(px + 60, py + 64, pw - 80, 7, t.shield, C.cyan)
         end
         if t.detail then
-            ui.text(t.detail, px + 14, py + 82, C.uiDim, "small")
-            if t.detail2 then ui.text(t.detail2, px + 14, py + 96, C.uiDim, "small") end
+            ui.textFit(t.detail, px + 14, py + 82, textW, C.uiDim, "small")
+            if t.detail2 then ui.textFit(t.detail2, px + 14, py + 96, textW, C.uiDim, "small") end
         end
     end
 
@@ -345,31 +406,33 @@ function hud.draw(ctx, w, h)
     local sys = ctx.world.stub
     if sys then
         local faction = factions.get(sys.factionId)
-        local bx = w - 300
-        ui.brackets(bx, 22, 274, 62, 10, accent, 0.4)
-        ui.textRight(sys.name, w - 34, 28, C.uiText, "normal")
-        ui.textRight(L(faction.name), w - 34, 48,
+        local bw = 274
+        local bx = w - 34 - bw
+        local textW = bw - 20
+        -- the conflict line used to print at y=88 inside a frame that ended at
+        -- 84, so the frame grows when it is showing
+        local conflict = sys.conflict and sys.conflict > 0.2
+        ui.brackets(bx, 22, bw, conflict and 84 or 62, 10, accent, 0.4)
+        ui.textRightFit(sys.name, w - 34, 28, textW, C.uiText, "normal")
+        ui.textRightFit(L(faction.name), w - 34, 48, textW,
             { faction.color[1], faction.color[2], faction.color[3], 1 }, "small")
-        ui.textRight(ctx.world:dateString() .. "   " .. L(sys.economyName), w - 34, 64, C.uiDim, "small")
-        if sys.conflict and sys.conflict > 0.2 and ui.blink(0.7) then
-            ui.textRight(L("CONFLICT ZONE"), w - 34, 88, C.uiDanger, "small")
+        ui.textRightFit(ctx.world:dateString() .. "   " .. L(sys.economyName),
+            w - 34, 64, textW, C.uiDim, "small")
+        if conflict and ui.blink(0.7) then
+            ui.textRightFit(L("CONFLICT ZONE"), w - 34, 82, textW, C.uiDanger, "small")
         end
     end
 
     -- ---- messages -------------------------------------------------------
-    local my = h * 0.5 + 60
-    for i, m in ipairs(hud.messages) do
-        local alpha = util.clamp(m.life / 1.5, 0, 1)
-        local col = C.uiText
-        if m.kind == "good" then col = C.uiPrimary
-        elseif m.kind == "alert" then col = C.uiDanger
-        elseif m.kind == "warn" then col = C.uiWarn end
-        love.graphics.setColor(col[1], col[2], col[3], alpha)
-        love.graphics.setFont(ui.font("small"))
-        local f = ui.font("small")
-        love.graphics.print(m.text, floor(cx - f:getWidth(m.text) * 0.5), floor(my + (i - 1) * 17))
-    end
-    love.graphics.setColor(1, 1, 1, 1)
+    --
+    -- The strip is anchored above the scanner rather than at a fixed fraction
+    -- of the height: at 540px the old position put the last four messages
+    -- inside the scanner ellipse.
+    -- the band runs from just under the reticle to just above the scanner
+    -- caption at h-146
+    local msgBottom = h - 152
+    local msgTop = math.max(h * 0.30, math.min(h * 0.5 + 60, msgBottom - 140))
+    drawMessages(cx, msgTop, msgBottom, w)
 
     -- ---- prompts --------------------------------------------------------
     if ctx.prompt then
@@ -389,10 +452,14 @@ function hud.drawWalking(ctx, w, h)
     ui.setColor(C.uiPrimary, 0.7)
     love.graphics.circle("line", cx, cy, 3)
 
-    ui.brackets(20, h - 76, 230, 56, 10, C.uiPrimary, 0.45)
-    ui.text(ctx.locationName or "", 32, h - 68, C.uiText, "small")
-    ui.text(ctx.subtitle or "", 32, h - 50, C.uiDim, "small")
-    ui.textRight(util.money(ctx.player.credits) .. " " .. L("cr"), 240, h - 32, C.amber, "small")
+    -- 230 wide from x=20; every string inside is fitted to it, and the
+    -- credits line sits on its own row instead of overlapping the subtitle
+    local bw = 236
+    ui.brackets(20, h - 84, bw, 72, 10, C.uiPrimary, 0.45)
+    ui.textFit(ctx.locationName or "", 32, h - 76, bw - 24, C.uiText, "small")
+    ui.textFit(ctx.subtitle or "", 32, h - 58, bw - 24, C.uiDim, "small")
+    ui.textRightFit(util.money(ctx.player.credits) .. " " .. L("cr"),
+        20 + bw - 12, h - 38, bw - 24, C.amber, "small")
 
     if ctx.prompt then
         ui.setColor(C.uiPanel, 1)
@@ -404,15 +471,7 @@ function hud.drawWalking(ctx, w, h)
         ui.textCenter(ctx.prompt, cx, cy + 66, C.uiPrimary, "normal")
     end
 
-    local my = h * 0.35
-    for i, m in ipairs(hud.messages) do
-        local alpha = util.clamp(m.life / 1.5, 0, 1)
-        love.graphics.setColor(C.uiText[1], C.uiText[2], C.uiText[3], alpha)
-        love.graphics.setFont(ui.font("small"))
-        local f = ui.font("small")
-        love.graphics.print(m.text, floor(cx - f:getWidth(m.text) * 0.5), floor(my + (i - 1) * 17))
-    end
-    love.graphics.setColor(1, 1, 1, 1)
+    drawMessages(cx, h * 0.3, h - 110, w)
 end
 
 return hud

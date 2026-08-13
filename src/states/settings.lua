@@ -19,6 +19,18 @@ local Settings = class("SettingsState")
 local C = palette.colors
 local L = i18n.format
 
+-- Pane geometry, shared by the builders and the draw code. The options list
+-- is 28 rows and the bindings list 43, so both genuinely scroll; sizing them
+-- from the window is what stops them running into the help pane below.
+local PANE_TOP = 140
+local PANE_LINE = 21
+local HELP_SPACE = 116          -- rule, help paragraph and the status row
+
+local function paneRows()
+    local h = love.graphics and love.graphics.getHeight() or 720
+    return ui.rowsFor(h - PANE_TOP - HELP_SPACE, PANE_LINE)
+end
+
 function Settings:init() self.drawUnderlying = true end
 
 function Settings:enter(caller)
@@ -56,7 +68,7 @@ function Settings:buildOptions()
         end,
     }
     local cursor = self.optionMenu and self.optionMenu.cursor or 2
-    self.optionMenu = ui.menu(items, { visible = 17, cursor = cursor })
+    self.optionMenu = ui.menu(items, { visible = paneRows(), cursor = cursor })
 end
 
 function Settings:buildBindings()
@@ -72,7 +84,7 @@ function Settings:buildBindings()
         end
     end
     local cursor = self.bindMenu and self.bindMenu.cursor or 2
-    self.bindMenu = ui.menu(items, { visible = 17, cursor = cursor })
+    self.bindMenu = ui.menu(items, { visible = paneRows(), cursor = cursor })
 end
 
 function Settings:menu()
@@ -172,8 +184,14 @@ function Settings:draw()
 
     self.optionMenu.accent = self.pane == 1 and C.uiPrimary or C.uiDim
     self.bindMenu.accent = self.pane == 2 and C.uiPrimary or C.uiDim
-    self.optionMenu:draw(left + 14, 140, paneW - 60, 21, "small")
-    self.bindMenu:draw(right + 14, 140, paneW - 60, 21, "small")
+    local rows = paneRows()
+    self.optionMenu:setVisible(rows)
+    self.bindMenu:setVisible(rows)
+    -- the cursor arrow hangs 14px left and the scrollbar 13px right of the
+    -- width passed here, so the pane's usable width allows for both
+    local menuW = paneW - 40 - ui.MENU_BLEED_RIGHT
+    self.optionMenu:draw(left + ui.MENU_BLEED_LEFT, PANE_TOP, menuW, PANE_LINE, "small")
+    self.bindMenu:draw(right + ui.MENU_BLEED_LEFT, PANE_TOP, menuW, PANE_LINE, "small")
 
     -- help text for the highlighted option
     local item = self:menu():current()

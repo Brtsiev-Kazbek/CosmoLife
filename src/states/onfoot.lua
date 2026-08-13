@@ -266,10 +266,11 @@ function OnFoot:draw(background)
     }, w, h)
 
     if settings.get("showHints") and not self.game.showHelp then
+        local top = h - 100
         hints.draw(hints.onFoot({
             canInteract = self.action and self.action.kind == "enter",
             canBoard = self.action and self.action.kind == "board",
-        }), 26, 26)
+        }), 26, top, { anchor = "bottom", maxLines = hints.rowsFor(top - 40) })
     end
 
     if self.game.showHelp then

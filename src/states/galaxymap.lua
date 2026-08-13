@@ -171,6 +171,7 @@ function Map:draw()
     end
 
     -- systems
+    local labels = {}
     for _, s in ipairs(self.systems) do
         local x, y = self:screenOf(s, w, h)
         if x > -20 and x < w + 20 and y > -20 and y < h + 20 then
@@ -195,13 +196,22 @@ function Map:draw()
                 ui.setColor(C.uiWarn, 1)
                 love.graphics.rectangle("line", x - r - 7, y - dy * self.scale - r - 7, (r + 7) * 2, (r + 7) * 2)
             end
+            -- Labels are collected, not drawn here. Printing one per system
+            -- turned the chart into an unreadable wall of text the moment the
+            -- view held more than a few dozen stars.
             if self.scale > 2.4 then
-                love.graphics.setColor(col[1], col[2], col[3], visited and 0.9 or 0.4)
-                love.graphics.setFont(ui.font("small"))
-                love.graphics.print(s.name, floor(x + r + 5), floor(y - dy * self.scale - 7))
+                labels[#labels + 1] = {
+                    text = s.name, x = floor(x + r + 5), y = floor(y - dy * self.scale - 7),
+                    col = col, alpha = visited and 0.9 or 0.4,
+                    rank = (s.id == here.id and 1e9 or 0)
+                        + (self.selected and s.id == self.selected.id and 1e9 or 0)
+                        + (visited and 1e6 or 0) + (s.population or 0),
+                }
             end
         end
     end
+
+    self:drawLabels(labels, w, h)
 
     -- route line
     if self.selected and self.selected.id ~= here.id then
@@ -213,29 +223,91 @@ function Map:draw()
         love.graphics.line(hx, hy - (here.y - self.cy) * self.scale, sx, sy - (self.selected.y - self.cy) * self.scale)
     end
 
+    -- The chart furniture sits over the star field, so it gets a wash behind
+    -- it; without one the hint line is read through a few hundred dots. Drawn
+    -- before the info panel so it does not paint over it.
+    love.graphics.setColor(0.015, 0.02, 0.03, 0.82)
+    love.graphics.rectangle("fill", 0, 0, w, 84)
+    love.graphics.rectangle("fill", 0, h - 68, w, 68)
+    love.graphics.setColor(1, 1, 1, 1)
+
     -- info panel
     self:drawInfo(w - 372, 40, 332)
 
-    -- header + footer
     ui.text(L("GALACTIC CHART"), 40, 30, C.uiPrimary, "large")
     ui.text(L("centre {x}, {y}, {z} ly     scale {scale} px/ly", {
         x = string.format("%.0f", self.cx), y = string.format("%.0f", self.cy),
         z = string.format("%.0f", self.cz), scale = string.format("%.1f", self.scale),
     }), 40, 62, C.uiDim, "small")
     ui.rule(40, h - 60, w - 80, C.uiLine, 0.4)
-    ui.text(L("WASD pan   PGUP/PGDN vertical   +/- zoom   ENTER jump   TAB close"),
-        40, h - 48, C.uiDim, "small")
-    ui.textRight(L("FUEL") .. string.format(" %.1f / %.1f t", self.player.fuel, self.player.stats.fuel),
-        w - 40, h - 48, C.amber, "small")
+    local fuel = L("FUEL") .. " " .. L("{a} / {b} t", {
+        a = string.format("%.1f", self.player.fuel),
+        b = string.format("%.1f", self.player.stats.fuel) })
+    local fuelW = ui.font("small"):getWidth(fuel)
+    ui.textFit(L("WASD pan   PGUP/PGDN vertical   +/- zoom   ENTER jump   TAB close"),
+        40, h - 48, w - 100 - fuelW, C.uiDim, "small")
+    ui.textRight(fuel, w - 40, h - 48, C.amber, "small")
+end
+
+--- Draws system labels, thinned so the chart stays readable.
+--
+-- Three rules, in order: never inside the header, footer or info panel;
+-- never overlapping a label already placed; and never more than a fixed
+-- budget, spending it on the systems that matter (current, selected, visited,
+-- then populous).
+local LABEL_BUDGET = 70
+
+function Map:drawLabels(labels, w, h)
+    if #labels == 0 then return end
+    table.sort(labels, function(a, b) return a.rank > b.rank end)
+
+    local font = ui.font("small")
+    local lineH = font:getHeight()
+    -- bands the chart furniture owns
+    local headerH, footerY = 84, h - 68
+    local panelX, panelY, panelH = w - 372, 40, 340
+
+    local placed = {}
+    local drawn = 0
+    love.graphics.setFont(font)
+    for _, l in ipairs(labels) do
+        if drawn >= LABEL_BUDGET then break end
+        local lw = font:getWidth(l.text)
+        local x1, y1, x2, y2 = l.x, l.y, l.x + lw, l.y + lineH
+        local blocked = y1 < headerH or y2 > footerY
+            or (x2 > panelX and y1 < panelY + panelH and y2 > panelY)
+            or x2 > w or x1 < 0
+        if not blocked then
+            for _, p in ipairs(placed) do
+                if x1 < p[3] and x2 > p[1] and y1 < p[4] and y2 > p[2] then
+                    blocked = true
+                    break
+                end
+            end
+        end
+        if not blocked then
+            placed[#placed + 1] = { x1 - 4, y1 - 2, x2 + 4, y2 + 2 }
+            love.graphics.setColor(l.col[1], l.col[2], l.col[3], l.alpha)
+            love.graphics.print(l.text, x1, y1)
+            drawn = drawn + 1
+        end
+    end
+    love.graphics.setColor(1, 1, 1, 1)
 end
 
 function Map:drawInfo(x, y, w)
     local s = self.selected
     if not s then return end
-    local h = 330
+    -- height follows the content: the war list is variable, and a fixed 330
+    -- meant three concurrent wars spilled out of the bottom of the panel
+    local wars = 0
+    for _, war in ipairs(self.world.diplomacy:activeWars()) do
+        if war.a == s.factionId or war.b == s.factionId then wars = wars + 1 end
+    end
+    local h = 300 + wars * 18
     ui.panel(x, y, w, h, L("SYSTEM"))
     local px, py = x + 18, y + 18
-    ui.text(s.name, px, py, C.uiPrimary, "large")
+    ui.textFit(s.name, px, py, w - 36, C.uiPrimary, "large")
     py = py + 32
 
     local faction = factions.get(s.factionId)
@@ -245,8 +317,8 @@ function Map:drawInfo(x, y, w)
     local cost = self.world:fuelCost(dist)
 
     local rows = {
-        { L("Distance"), string.format("%.2f ly", dist) },
-        { L("Fuel needed"), string.format("%.1f t", cost) },
+        { L("Distance"), L("{n} ly", { n = string.format("%.2f", dist) }) },
+        { L("Fuel needed"), L("{n} t", { n = string.format("%.1f", cost) }) },
         { L("Allegiance"), L(faction.name) },
         { L("Government"), L(s.governmentName) },
         { L("Economy"), L(s.economyName) },
@@ -256,9 +328,12 @@ function Map:drawInfo(x, y, w)
         { L("Star"), L("class {c}", { c = s.starClass }) },
         { L("Frontier"), string.format("%.0f%%", (s.frontier or 0) * 100) },
     }
+    -- label and value share 296px; the value is measured first so a long
+    -- faction or economy name shortens rather than collides
     for _, r in ipairs(rows) do
-        ui.text(r[1], px, py, C.uiDim, "small")
-        ui.textRight(r[2], x + w - 18, py, C.uiText, "small")
+        local vw = math.min(ui.font("small"):getWidth(r[2]), (w - 36) * 0.6)
+        ui.textRightFit(r[2], x + w - 18, py, vw, C.uiText, "small")
+        ui.textFit(r[1], px, py, w - 36 - vw - 10, C.uiDim, "small")
         py = py + 18
     end
 
@@ -287,7 +362,7 @@ function Map:drawInfo(x, y, w)
     if self.player.knownSystems[s.id] then
         ui.text(L("Visited"), px, py, C.uiPrimary, "small")
     else
-        ui.text(L("Unvisited - long range survey"), px, py, C.uiDim, "small")
+        ui.paragraph(L("Unvisited - long range survey"), px, py, w - 36, C.uiDim, "small")
     end
 end
 

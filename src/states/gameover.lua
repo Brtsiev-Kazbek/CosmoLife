@@ -96,7 +96,7 @@ function GameOver:draw()
     if fade < 0.4 then return end
 
     ui.textCenter(L("SHIP DESTROYED"), w * 0.5, h * 0.32, C.uiDanger, "huge")
-    ui.textCenter(self.reason, w * 0.5, h * 0.32 + 52, C.uiDim, "normal")
+    ui.paragraph(self.reason, w * 0.5 - 300, h * 0.32 + 52, 600, C.uiDim, "normal")
 
     local r = self.player.record
     ui.textCenter(L("{j} {j:jump}  -  {k} {k:kill}  -  {c} {c:contract}  -  {cash} cr", {
@@ -104,7 +104,10 @@ function GameOver:draw()
     }), w * 0.5, h * 0.32 + 82, C.uiText, "small")
 
     if self.timer > 1.2 and self.menu then
-        self.menu:draw(w * 0.5 - 260, h * 0.55, 520, 30, "normal")
+        -- the longest option is a full sentence, and Russian is longer still,
+        -- so the menu takes the width it can rather than a fixed 520
+        local mw = math.min(680, w - 160)
+        self.menu:draw((w - mw) * 0.5, h * 0.55, mw, 30, "normal")
     end
 end
 

@@ -60,7 +60,7 @@ function Pause:rebuild()
         { label = L("Quit to desktop"), action = function() love.event.quit() end },
     }
     local cursor = self.menu and self.menu.cursor or 1
-    self.menu = ui.menu(items, { visible = 10, cursor = cursor })
+    self.menu = ui.menu(items, { visible = #items, cursor = cursor })
 end
 
 function Pause:keypressed(key)
@@ -78,7 +78,12 @@ function Pause:draw()
     love.graphics.rectangle("fill", 0, 0, w, h)
     love.graphics.setColor(1, 1, 1, 1)
 
-    local pw, ph = 380, 340
+    -- sized to the items rather than a constant: eight rows of 28 from py+84
+    -- reached py+308, and the status line was printed at py+306, on top of
+    -- the last one
+    local rows = self.menu and #self.menu.items or 8
+    local pw = 380
+    local ph = 84 + rows * 28 + 52
     local px, py = (w - pw) * 0.5, (h - ph) * 0.5
     ui.panel(px, py, pw, ph, L("PAUSED"))
     ui.text("COSMOLIFE", px + 28, py + 22, C.uiPrimary, "large")
@@ -87,7 +92,7 @@ function Pause:draw()
     end
     if self.menu then self.menu:draw(px + 44, py + 84, pw - 88, 28, "normal") end
     if self.status then
-        ui.textCenter(self.status, px + pw * 0.5, py + ph - 34, C.uiPrimary, "small")
+        ui.textCenter(self.status, px + pw * 0.5, py + ph - 30, C.uiPrimary, "small")
     end
 end
 

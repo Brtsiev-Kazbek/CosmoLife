@@ -25,6 +25,18 @@ local C = palette.colors
 local L = i18n.format
 local floor, min, max = math.floor, math.min, math.max
 
+-- Layout constants shared by the menu builders and the draw code, so the
+-- number of visible rows is derived from the same geometry that draws them
+-- rather than being a hand-tuned constant that overran the footer at 540px.
+local LIST_TOP = 152
+local LIST_LINE = 24
+local FOOTER = 76        -- rule, hint line and status line below the list
+
+local function listRows()
+    local h = love.graphics and love.graphics.getHeight() or 720
+    return ui.rowsFor(h - LIST_TOP - FOOTER, LIST_LINE)
+end
+
 local TAB_ORDER = { "summary", "market", "blackMarket", "missions", "outfitting", "shipyard", "colony" }
 -- Tab captions are looked up at draw time rather than stored, so switching
 -- language re-labels the screen without rebuilding the state.
@@ -194,7 +206,7 @@ function Port:buildSummaryMenu()
         action = function() self:launch() end,
     }
 
-    self.menu = ui.menu(items, { visible = 14, onSelect = function() end })
+    self.menu = ui.menu(items, { visible = listRows(), onSelect = function() end })
 end
 
 function Port:buildMarketMenu(black)
@@ -223,7 +235,7 @@ function Port:buildMarketMenu(black)
             disabled = true,
         }
     end
-    self.menu = ui.menu(items, { visible = 15 })
+    self.menu = ui.menu(items, { visible = listRows() })
 end
 
 function Port:buildMissionMenu()
@@ -234,14 +246,14 @@ function Port:buildMissionMenu()
         local ok = missionsMod.canAccept(m, self.player)
         items[#items + 1] = {
             label = missionsMod.title(m),
-            value = util.money(m.reward) .. " cr",
+            value = util.money(m.reward) .. " " .. L("cr"),
             mission = m,
             color = m.illegal and C.magenta or (m.warZone and C.uiWarn or nil),
             valueColor = ok and C.amber or C.uiDim,
         }
     end
     if #items == 0 then items[1] = { label = L("No contracts posted."), disabled = true } end
-    self.menu = ui.menu(items, { visible = 12 })
+    self.menu = ui.menu(items, { visible = listRows() })
 end
 
 function Port:buildOutfitMenu()
@@ -269,7 +281,7 @@ function Port:buildOutfitMenu()
             valueColor = self.player.credits >= e.price and C.amber or C.uiDim,
         }
     end
-    self.menu = ui.menu(items, { visible = 15 })
+    self.menu = ui.menu(items, { visible = listRows() })
 end
 
 function Port:buildShipyardMenu()
@@ -291,7 +303,7 @@ function Port:buildShipyardMenu()
             valueColor = (self.player.credits + tradeIn) >= def.stats.price and C.amber or C.uiDim,
         }
     end
-    self.menu = ui.menu(items, { visible = 12 })
+    self.menu = ui.menu(items, { visible = listRows() })
 end
 
 function Port:buildColonyMenu()
@@ -337,7 +349,7 @@ function Port:buildColonyMenu()
             }
         end
     end
-    self.menu = ui.menu(items, { visible = 12 })
+    self.menu = ui.menu(items, { visible = listRows() })
 end
 
 -- ---------------------------------------------------------------------------
@@ -549,20 +561,28 @@ function Port:draw()
 
     -- body
     local tab = self:currentTab()
-    local listX, listY = 70, 152
-    local listW = w - 480
+    local listX, listY = 70, LIST_TOP
+    -- the side panel starts at w-380 and the menu's own furniture adds 13px on
+    -- the right, so leave room for both
+    local listW = w - 380 - listX - ui.MENU_BLEED_RIGHT - 24
 
     if tab == "market" or tab == "blackMarket" then
         ui.text(L("COMMODITY"), listX, listY - 20, C.uiDim, "small")
+        -- right-aligned against the same edge the values use, so the header
+        -- lines up with them instead of relying on space padding
         ui.textRight(L("BUY / SELL   STOCK   HOLD"), listX + listW, listY - 20, C.uiDim, "small")
     end
 
-    if self.menu then self.menu:draw(listX, listY, listW, 24, "small") end
+    if self.menu then
+        self.menu:setVisible(listRows())
+        self.menu:draw(listX, listY, listW, LIST_LINE, "small")
+    end
 
     -- side panel
-    self:drawSidePanel(w - 380, 152, 320, h - 240)
+    self:drawSidePanel(w - 380, LIST_TOP, 320, h - LIST_TOP - FOOTER)
 
-    -- footer
+    -- footer: the status line sits between the list and the rule, so the list
+    -- height above already reserves room for it
     local leave = self.docked and L("ESC launch") or L("ESC leave")
     local hint
     if tab == "market" or tab == "blackMarket" then
@@ -583,7 +603,7 @@ function Port:draw()
 
     if self.status then
         local col = self.status.bad and C.uiDanger or C.uiPrimary
-        ui.textCenter(self.status.text, w * 0.5, h - 84, col, "normal")
+        ui.textCenter(self.status.text, w * 0.5, h - 82, col, "normal")
     end
 end
 
@@ -591,6 +611,14 @@ function Port:drawSidePanel(x, y, w, h)
     local tab = self:currentTab()
     local item = self.menu and self.menu:current()
     ui.panel(x, y, w, h, L("DETAIL"))
+    -- the hold, a colony's export list and a market event blurb are all
+    -- unbounded; without this they paint over the footer and the list
+    ui.clip(x + 1, y + 1, w - 2, h - 2, function()
+        self:drawSidePanelContent(x, y, w, h, tab, item)
+    end)
+end
+
+function Port:drawSidePanelContent(x, y, w, h, tab, item)
     local px, py = x + 18, y + 20
 
     if (tab == "market" or tab == "blackMarket") and item and item.commodity then
@@ -602,14 +630,14 @@ function Port:drawSidePanel(x, y, w, h)
         local buy = self.market:buyPrice(c.id)
         local sell = self.market:sellPrice(c.id)
         ui.text(L("Galactic average"), px, py, C.uiDim, "small")
-        ui.textRight(util.money(c.base) .. " cr", x + w - 18, py, C.uiText, "small")
+        ui.textRight(util.money(c.base) .. " " .. L("cr"), x + w - 18, py, C.uiText, "small")
         py = py + 18
         ui.text(L("Buy here"), px, py, C.uiDim, "small")
-        ui.textRight(util.money(buy) .. " cr", x + w - 18, py,
+        ui.textRight(util.money(buy) .. " " .. L("cr"), x + w - 18, py,
             buy < c.base and C.uiPrimary or C.uiDanger, "small")
         py = py + 18
         ui.text(L("Sell here"), px, py, C.uiDim, "small")
-        ui.textRight(util.money(sell) .. " cr", x + w - 18, py,
+        ui.textRight(util.money(sell) .. " " .. L("cr"), x + w - 18, py,
             sell > c.base and C.uiPrimary or C.uiDanger, "small")
         py = py + 24
         local ev = self.market.events[c.id]

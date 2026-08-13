@@ -178,7 +178,21 @@ end)
 
 step(185, "open a service terminal", function(game)
     local room = game.manager:current()
-    if selftest.skippedInterior then return end
+    -- If the landing site had no settlement the interior steps were skipped,
+    -- which used to mean the port screen -- market, contracts, outfitting,
+    -- shipyard -- was never drawn at all while three steps still reported ok.
+    -- Dock at the system's own port instead so the screen is always exercised.
+    if selftest.skippedInterior then
+        local systemGen = require("src.procgen.system")
+        local Port = require("src.states.port")
+        local place = systemGen.ports(game.world.system)[1]
+        assert(place, "system has nowhere to dock")
+        game.manager:push(Port.new(), place, { docked = false })
+        local port = game.manager:current()
+        assert(port.menu, "port screen has no menu")
+        selftest.port = port
+        return
+    end
     if not room.room then return end
     local t = room.room.terminals[1]
     assert(t, "interior has no terminals")
@@ -193,17 +207,23 @@ end)
 
 step(200, "browse every port tab", function(game)
     local port = selftest.port
-    if not port then return end
+    assert(port, "the port screen never opened")
     for i = 1, #port.tabs do
         port.tab = i
         port:rebuild()
         port:draw()
     end
+    -- leave it on the market tab so the screenshot at 205 catches the busiest
+    -- layout: a scrolling list, a detail panel and a footer
+    for i, t in ipairs(port.tabs) do
+        if t == "market" then port.tab = i end
+    end
+    port:rebuild()
 end)
 
 step(215, "buy and sell a commodity", function(game)
     local port = selftest.port
-    if not port then return end
+    assert(port, "the port screen never opened")
     for i, t in ipairs(port.tabs) do
         if t == "market" then port.tab = i end
     end

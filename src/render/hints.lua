@@ -75,36 +75,54 @@ function hints.onFoot(ctx)
     return list
 end
 
---- Draws a hint list in the bottom-left corner, above the gauges.
-function hints.draw(list, x, y, maxLines)
+--- Draws a hint list.
+--
+-- `x, y` is the top-left of the panel unless `opts.anchor` is "bottom", in
+-- which case `y` is its *bottom* edge -- which is what a caller pinning the
+-- box above the gauges actually knows.
+--
+-- Both columns are measured. The label column used to be a fixed 108px for
+-- text that was never measured, so a longer label ("Автопилот к цели") simply
+-- spilled past the background it was drawn on.
+function hints.draw(list, x, y, opts)
     if not list or #list == 0 then return end
+    opts = opts or {}
     local font = ui.font("small")
     local lineH = font:getHeight() + 3
-    maxLines = maxLines or #list
 
-    -- widest key column, so labels line up
-    local keyW = 0
-    for i = 1, math.min(#list, maxLines) do
-        keyW = math.max(keyW, font:getWidth(list[i].keys))
-    end
-
+    local maxLines = opts.maxLines or #list
     local n = math.min(#list, maxLines)
     local h = n * lineH + 10
-    local w = keyW + 14 + 108
+
+    local keyW, labelW = 0, 0
+    for i = 1, n do
+        keyW = math.max(keyW, font:getWidth(list[i].keys))
+        labelW = math.max(labelW, font:getWidth(list[i].label))
+    end
+    local w = keyW + 12 + labelW + 12
+
+    local top = (opts.anchor == "bottom") and (y - h) or y
 
     love.graphics.setColor(0, 0, 0, 0.42)
-    love.graphics.rectangle("fill", x - 6, y - 5, w, h)
+    love.graphics.rectangle("fill", x - 6, top - 5, w, h)
     ui.setColor(C.uiLine, 0.25)
     love.graphics.setLineWidth(1)
-    love.graphics.line(x - 6, y - 5, x - 6, y - 5 + h)
+    love.graphics.line(x - 6, top - 5, x - 6, top - 5 + h)
 
     for i = 1, n do
         local hint = list[i]
-        local yy = y + (i - 1) * lineH
+        local yy = top + (i - 1) * lineH
         ui.text(hint.keys, x, yy, hint.highlight and C.uiWarn or C.uiPrimary, "small")
         ui.text(hint.label, x + keyW + 12, yy, hint.highlight and C.uiText or C.uiDim, "small")
     end
     love.graphics.setColor(1, 1, 1, 1)
+    return w, h
+end
+
+--- How many hint rows fit in `height`.
+function hints.rowsFor(height)
+    local lineH = ui.font("small"):getHeight() + 3
+    return math.max(1, math.floor((height - 10) / lineH))
 end
 
 return hints

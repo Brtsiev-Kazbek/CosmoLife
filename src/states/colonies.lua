@@ -19,6 +19,15 @@ local Colonies = class("ColoniesState")
 
 local C = palette.colors
 local L = i18n.format
+
+local LIST_TOP = 100
+local LIST_LINE = 24
+local FOOTER = 76
+
+local function listRows()
+    local h = love.graphics and love.graphics.getHeight() or 720
+    return ui.rowsFor(h - LIST_TOP - FOOTER, LIST_LINE)
+end
 local floor = math.floor
 
 function Colonies:init() self.drawUnderlying = false end
@@ -79,7 +88,7 @@ function Colonies:rebuild()
     if #self.player.colonies == 0 then
         items[#items + 1] = { label = L("No colonies yet."), disabled = true, color = C.uiDim }
     end
-    self.menu = ui.menu(items, { visible = 14 })
+    self.menu = ui.menu(items, { visible = listRows() })
 end
 
 function Colonies:found()
@@ -127,13 +136,20 @@ function Colonies:draw()
     ui.textRight(self.world:dateString(), w - 40, 34, C.uiDim, "small")
     ui.rule(40, 70, w - 80, C.uiLine, 0.4)
 
-    if self.menu then self.menu:draw(70, 100, w - 480, 24, "small") end
+    if self.menu then
+        self.menu:setVisible(listRows())
+        self.menu:draw(70, LIST_TOP, w - 380 - 70 - ui.MENU_BLEED_RIGHT - 24, LIST_LINE, "small")
+    end
 
     -- detail panel
-    local x, y, pw = w - 380, 100, 320
-    ui.panel(x, y, pw, h - 190, L("DETAIL"))
-    local px, py = x + 18, y + 18
+    local x, y, pw = w - 380, LIST_TOP, 320
+    local ph = h - LIST_TOP - FOOTER
+    ui.panel(x, y, pw, ph, L("DETAIL"))
     local item = self.menu and self.menu:current()
+    -- a colony's history and stockpile grow without bound; clipped, they stop
+    -- painting over the footer
+    ui.clip(x + 1, y + 1, pw - 2, ph - 2, function()
+    local px, py = x + 18, y + 18
 
     if item and item.colony then
         local c = item.colony
@@ -204,6 +220,8 @@ function Colonies:draw()
             py = py + 16
         end
     end
+
+    end)
 
     ui.rule(40, h - 60, w - 80, C.uiLine, 0.4)
     ui.text(L("LEFT/RIGHT specialisation   ENTER select   {key} or ESC to close",

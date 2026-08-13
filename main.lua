@@ -22,8 +22,18 @@ function love.load(args)
     game.manager:push(Menu.new())
 
     -- `love . --new` skips the title screen, which is handy while developing;
-    -- `love . --selftest` drives the scripted smoke test in tests/selftest.lua
-    for _, a in ipairs(args or {}) do
+    -- `love . --selftest` drives the scripted smoke test in tests/selftest.lua;
+    -- `love . --size 960x540` opens at a given size, which is how the layout
+    -- is checked at the minimum the window allows
+    for i, a in ipairs(args or {}) do
+        local sw, sh = a:match("^%-%-size=?(%d+)x(%d+)$")
+        if not sw and a == "--size" and args[i + 1] then
+            sw, sh = args[i + 1]:match("^(%d+)x(%d+)$")
+        end
+        if sw then
+            love.window.setMode(tonumber(sw), tonumber(sh))
+            game:resize(tonumber(sw), tonumber(sh))
+        end
         if a == "--new" then
             game:newGame(os.time() % 1e7, "Jameson")
             local Flight = require("src.states.flight")

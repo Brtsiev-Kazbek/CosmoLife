@@ -1505,7 +1505,12 @@ function Flight:draw(background)
             dockPrompt = self.dockPrompt, landed = self.landedOn ~= nil,
             dockPromptIsPlace = self.dockPrompt and self.dockPrompt.place ~= nil,
         }
-        hints.draw(hints.flight(ctx), 26, 26)
+        -- above the left gauge cluster, not on top of the target panel:
+        -- both used to be drawn at (26, 26)
+        local top = h - 150 - 24
+        hints.draw(hints.flight(ctx), 26, top, {
+            anchor = "bottom", maxLines = hints.rowsFor(top - 40),
+        })
     end
 
     if self.game.showHelp then self:drawHelp(w, h) end
