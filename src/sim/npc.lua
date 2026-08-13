@@ -383,13 +383,27 @@ BEHAVIOUR.flee = function(e, dt, ctx)
 end
 
 BEHAVIOUR.mine = function(e, dt, ctx)
-    if not e.rock then
-        e.state = "cruise"
-        return
+    -- `e.rock` was never assigned by anything, so this branch bailed out on its
+    -- first line and every miner simply cruised. Miners now pick a rock out of
+    -- the belt they are in and work it until it is spent.
+    if not e.rock or (e.rock.health or 1) <= 0 then
+        e.rock = ctx.pickRock and ctx.pickRock(e) or nil
+        if not e.rock then
+            e.state = "cruise"
+            return
+        end
     end
     steerTowards(e, e.rock.x, e.rock.y, e.rock.z, dt, 0.6)
     local d = sqrt((e.rock.x - e.pos.x) ^ 2 + (e.rock.y - e.pos.y) ^ 2 + (e.rock.z - e.pos.z) ^ 2)
     e.throttle = d > 400 and 0.6 or 0.05
+    -- close enough to work: chip away, which is what makes a belt look busy
+    if d < e.rock.radius * 3 and ctx.mineRock then
+        e.mineTimer = (e.mineTimer or 0) - dt
+        if e.mineTimer <= 0 then
+            e.mineTimer = 0.6
+            ctx.mineRock(e, e.rock)
+        end
+    end
 end
 
 -- ---------------------------------------------------------------------------

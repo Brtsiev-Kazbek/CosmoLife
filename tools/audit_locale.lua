@@ -242,6 +242,10 @@ local function sweepData()
         emit(t.name, "src/procgen/system.lua (planet type)")
     end
 
+    local progression = require("src.sim.progression")
+    for _, r in ipairs(progression.RANKS) do emit(r.name, "src/sim/progression.lua (rank)") end
+    for _, u in pairs(progression.UNLOCKS) do emit(u, "src/sim/progression.lua (unlock)") end
+
     local pois = require("src.procgen.pois")
     for _, list in ipairs({ pois.SPACE_KINDS or {}, pois.SURFACE_KINDS or {} }) do
         for _, k in ipairs(list) do emit(k.name, "src/procgen/pois.lua") end

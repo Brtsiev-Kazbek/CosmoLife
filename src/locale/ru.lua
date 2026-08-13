@@ -211,6 +211,9 @@ local strings = {
     ["Hull restored."] = "Корпус восстановлен.",
     ["Missile loaded."] = "Ракета загружена.",
     ["Not enough credits."] = "Недостаточно кредитов.",
+    ["Customs seized {n} {n:t}. Fine {cash} cr."] = "Таможня изъяла {n} {n:t}. Штраф {cash} кр.",
+    ["Customs seized contraband at {port}. Fine {cash} cr."] =
+        "Таможня изъяла контрабанду: {port}. Штраф {cash} кр.",
     ["Record cleared."] = "Судимость погашена.",
     ["Contract accepted."] = "Контракт принят.",
     ["Ship"] = "Корабль",
@@ -550,6 +553,33 @@ local strings = {
     ["Twelve tonnes that a routine scan does not find."] =
         "Двенадцать тонн, которых обычный досмотр не находит.",
 
+    -- ------------------------------------------------------------ прогрессия
+    ["Rank"] = "Ранг",
+    ["Rank: {rank}"] = "Ранг: {rank}",
+    ["NEXT RANK"] = "СЛЕДУЮЩИЙ РАНГ",
+    ["Next: {rank}"] = "Далее: {rank}",
+    ["Next: {rank}, {cash} cr more"] = "Далее: {rank}, ещё {cash} кр",
+    ["{cash} cr more"] = "ещё {cash} кр",
+    ["More flying, trading or fighting"] = "Больше полётов, торговли или боёв",
+    ["Promoted to {rank}."] = "Присвоен ранг: {rank}.",
+    ["Harmless"] = "Безобидный",
+    ["Novice"] = "Новичок",
+    ["Trader"] = "Торговец",
+    ["Dealer"] = "Делец",
+    ["Merchant"] = "Купец",
+    ["Broker"] = "Маклер",
+    ["Magnate"] = "Магнат",
+    ["Tycoon"] = "Воротила",
+    ["Elite"] = "Элита",
+    ["Better paid contracts appear on the boards."] = "На досках появляются контракты подороже.",
+    ["Shipyards will trade in your hull."] = "Верфи принимают ваш корпус в зачёт.",
+    ["High tech outfitting becomes available."] = "Открывается высокотехнологичное оснащение.",
+    ["Colony equipment is within reach."] = "Колониальное снаряжение становится по карману.",
+    ["Faction agents offer standing work."] = "Агенты фракций предлагают постоянную работу.",
+    ["Your colonies attract migrants faster."] = "Ваши колонии быстрее притягивают переселенцев.",
+    ["Rare hulls are offered for sale."] = "В продаже появляются редкие корпуса.",
+    ["Nothing left to prove."] = "Доказывать больше нечего.",
+
     -- ------------------------------------------------------------ репутация
     ["Allied"] = "Союзник",
     ["Friendly"] = "Дружественно",
@@ -598,6 +628,7 @@ local strings = {
     ["Research Wing"] = "Исследовательское крыло",
 
     -- ---------------------------------------------------------------- полёт
+    ["Arrived in {system}. {name} ahead."] = "Прибытие в {system}. Впереди {name}.",
     ["Launched from {name}"] = "Взлёт с {name}",
     ["On the pad at {name}"] = "На площадке: {name}",
     ["Approaching {name}"] = "Подлёт к {name}",
@@ -613,6 +644,17 @@ local strings = {
     ["Bounty claimed: {cash} cr"] = "Награда получена: {cash} кр",
     ["Bounty issued against you: {cash} cr"] = "Против вас объявлена награда: {cash} кр",
     ["Missile away ({n} left)"] = "Ракета пошла (осталось {n})",
+    ["No missiles"] = "Ракет нет",
+    ["No shield cells"] = "Щитовых ячеек нет",
+    ["Shield already full"] = "Щит и так полон",
+    ["Shield cell fired ({n} left)"] = "Ячейка щита израсходована (осталось {n})",
+    ["Shield cell"] = "Ячейка щита",
+    ["Mined {n} {n:t} of {cargo:gen:lc}"] = "Добыто {n} {n:t} {cargo:gen:lc}",
+    ["Missiles need a ship target"] = "Ракете нужна цель — корабль",
+    ["nothing fitted"] = "ничего не установлено",
+    ["Value"] = "Стоимость",
+    ["{class} class"] = "класс {class:lc}",
+    ["W/S scroll   {key} or ESC to close"] = "W/S прокрутка   {key} или ESC закрыть",
     ["{pilot} scanned - {faction}, {cash} cr cargo"] =
         "{pilot} просканирован — {faction}, груз на {cash} кр",
     ["{name}: {kind}, gravity {g} m/s2, atmosphere {atm} atm"] =

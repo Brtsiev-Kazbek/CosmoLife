@@ -19,6 +19,7 @@ local colonyMod = require("src.sim.colony")
 local Player = require("src.sim.player")
 local names = require("src.procgen.names")
 local i18n = require("src.i18n")
+local progression = require("src.sim.progression")
 
 local World = class("World")
 
@@ -57,6 +58,21 @@ function World:update(dt)
     end
     if self.system then
         systemGen.updateOrbits(self.system, self.day)
+    end
+    self:checkPromotion()
+end
+
+--- Announces a rank promotion once, when it happens.
+function World:checkPromotion()
+    local rank = progression.check(self.player)
+    if not rank then return end
+    local unlock = progression.UNLOCKS[rank.id]
+    self.player:addLog(i18n.format("Promoted to {rank}.", { rank = i18n.translate(rank.name) }),
+        self.day, "good")
+    local hud = package.loaded["src.render.hud"]
+    if hud then
+        hud.message(i18n.format("Rank: {rank}", { rank = i18n.translate(rank.name) }), "good")
+        if unlock then hud.message(i18n.translate(unlock), "info") end
     end
 end
 
@@ -252,7 +268,50 @@ function World:onDock(port)
     end
     -- docking fees and a little time
     self.day = self.day + 0.08
-    return completed
+
+    local caught, fine = self:customsScan(port)
+    return completed, caught, fine
+end
+
+--- Customs inspection on docking.
+--
+-- Smuggling had no risk side at all: `illegalRisk` and `fineRate` in the
+-- config, `Player:contraband`, and the Signal Dampener's `stealth` and the
+-- Concealed Hold's `smuggleSpace` were all written and read by nothing. Black
+-- market runs were therefore free money, while the two expensive modules that
+-- exist to mitigate the risk did nothing at all.
+--
+-- Returns the confiscated list and the fine, or nil when nothing was found.
+function World:customsScan(port)
+    local law = port.lawLevel or 0.5
+    local goods, value = self.player:contraband(law)
+    if #goods == 0 then return nil end
+
+    local stats = self.player.stats or {}
+    -- a concealed hold hides a fixed tonnage; only the excess is exposed
+    local hidden = stats.smuggleSpace or 0
+    local exposed = 0
+    for _, g in ipairs(goods) do exposed = exposed + g.qty end
+    exposed = math.max(0, exposed - hidden)
+    if exposed <= 0 then return nil end
+
+    -- lawful ports look harder; a signal dampener cuts the odds
+    local chance = config.economy.illegalRisk * law * (1 - (stats.stealth or 0))
+    local rng = Rng.new(self.seed, "customs", math.floor(self.day * 10), port.seed or 0)
+    if rng:float() > chance then return nil end
+
+    local confiscated = {}
+    for _, g in ipairs(goods) do
+        local take = math.min(g.qty, math.max(1, math.ceil(g.qty * exposed / math.max(g.qty, 1))))
+        self.player:removeCargo(g.id, take)
+        confiscated[#confiscated + 1] = { id = g.id, qty = take, name = g.name }
+    end
+    local fine = math.floor(value * config.economy.fineRate)
+    self.player:spend(math.min(fine, self.player.credits))
+    self.player:addBounty(port.factionId, math.floor(fine * 0.5))
+    self.player:addLog(i18n.format("Customs seized contraband at {port}. Fine {cash} cr.",
+        { port = port.name, cash = util.money(fine) }), self.day, "alert")
+    return confiscated, fine
 end
 
 function World:onLaunch()

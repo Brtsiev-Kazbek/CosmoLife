@@ -35,6 +35,8 @@ local settings = require("src.settings")
 local i18n = require("src.i18n")
 local hints = require("src.render.hints")
 local pois = require("src.procgen.pois")
+local mining = require("src.sim.mining")
+local commodities = require("src.sim.commodities")
 
 local Flight = class("FlightState")
 
@@ -148,13 +150,28 @@ function Flight:spawn(opts)
         return
     end
 
-    -- default arrival: near the first planet, or by the star
-    local target = nil
-    for _, b in ipairs(sys.bodies) do
-        if b.kind == "planet" then target = b break end
+    -- Default arrival.
+    --
+    -- Previously this dropped the ship fourteen radii from the *innermost*
+    -- planet, facing it, and said nothing -- the one spawn path in the game
+    -- that printed no message. A new pilot appeared in empty space with no
+    -- target, no prompt and no idea which of a dozen unlabelled boxes in the
+    -- sky was a station. Now it arrives on the approach to the system's main
+    -- station, pointed at it, and says so.
+    local station = sys.stations and sys.stations[1]
+    local base, d, name
+    if station then
+        base, d, name = station.pos, math.max(station.size * 26, 40000), station.name
+    else
+        local body
+        for _, b in ipairs(sys.bodies) do
+            if b.kind == "planet" then body = b break end
+        end
+        base = body and body.pos or sys.star.pos
+        d = body and (body.radius * 14) or (sys.star.radius * 8)
+        name = body and body.name or sys.star.name
     end
-    local d = target and (target.radius * 14) or (sys.star.radius * 8)
-    local base = target and target.pos or sys.star.pos
+
     ship.pos:set(base.x + d, base.y + d * 0.25, base.z + d)
     local dx, dy, dz = vec3.normT(base.x - ship.pos.x, base.y - ship.pos.y, base.z - ship.pos.z)
     ship.fwd:set(dx, dy, dz)
@@ -162,6 +179,12 @@ function Flight:spawn(opts)
     mat4.orthonormalize(ship.right, ship.up, ship.fwd)
     ship.vel:set(0, 0, 0)
     self.throttle = 0
+
+    -- the contact list is rebuilt in update(), so the target is picked on the
+    -- first frame rather than here
+    self.pendingArrivalTarget = true
+    hud.message(L("Arrived in {system}. {name} ahead.",
+        { system = sys.stub and sys.stub.name or sys.name or "?", name = name }), "info")
 end
 
 function Flight:stationMesh(st)
@@ -977,11 +1000,23 @@ function Flight:cycleTarget(hostileOnly)
     for i, c in ipairs(self.contacts) do
         if c == self.target then startIndex = i break end
     end
+    -- Range.
+    --
+    -- Combat contacts stay bounded by the scanner: you cannot lock a ship you
+    -- cannot see. Navigation contacts -- stations, planets, settlements,
+    -- points of interest -- must not be, because the player arrives 30,000 to
+    -- 150,000 km from anything and the nearest station is thousands of times
+    -- further away than the old 36 km clamp allowed. With the clamp in place
+    -- `T` selected nothing at all from the spawn point, so the autopilot could
+    -- never engage and the market, contracts, outfitting and the colony goal
+    -- behind them were all unreachable without blind guesswork.
     local n = #self.contacts
+    local scanRange = config.combat.scanRange * 4
     for k = 1, n do
         local i = ((startIndex + k - 1) % n) + 1
         local c = self.contacts[i]
-        local ok = c.marker and c.distance < config.combat.scanRange * 4
+        local ok = c.marker
+        if c.kind == "ship" then ok = ok and c.distance < scanRange end
         if hostileOnly then ok = ok and c.hostile end
         if ok then
             best, bestIndex = c, i
@@ -990,6 +1025,19 @@ function Flight:cycleTarget(hostileOnly)
     end
     self.target = best
     if best then hud.message(L("Target: {name}", { name = best.label or "?" }), "info") end
+end
+
+--- Picks the nearest station, or failing that any dockable place, as a target.
+--- Used on arrival so a new pilot has somewhere to point at.
+function Flight:targetNearestPort()
+    local best, bestD = nil, math.huge
+    for _, c in ipairs(self.contacts) do
+        if c.station or c.place then
+            if c.distance < bestD then best, bestD = c, c.distance end
+        end
+    end
+    if best then self.target = best end
+    return best
 end
 
 function Flight:scanTarget()
@@ -1145,6 +1193,9 @@ function Flight:update(dt, background)
         upAt = self.surface and function(x, y, z)
             return self.surface.up.x, self.surface.up.y, self.surface.up.z
         end or nil,
+        -- miners need a rock to work; without these the behaviour bailed out
+        pickRock = function(e) return self:rockNear(e.pos) end,
+        mineRock = function(e, rock) mining.hit(rock, 14, self.rockDamage or {}) end,
     }
     npcMod.maintain(self.npcs, self.world.system, self.player, self.world.diplomacy,
         self.world.day, self.game.camera, dt, self.npcState)
@@ -1166,7 +1217,14 @@ function Flight:update(dt, background)
         self.surface:update(self.local_.pos.x, self.local_.pos.z, dt, self.altitude)
     end
 
+    self:updateMining()
     self:updateContacts()
+    -- spawn() cannot pick a target because the contact list does not exist
+    -- until the first update; this hands the new arrival something to fly to
+    if self.pendingArrivalTarget then
+        self.pendingArrivalTarget = nil
+        self:targetNearestPort()
+    end
     self:updateDockPrompt()
 
     self.player.hull = self.ship.hull
@@ -1286,6 +1344,88 @@ function Flight:bodyBasis(body)
 end
 
 --- Draws the drifting things that make space feel occupied.
+--- Draws the asteroid field when the ship is inside a belt.
+--
+-- Belts have existed since the system generator was written and were never
+-- rendered, so a "belt" was an invisible annulus that only affected which
+-- NPCs spawned. bodies.asteroids() had no callers at all.
+function Flight:submitRocks(renderer)
+    self.rockDamage = self.rockDamage or {}
+    self.rocks = self.rocks or {}
+    local ship = self.ship
+    mining.near(self.world.system, ship.pos.x, ship.pos.y, ship.pos.z, self.rockDamage, self.rocks)
+    if #self.rocks == 0 then return end
+
+    local set = bodies.asteroids(self.world.system.seed)
+    local basis = self._rockBasis or { right = vec3(), up = vec3(0, 1, 0), fwd = vec3() }
+    self._rockBasis = basis
+    local pos = self._rockPos or vec3()
+    self._rockPos = pos
+
+    for _, r in ipairs(self.rocks) do
+        local a = r.phase + self.time * r.spin
+        basis.right:set(math.cos(a), 0, -math.sin(a))
+        basis.up:set(0, 1, 0)
+        basis.fwd:set(-math.sin(a), 0, -math.cos(a))
+        mat4.orthonormalize(basis.right, basis.up, basis.fwd)
+        pos:set(r.x, r.y, r.z)
+        -- a chipped rock is visibly smaller
+        local wear = 0.55 + 0.45 * (r.health / max(r.maxHealth, 1))
+        renderer:draw(set[r.variant], pos, basis, { scale = r.radius * wear })
+    end
+end
+
+--- The nearest live rock to a point, for an NPC miner to work.
+function Flight:rockNear(pos)
+    self.rockDamage = self.rockDamage or {}
+    local list = mining.near(self.world.system, pos.x, pos.y, pos.z, self.rockDamage, self._npcRocks)
+    self._npcRocks = list
+    local best, bestD = nil, math.huge
+    for _, r in ipairs(list) do
+        local d = (r.x - pos.x) ^ 2 + (r.y - pos.y) ^ 2 + (r.z - pos.z) ^ 2
+        if d < bestD then best, bestD = r, d end
+    end
+    return best
+end
+
+--- Mining bolts that reach a rock free ore into the hold.
+--
+-- combat.lua has tagged projectiles `p.mining` since the mining laser was
+-- added; nothing read the tag, so the laser was a weapon that did less damage
+-- than the cheapest gun and nothing else.
+function Flight:updateMining()
+    local rocks = self.rocks
+    if not rocks or #rocks == 0 then return end
+    local arena = self.arena
+    for i = 1, arena.nProjectiles do
+        local p = arena.projectiles[i]
+        if p and p.life > 0 and p.mining and p.owner == self.ship then
+            for _, r in ipairs(rocks) do
+                local dx, dy, dz = p.pos.x - r.x, p.pos.y - r.y, p.pos.z - r.z
+                if dx * dx + dy * dy + dz * dz < r.radius * r.radius then
+                    local ore, tonnes = mining.hit(r, p.damage or 8, self.rockDamage)
+                    -- expire the bolt; combat.update compacts the array
+                    p.life = 0
+                    combat.effect(arena, p.pos.x, p.pos.y, p.pos.z, r.radius * 0.12, "hit",
+                        r.ore == "gems" and { 0.8, 0.9, 1.0 } or { 0.9, 0.75, 0.5 })
+                    if ore and tonnes then
+                        local free = self.player:cargoFree()
+                        local taken = min(tonnes, free)
+                        if taken > 0 then
+                            self.player:addCargo(ore, taken)
+                            hud.message(L("Mined {n} {n:t} of {cargo:gen:lc}", {
+                                n = taken, cargo = i18n.term(commodities.get(ore).name) }), "good")
+                        else
+                            hud.message(L("Hold is full."), "warn")
+                        end
+                    end
+                    break
+                end
+            end
+        end
+    end
+end
+
 function Flight:submitPois(renderer)
     local seed = self.world.system.seed
     pois.near(seed, self.ship.pos.x, self.ship.pos.y, self.ship.pos.z, self.pois)
@@ -1451,6 +1591,7 @@ function Flight:draw(background)
     self:submitBodies(renderer)
     self:submitStations(renderer)
     self:submitPois(renderer)
+    self:submitRocks(renderer)
     if self.surface then
         self.surface:draw(renderer, { nightGlow = self.nightGlow, eye = self.local_.pos })
     end
@@ -1615,6 +1756,11 @@ function Flight:keypressed(key)
         self.manager:push(Colonies.new(), self, self.landedOn and self.surface or nil, self.local_)
         return
     end
+    if config.is("ship", key) then
+        local ShipInfo = require("src.states.shipinfo")
+        self.manager:push(ShipInfo.new())
+        return
+    end
     if config.is("save", key) then
         local ok, err = self.game:saveGame()
         hud.message(ok and L("Game saved") or L("Save failed: {reason}", { reason = tostring(err) }),
@@ -1630,13 +1776,52 @@ function Flight:keypressed(key)
         end
         return
     end
-    if key == "m" and self.target and self.target.entity and self.player.missiles > 0 then
-        self.player.missiles = self.player.missiles - 1
-        local w = { weapon = { damage = 140, rate = 1, energy = 0, speed = config.combat.missileSpeed,
-                               color = { 1, 0.8, 0.4 } } }
-        combat.fire(self.arena, self.ship, w, self.ship.fwd.x, self.ship.fwd.y, self.ship.fwd.z, 0)
-        hud.message(L("Missile away ({n} left)", { n = self.player.missiles }), "info")
+    -- Missiles were unreachable: this tested `key == "m"`, but `m` is the
+    -- galaxy map binding and the map branch above returns first. Meanwhile the
+    -- real binding (2 / middle mouse) was never queried by anything, so the
+    -- two missiles a new pilot starts with, the ones the port sells at 1200
+    -- credits each, and the key the help panel advertised could not be fired.
+    if config.is("missile", key) then self:fireMissile() end
+    if config.is("shieldCell", key) then self:useShieldCell() end
+end
+
+--- Burns one shield cell to restore the shield.
+--
+-- The Shield Cell Bank granted `stats.shieldCells`, the player tracked and
+-- saved the count, and nothing anywhere consumed one -- 34,000 credits for a
+-- number that only ever went up.
+function Flight:useShieldCell()
+    if (self.player.shieldCells or 0) <= 0 then
+        hud.message(L("No shield cells"), "warn")
+        return
     end
+    local maxShield = self.player.stats.maxShield or 0
+    if self.player.shield >= maxShield - 0.5 then
+        hud.message(L("Shield already full"), "warn")
+        return
+    end
+    self.player.shieldCells = self.player.shieldCells - 1
+    self.player.shield = min(maxShield, self.player.shield + maxShield * 0.6)
+    self.ship.shield = self.player.shield
+    -- the recharge dumps heat, so it is not free in a long fight
+    self.heat = min(1, (self.heat or 0) + 0.18)
+    hud.message(L("Shield cell fired ({n} left)", { n = self.player.shieldCells }), "good")
+end
+
+function Flight:fireMissile()
+    if self.player.missiles <= 0 then
+        hud.message(L("No missiles"), "warn")
+        return
+    end
+    if not (self.target and self.target.entity) then
+        hud.message(L("Missiles need a ship target"), "warn")
+        return
+    end
+    self.player.missiles = self.player.missiles - 1
+    local w = { weapon = { damage = 140, rate = 1, energy = 0, speed = config.combat.missileSpeed,
+                           color = { 1, 0.8, 0.4 } } }
+    combat.fire(self.arena, self.ship, w, self.ship.fwd.x, self.ship.fwd.y, self.ship.fwd.z, 0)
+    hud.message(L("Missile away ({n} left)", { n = self.player.missiles }), "info")
 end
 
 function Flight:setMouseFlight(on)

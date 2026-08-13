@@ -1263,6 +1263,136 @@ test("text fitting never returns something wider than asked", function(assert_)
     ui.font = realFont
 end)
 
+test("belts contain rocks that can actually be mined out", function(assert_)
+    local mining = require("src.sim.mining")
+    local g = Galaxy.new(31)
+    local diplo = factions.Diplomacy.new(31)
+
+    -- find a system that has a belt at all
+    local sys
+    for _, stub in ipairs(g:systemsNear(0, 0, 0, 60)) do
+        local s = systemGen.build(stub, diplo, 5)
+        if s.belts and #s.belts > 0 then sys = s break end
+    end
+    assert_(sys ~= nil, "no system with an asteroid belt nearby")
+    if not sys then return end
+
+    local belt = sys.belts[1]
+    local damage = {}
+
+    -- a point on the belt's ring
+    local x, z = belt.radius, 0
+    local rocks = mining.near(sys, x, 0, z, damage)
+    assert_(#rocks > 0, "a belt with density " .. belt.density .. " produced no rocks")
+
+    -- deterministic: the same point gives the same field
+    local again = mining.near(sys, x, 0, z, damage)
+    assert_(#again == #rocks, "rock field is not deterministic")
+    if #rocks > 0 and #again > 0 then
+        assert_(rocks[1].key == again[1].key, "rock identity changed between calls")
+    end
+
+    -- outside the belt there is nothing
+    local none = mining.near(sys, belt.radius * 3, 0, 0, damage)
+    assert_(#none == 0, "found rocks outside the belt")
+
+    -- mining a rock yields ore and eventually exhausts it
+    local rock = rocks[1]
+    local total, guard = 0, 0
+    local oreId
+    while not mining.exhausted(rock) and guard < 10000 do
+        local ore, tonnes = mining.hit(rock, 25, damage)
+        if ore then oreId, total = ore, total + tonnes end
+        guard = guard + 1
+    end
+    assert_(guard < 10000, "the rock never ran out")
+    assert_(total > 0, "mining a rock to destruction yielded nothing")
+    assert_(oreId ~= nil and commodities.byId[oreId] ~= nil,
+        "mining produced an unknown commodity: " .. tostring(oreId))
+
+    -- damage persists, so a worked rock does not come back whole
+    local after = mining.near(sys, x, 0, z, damage)
+    local found = false
+    for _, r in ipairs(after) do
+        if r.key == rock.key then found = true end
+    end
+    assert_(not found, "an exhausted rock reappeared intact")
+end)
+
+test("rank climbs monotonically and never skips its gates", function(assert_)
+    local progression = require("src.sim.progression")
+    local p = Player.new({ seed = 1 })
+
+    assert_(progression.rank(p).id == "harmless", "a new pilot is not Harmless")
+    assert_(progression.next(p) ~= nil, "there is no rank above the first")
+
+    -- credits alone must not promote: a rich pilot who has done nothing is
+    -- still inexperienced, and vice versa
+    p.credits = 5000000
+    assert_(progression.rank(p).id ~= "elite", "wealth alone reached the top rank")
+
+    -- experience alone must not promote either
+    p = Player.new({ seed = 1 })
+    p.record.kills = 400
+    assert_(progression.rank(p).id ~= "elite", "experience alone reached the top rank")
+
+    -- Climbing both together must never demote, and every rank must be
+    -- reachable. Skipping a rank is legitimate -- a windfall should be able to
+    -- jump two -- so what is checked is monotonicity, and that a gradual climb
+    -- actually visits each rung rather than leaving some unreachable.
+    p = Player.new({ seed = 1 })
+    local function indexOf(id)
+        for i, r in ipairs(progression.RANKS) do if r.id == id then return i end end
+        return 0
+    end
+    local visited, lastIndex = {}, indexOf(progression.rank(p).id)
+    for step = 1, 2000 do
+        p.credits = step * 2600
+        p.record.trades = math.floor(step * 0.3)
+        p.record.profit = step * 2500
+        p.record.kills = math.floor(step * 0.15)
+        p.record.jumps = math.floor(step * 0.3)
+        p.record.missionsDone = math.floor(step * 0.12)
+        local idx = indexOf(progression.rank(p).id)
+        check("rank climbs monotonically and never skips its gates",
+            idx >= lastIndex, "rank went backwards at step " .. step)
+        visited[idx] = true
+        lastIndex = idx
+    end
+    assert_(lastIndex == #progression.RANKS,
+        "a gradual climb topped out at rank " .. lastIndex .. " of " .. #progression.RANKS)
+    for i = 1, #progression.RANKS do
+        check("rank climbs monotonically and never skips its gates",
+            visited[i] == true,
+            "rank " .. progression.RANKS[i].id .. " is unreachable by a gradual climb")
+    end
+
+    -- progress is bounded and monotone within a rank
+    p = Player.new({ seed = 1 })
+    local prev = -1
+    for step = 0, 40 do
+        p.credits = step * 150
+        local f = progression.progress(p)
+        check("rank climbs monotonically and never skips its gates",
+            f >= 0 and f <= 1, "progress out of range: " .. f)
+        if progression.rank(p).id == "harmless" then
+            check("rank climbs monotonically and never skips its gates",
+                f >= prev - 1e-9, "progress fell inside a rank")
+            prev = f
+        end
+    end
+
+    -- promotion fires once per rank
+    p = Player.new({ seed = 1 })
+    progression.check(p)                     -- first call only records
+    p.credits = 500000
+    p.record.trades = 200
+    p.record.profit = 900000
+    local first = progression.check(p)
+    assert_(first ~= nil, "promotion was never announced")
+    assert_(progression.check(p) == nil, "promotion announced twice for one rank")
+end)
+
 test("letter case helpers handle cyrillic", function(assert_)
     assert_(i18n.lcFirst("Зерно") == "зерно", "lc cyrillic")
     assert_(i18n.lcFirst("Руда") == "руда", "lc cyrillic р-я range")

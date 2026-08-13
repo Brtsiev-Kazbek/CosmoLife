@@ -256,6 +256,7 @@ function Player:save()
         fuel = self.fuel,
         missiles = self.missiles,
         shieldCells = self.shieldCells,
+        rankSeen = self.rankSeen,
         reputations = self.reputations,
         bounties = self.bounties,
         missions = self.missions,
@@ -283,6 +284,7 @@ function Player:load(data)
     self.fuel = math.min(data.fuel or self.stats.fuel, self.stats.fuel)
     self.missiles = data.missiles or 0
     self.shieldCells = data.shieldCells or 0
+    self.rankSeen = data.rankSeen
     self.reputations = data.reputations or {}
     self.bounties = data.bounties or {}
     self.missions = data.missions or {}

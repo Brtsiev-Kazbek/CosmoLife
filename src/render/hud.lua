@@ -149,9 +149,14 @@ local function drawContactMarker(camera, w, h, c, selected)
             love.graphics.line(x, y - t, x, y - s * 1.1)
             love.graphics.line(x, y + s * 1.1, x, y + t)
         end
-        if c.label and (selected or dist < 6000) then
+        -- Navigation contacts are labelled at any distance. They used to be
+        -- named only within 6 km, so from an arrival point tens of thousands
+        -- of kilometres out the player saw a scattering of identical unlabelled
+        -- boxes with no way to tell a station from a moon.
+        local navigable = c.station or c.place or c.body or c.poi
+        if c.label and (selected or navigable or dist < 6000) then
             ui.text(c.label, x + s + 6, y - 8, col, "small")
-            if selected then
+            if selected or navigable then
                 ui.text(util.distance(dist), x + s + 6, y + 6, col, "small")
             end
         end

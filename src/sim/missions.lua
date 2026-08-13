@@ -274,7 +274,11 @@ function missions.generate(port, sys, galaxy, diplomacy, day, count)
     local stub = sys.stub or sys
 
     -- candidate destinations: real systems within jump range of here
-    local nearby = galaxy and galaxy:systemsNear(stub.x, stub.y, stub.z, 70) or {}
+    -- The slab limit matters: without it this swept a 140 ly cube, roughly
+    -- 1700 sectors generated and sorted, every time the contracts tab was
+    -- opened and again whenever the board refreshed. The disc is thin, so
+    -- the vertical range can be a fraction of the horizontal one for free.
+    local nearby = galaxy and galaxy:systemsNear(stub.x, stub.y, stub.z, 70, 24) or {}
     local dests = {}
     for _, s in ipairs(nearby) do
         if s.id ~= stub.id and s.population > 0 then dests[#dests + 1] = s end
@@ -400,9 +404,13 @@ function missions.checkArrival(player, systemId, port, day)
         local done = false
         if m.state == "active" then
             if m.type == "delivery" or m.type == "passenger" or m.type == "smuggle" then
-                if m.destSystemId == systemId then
-                    local removed = player:removeCargo(m.commodity, m.quantity)
-                    if removed >= m.quantity then done = true end
+                -- Check before removing. This used to call removeCargo first
+                -- and only then test whether enough came back, so arriving one
+                -- tonne short destroyed the partial cargo *and* left the
+                -- contract active -- a silent, unrecoverable loss.
+                if m.destSystemId == systemId and player:cargoCount(m.commodity) >= m.quantity then
+                    player:removeCargo(m.commodity, m.quantity)
+                    done = true
                 end
             elseif m.type == "supply" then
                 if m.destSystemId == systemId and (port == nil or port.name == m.originPort) then

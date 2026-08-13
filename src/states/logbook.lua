@@ -104,7 +104,11 @@ end
 function Logbook:drawRecord(w, h)
     local r = self.player.record
     local x, y = 60, 130
+    local progression = require("src.sim.progression")
+    local rank = progression.rank(self.player)
+    local nextRank = progression.next(self.player)
     local rows = {
+        { L("Rank"), L(rank.name) },
         { L("Ship"), L(self.player.shipDef.roleName) .. "  \"" .. self.player.shipDef.name .. "\"" },
         { L("Credits"), util.money(self.player.credits) },
         { L("Systems visited"), tostring(util.count(self.player.knownSystems)) },
@@ -128,6 +132,27 @@ function Logbook:drawRecord(w, h)
         ui.textFit(row[1], x, y, labelW - 8, C.uiDim, "small")
         ui.textFit(row[2], x + labelW, y, leftW - labelW, C.uiText, "small")
         y = y + 19
+    end
+
+    -- next rank: the one thing that told the player they were making progress
+    if nextRank then
+        y = y + 8
+        ui.text(L("NEXT RANK"), x, y, C.uiPrimary, "small")
+        y = y + 20
+        ui.textFit(L(nextRank.name), x, y, 180, C.uiText, "small")
+        ui.bar(x + 190, y + 3, 150, 8, progression.progress(self.player), C.uiPrimary)
+        y = y + 20
+        local need, amount = progression.requirement(self.player)
+        if need == "credits" then
+            ui.textFit(L("{cash} cr more", { cash = util.money(amount) }), x, y, 340, C.uiDim, "small")
+        elseif need == "experience" then
+            ui.textFit(L("More flying, trading or fighting"), x, y, 340, C.uiDim, "small")
+        end
+        local unlock = progression.UNLOCKS[nextRank.id]
+        if unlock then
+            y = y + 18
+            ui.textFit(L(unlock), x, y, w * 0.5 - 100, C.uiDim, "small")
+        end
     end
 
     -- standings

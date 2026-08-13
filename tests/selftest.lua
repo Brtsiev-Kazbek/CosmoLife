@@ -46,6 +46,21 @@ step(40, "target and scan", function(game)
     f:scanTarget()
 end)
 
+step(44, "a new arrival can reach a port", function(game)
+    -- The whole opening of the game depends on this: from the spawn point the
+    -- player must be able to select a station and hand it to the autopilot.
+    -- With the old 36 km target clamp neither was possible, and the market,
+    -- contracts and outfitting behind them were unreachable.
+    local f = game.manager:current()
+    local port = f:targetNearestPort()
+    assert(port, "nothing dockable is selectable from the arrival point")
+    assert(port.distance > 36000,
+        "test is not exercising the clamp: port is only " .. math.floor(port.distance) .. " m away")
+    local ok = f:toggleAutopilot()
+    assert(f.autopilot, "autopilot refused a target at " .. math.floor(port.distance) .. " m")
+    f:toggleAutopilot()
+end)
+
 step(55, "fire weapons", function(game)
     local f = game.manager:current()
     local w = game.world.player:weapon()

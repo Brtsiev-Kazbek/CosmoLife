@@ -90,7 +90,14 @@ function Port:enter(place, opts)
     self.completed = nil
     if not self.arrived then
         self.arrived = true
-        self.completed = self.world:onDock(place)
+        local completed, seized, fine = self.world:onDock(place)
+        self.completed = completed
+        if seized then
+            local n = 0
+            for _, g in ipairs(seized) do n = n + g.qty end
+            self:say(L("Customs seized {n} {n:t}. Fine {cash} cr.",
+                { n = n, cash = util.money(fine) }), true)
+        end
     end
     self:rebuild()
 end
@@ -189,6 +196,42 @@ function Port:buildSummaryMenu()
                 self:rebuild()
             end,
         }
+    end
+
+    -- rank first: the summary tab is where a player checks in, so it is where
+    -- the next milestone belongs
+    local progression = require("src.sim.progression")
+    local rank = progression.rank(self.player)
+    local nextRank = progression.next(self.player)
+    items[#items + 1] = {
+        label = L("Rank: {rank}", { rank = L(rank.name) }),
+        value = nextRank and string.format("%d%%", math.floor(progression.progress(self.player) * 100)) or nil,
+        disabled = true, color = C.uiPrimary,
+    }
+    if nextRank then
+        local need, amount = progression.requirement(self.player)
+        local line = need == "credits"
+            and L("Next: {rank}, {cash} cr more", { rank = L(nextRank.name), cash = util.money(amount) })
+            or L("Next: {rank}", { rank = L(nextRank.name) })
+        items[#items + 1] = { label = "   " .. line, disabled = true, color = C.uiDim }
+    end
+
+    -- rank first: the summary tab is where a player checks in, so it is where
+    -- the next milestone belongs
+    local progression = require("src.sim.progression")
+    local rank = progression.rank(self.player)
+    local nextRank = progression.next(self.player)
+    items[#items + 1] = {
+        label = L("Rank: {rank}", { rank = L(rank.name) }),
+        value = nextRank and string.format("%d%%", math.floor(progression.progress(self.player) * 100)) or nil,
+        disabled = true, color = C.uiPrimary,
+    }
+    if nextRank then
+        local need, amount = progression.requirement(self.player)
+        local line = need == "credits"
+            and L("Next: {rank}, {cash} cr more", { rank = L(nextRank.name), cash = util.money(amount) })
+            or L("Next: {rank}", { rank = L(nextRank.name) })
+        items[#items + 1] = { label = "   " .. line, disabled = true, color = C.uiDim }
     end
 
     items[#items + 1] = { label = L("Trade computer: best local exports"), disabled = true, color = C.uiDim }
