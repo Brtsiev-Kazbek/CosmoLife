@@ -484,7 +484,16 @@ test("mission board generates valid, varied contracts", function(assert_)
     local ok = true
     for _, m in ipairs(board) do
         kinds[m.type] = true
-        if not (m.reward > 0 and m.title and m.expires > 5) then ok = false end
+        if not (m.reward > 0 and m.titleText and m.expires > 5) then ok = false end
+        -- the rendered sentence must be complete: an unresolved {placeholder}
+        -- means the template and its argument list disagree
+        local title, brief = missions.title(m), missions.brief(m)
+        check("mission board generates valid, varied contracts",
+            #title > 0 and not title:find("{"),
+            "unrendered title: " .. title)
+        check("mission board generates valid, varied contracts",
+            #brief > 0 and not brief:find("{"),
+            "unrendered brief: " .. brief)
     end
     assert_(ok, "a mission had no reward, title or deadline")
     assert_(util.count(kinds) >= 2, "mission board offers only one kind of job")
@@ -1057,6 +1066,45 @@ test("templates decline their arguments", function(assert_)
     -- plain strings still work as arguments
     out = i18n.format("привет {who}", { who = "Кеплер" })
     assert_(out == "привет Кеплер", "got: " .. out)
+end)
+
+test("the russian locale has no duplicate keys", function(assert_)
+    -- Lua silently keeps the last of two identical keys, so a duplicate is an
+    -- invisible way for one translation to shadow another
+    local fh = io.open("src/locale/ru.lua", "r")
+    assert_(fh ~= nil, "cannot open the locale file")
+    local src = fh:read("*a")
+    fh:close()
+    local seen, dupes = {}, {}
+    for key in src:gmatch('\n%s*%["([^"]*)"%]%s*=') do
+        if seen[key] then dupes[#dupes + 1] = key end
+        seen[key] = true
+    end
+    assert_(#dupes == 0, "duplicate keys: " .. table.concat(dupes, ", "))
+end)
+
+test("contract text renders in russian without stray placeholders", function(assert_)
+    i18n.setLocale("ru")
+    local g = Galaxy.new(31)
+    local diplo = factions.Diplomacy.new(31)
+    local sys = systemGen.build(g:findStartSystem(), diplo, 5)
+    local port = systemGen.ports(sys)[1]
+    assert_(port ~= nil, "no port to post contracts at")
+    if not port then i18n.setLocale("en") return end
+    local board = missions.generate(port, sys, g, diplo, 5, 14)
+    assert_(#board > 0, "empty mission board")
+    local cyrillic = 0
+    for _, m in ipairs(board) do
+        local title, brief = missions.title(m), missions.brief(m)
+        check("contract text renders in russian without stray placeholders",
+            not title:find("{") and not brief:find("{"),
+            "unresolved placeholder: " .. title .. " / " .. brief)
+        -- the whole point is that it came out Russian, not that it came out
+        if title:find("[\208\209]") then cyrillic = cyrillic + 1 end
+    end
+    assert_(cyrillic == #board,
+        string.format("only %d of %d titles were Russian", cyrillic, #board))
+    i18n.setLocale("en")
 end)
 
 test("letter case helpers handle cyrillic", function(assert_)

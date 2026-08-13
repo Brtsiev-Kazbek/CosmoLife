@@ -18,6 +18,7 @@ local missionsMod = require("src.sim.missions")
 local colonyMod = require("src.sim.colony")
 local Player = require("src.sim.player")
 local names = require("src.procgen.names")
+local i18n = require("src.i18n")
 
 local World = class("World")
 
@@ -80,8 +81,9 @@ function World:onNewDay(day)
 
     local failed = missionsMod.expire(self.player, day)
     for _, m in ipairs(failed) do
-        self:addNews(string.format("Contract expired: %s", m.title), "alert")
-        self.player:addLog("Failed: " .. m.title, day, "alert")
+        local title = missionsMod.title(m)
+        self:addNews(i18n.format("Contract expired: {title}", { title = title }), "alert")
+        self.player:addLog(i18n.format("Failed: {title}", { title = title }), day, "alert")
     end
 
     -- markets of the current system keep ticking while the player is here
@@ -242,8 +244,11 @@ function World:onDock(port)
     self.player.dockedAt = port.name
     local completed = missionsMod.checkArrival(self.player, self.stub.id, port, self.day)
     for _, m in ipairs(completed) do
-        self:addNews(string.format("Contract complete: %s (+%s cr)", m.title, util.money(m.reward)), "good")
-        self.player:addLog(string.format("Completed %s for %s cr.", m.title, util.money(m.reward)), self.day, "good")
+        local title = missionsMod.title(m)
+        self:addNews(i18n.format("Contract complete: {title} (+{cash} cr)",
+            { title = title, cash = util.money(m.reward) }), "good")
+        self.player:addLog(i18n.format("Completed {title} for {cash} cr.",
+            { title = title, cash = util.money(m.reward) }), self.day, "good")
     end
     -- docking fees and a little time
     self.day = self.day + 0.08

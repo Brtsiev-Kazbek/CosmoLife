@@ -77,7 +77,6 @@ local strings = {
     ["Mass locked - too close to a surface"] = "Масс-блокировка: слишком близко к поверхности",
     ["Frame shift dropped - mass lock"] = "Сверхсвет сброшен: масс-блокировка",
     ["Game saved"] = "Игра сохранена",
-    ["No target"] = "Нет цели",
     ["Out of scanner range"] = "Вне зоны сканера",
     ["Nothing to scan"] = "Нечего сканировать",
     ["Land first"] = "Сначала сядьте",
@@ -132,8 +131,74 @@ local strings = {
     ["Launch"] = "Взлёт",
     ["an elite in an endless galaxy"] = "элита в бесконечной галактике",
 
+    -- ------------------------------------------------------------ единицы
+    ["cr"] = "кр",
+    ["{n} {n:t}"] = "{n} {n:t}",
+    ["{n} {n:day}"] = "{n} {n:day}",
+    ["tech {n}"] = "тех. {n}",
+
     -- порт
     ["Refuel"] = "Заправка",
+    ["Refuel ({amount} t)"] = "Заправка ({amount} т)",
+    ["Repair hull ({amount})"] = "Ремонт корпуса ({amount})",
+    ["Step away from the terminal"] = "Отойти от терминала",
+    ["Trade computer: best local exports"] = "Торговый компьютер: лучший местный экспорт",
+    ["Pay off bounty with {faction}"] = "Погасить розыск: {faction}",
+    ["COMMODITY"] = "ТОВАР",
+    ["BUY / SELL   STOCK   HOLD"] = "ПОКУПКА / ПРОДАЖА   СКЛАД   ТРЮМ",
+    ["QUANTITY"] = "КОЛИЧЕСТВО",
+    ["max"] = "макс",
+    ["FITTED"] = "УСТАНОВЛЕНО",
+    ["FOR SALE"] = "В ПРОДАЖЕ",
+    ["sell"] = "продать",
+    ["trade-in"] = "зачёт",
+    ["available"] = "доступно",
+    ["too expensive"] = "не по карману",
+    ["supply"] = "снабжение",
+    ["surface settlement"] = "наземное поселение",
+    ["{kind} station"] = "станция типа «{kind}»",
+    ["Your {class} ({name})"] = "Ваш {class:lc} ({name})",
+    ["{kind}  -  {economy}  -  pop {pop}  -  tech {tech}  -  law {law}%"] =
+        "{kind}  -  {economy}  -  насел. {pop}  -  тех. {tech}  -  закон {law}%",
+    ["Collect exports and taxes"] = "Забрать экспорт и налоги",
+    ["Invest {amount} cr"] = "Вложить {amount} кр",
+    ["Unload {qty} {qty:t} of {cargo:gen:lc}"] = "Выгрузить {qty} {qty:t} {cargo:gen:lc}",
+    ["In your hold: {qty} {qty:t}"] = "В трюме: {qty} {qty:t}",
+    ["Pending exports"] = "Готово к вывозу",
+    ["Tier"] = "Ступень",
+    ["Specialisation"] = "Специализация",
+    ["Morale"] = "Настрой",
+    ["Supplies"] = "Припасы",
+    ["Treasury"] = "Казна",
+    ["Illegal in high-law systems"] = "Незаконно в системах со строгим законом",
+    ["ESC launch"] = "ESC взлёт",
+    ["ESC leave"] = "ESC выйти",
+    ["B buy   N sell   1/2/3/4 quantity   Q/E tabs"] =
+        "B купить   N продать   1/2/3/4 количество   Q/E вкладки",
+    ["ENTER accept   Q/E tabs"] = "ENTER принять   Q/E вкладки",
+    ["ENTER buy or sell   Q/E tabs"] = "ENTER купить или продать   Q/E вкладки",
+    ["ENTER select   Q/E tabs"] = "ENTER выбрать   Q/E вкладки",
+
+    -- сообщения порта
+    ["Bought {qty} {qty:t} of {cargo:gen:lc} for {cash} cr."] =
+        "Куплено {qty} {qty:t} {cargo:gen:lc} за {cash} кр.",
+    ["Sold {qty} {qty:t} of {cargo:gen:lc} for {cash} cr."] =
+        "Продано {qty} {qty:t} {cargo:gen:lc} за {cash} кр.",
+    ["Collected {qty} {qty:t} and {cash} cr."] = "Получено {qty} {qty:t} и {cash} кр.",
+    ["Sold {module:acc:lc} for {cash} cr."] = "Продан модуль «{module:nom:lc}» за {cash} кр.",
+    ["{module} fitted."] = "Установлено: {module:lc}.",
+    ["Registered to {name}."] = "Судно «{name}» зарегистрировано на вас.",
+    ["Bought a {class:acc:lc}."] = "Куплен корабль класса «{class:nom:lc}».",
+    ["Accepted: {title}"] = "Принят контракт: {title}",
+    ["Cannot accept: {reason}"] = "Нельзя принять: {reason}",
+    ["Cannot fit: {reason}"] = "Нельзя установить: {reason}",
+    ["Nothing to sell."] = "Нечего продавать.",
+    ["Hold is full."] = "Трюм полон.",
+    ["Cannot afford any."] = "Не хватает кредитов ни на одну единицу.",
+    ["Investment committed."] = "Вложение сделано.",
+    ["Supplies delivered."] = "Припасы доставлены.",
+    ["No black market trade today."] = "Сегодня чёрный рынок пуст.",
+    ["New ship's hold is too small for your cargo."] = "Трюм нового корабля меньше вашего груза.",
     ["Repair hull"] = "Ремонт корпуса",
     ["Buy missile"] = "Купить ракету",
     ["tanks full"] = "баки полны",
@@ -144,7 +209,6 @@ local strings = {
     ["Not enough credits."] = "Недостаточно кредитов.",
     ["Record cleared."] = "Судимость погашена.",
     ["Contract accepted."] = "Контракт принят.",
-    ["Trade computer: best local exports"] = "Торговый компьютер: лучший местный экспорт",
     ["Ship"] = "Корабль",
     ["Hold"] = "Трюм",
     ["empty"] = "пусто",
@@ -218,6 +282,316 @@ local strings = {
     ["Bindings reset."] = "Клавиши сброшены.",
     ["on"] = "вкл",
     ["off"] = "выкл",
+
+    -- ------------------------------------------------------------ контракты
+    ["Deliver {qty} {qty:t} of {cargo:gen:lc} to {dest}"] =
+        "Доставить {qty} {qty:t} {cargo:gen:lc} в {dest}",
+    ["{employer} needs {qty} {qty:t} of {cargo:gen:lc} at {dest}. Cargo is supplied on acceptance; you carry it there."] =
+        "{employer} ждёт {qty} {qty:t} {cargo:gen:lc} в {dest}. Груз выдают при приёме контракта — довезти его ваша забота.",
+    ["Supply {qty} {qty:t} of {cargo:gen:lc}"] = "Поставить {qty} {qty:t} {cargo:gen:lc}",
+    ["{port} is short of {cargo:gen:lc}. Bring {qty} {qty:t} back here and they pay well over the market."] =
+        "{port} испытывает нехватку: {cargo:nom:lc}. Привезите сюда {qty} {qty:t} — заплатят заметно выше рынка.",
+    ["Destroy {count} {short} vessels"] = "Уничтожить {count} {count:ship} ({short})",
+    ["{employer} is paying per hull. {count} {faction:gen} {count:ship}, in {dest} or anywhere you find them."] =
+        "{employer} платит за каждый корпус. {count} {count:ship} ({faction:gen}) — в системе {dest} или где найдёте.",
+    ["Escort {who} to {dest}"] = "Сопроводить: {who} в {dest}",
+    ["{who} must reach {dest} discreetly. They will not explain why."] =
+        "{who} должен добраться до {dest} незаметно. Объяснять причину не станут.",
+    ["{qty} passengers to {dest}"] = "Пассажиры ({qty}) в {dest}",
+    ["{qty} travellers booked passage to {dest}. Cabins are your cargo hold."] =
+        "Путешественники ({qty}) выкупили места до {dest}. Каюта — это ваш трюм.",
+    ["Run {qty} {qty:t} of {cargo:gen:lc} to {dest}"] =
+        "Провезти {qty} {qty:t} {cargo:gen:lc} в {dest}",
+    ["No manifest, no questions. {qty} {qty:t} of {cargo:gen:lc} into {dest}. Customs will scan you."] =
+        "Без манифеста и без вопросов. {qty} {qty:t} {cargo:gen:lc} в {dest}. Таможня вас просканирует.",
+    ["Survey {dest}"] = "Разведать: {dest}",
+    ["Nobody has filed a current report on {dest}. Jump in, scan what is there, come back."] =
+        "Свежего отчёта по системе {dest} нет ни у кого. Прыгните туда, просканируйте, что найдёте, и вернитесь.",
+    ["Ship {qty} {qty:t} of {cargo:gen:lc} to a colony"] =
+        "Отвезти {qty} {qty:t} {cargo:gen:lc} в колонию",
+    ["Frontier settlements pay a premium for {cargo:acc:lc} delivered to their own pads, not to a station."] =
+        "Поселения фронтира доплачивают за {cargo:acc:lc}, доставленные прямо на их площадки, а не на станцию.",
+    ["Eliminate {who}"] = "Устранить: {who}",
+    ["{who} runs a courier out of {dest}. The contract does not care how."] =
+        "{who} водит курьера из системы {dest}. Как именно — контракту всё равно.",
+    ["{n} {n:day} left"] = "осталось {n} {n:day}",
+    ["scanned, return"] = "просканировано, возвращайтесь",
+    ["not yet scanned"] = "ещё не просканировано",
+    ["Contract expired: {title}"] = "Контракт просрочен: {title}",
+    ["Failed: {title}"] = "Провал: {title}",
+    ["Contract complete: {title} (+{cash} cr)"] = "Контракт выполнен: {title} (+{cash} кр)",
+    ["Completed {title} for {cash} cr."] = "Выполнено: {title} за {cash} кр.",
+
+    -- ------------------------------------------------------------- журнал
+    ["COMMANDER {name}"] = "ПИЛОТ {name}",
+    ["Credits"] = "Кредиты",
+    ["Systems visited"] = "Посещено систем",
+    ["Hyperspace jumps"] = "Гиперпрыжков",
+    ["Distance travelled"] = "Пройдено",
+    ["Landings"] = "Посадок",
+    ["Trades"] = "Сделок",
+    ["Trade revenue"] = "Торговый оборот",
+    ["Ships destroyed"] = "Кораблей уничтожено",
+    ["Ships lost"] = "Кораблей потеряно",
+    ["Contracts completed"] = "Контрактов выполнено",
+    ["Contracts failed"] = "Контрактов провалено",
+    ["Colonies founded"] = "Колоний основано",
+    ["Bodies scanned"] = "Тел просканировано",
+    ["wanted: {cash} cr"] = "розыск: {cash} кр",
+    ["none founded"] = "ни одной",
+    ["{tier}, pop {pop}"] = "{tier}, насел. {pop}",
+    ["The wires are quiet."] = "В эфире тихо.",
+    ["No active contracts. Take work at any station's contract board."] =
+        "Активных контрактов нет. Работу берут на доске контрактов любой станции.",
+    ["Q/E tabs   W/S scroll   {key} or ESC to close"] =
+        "Q/E вкладки   W/S прокрутка   {key} или ESC закрыть",
+
+    -- --------------------------------------------------------------- карта
+    ["centre {x}, {y}, {z} ly     scale {scale} px/ly"] =
+        "центр {x}, {y}, {z} св. лет     масштаб {scale} px/св. год",
+    ["WASD pan   PGUP/PGDN vertical   +/- zoom   ENTER jump   TAB close"] =
+        "WASD сдвиг   PGUP/PGDN по высоте   +/- масштаб   ENTER прыжок   TAB закрыть",
+    ["class {c}"] = "класс {c}",
+    ["At war with {faction:ins}"] = "Война с {faction:ins}",
+    ["Unvisited - long range survey"] = "Не посещена — данные дальней разведки",
+
+    -- ------------------------------------------------------------- колонии
+    ["Found a colony here"] = "Основать здесь колонию",
+    ["Found a colony here ({reason})"] = "Основать здесь колонию ({reason})",
+    ["No colonies yet."] = "Колоний пока нет.",
+    ["Founding a colony"] = "Основание колонии",
+    ["Land on any solid world, then commit the kit. A new outpost grows on what you keep delivering: provisions, water, medicine and machinery. Neglect it and it starves."] =
+        "Сядьте на любой твёрдый мир и задействуйте комплект. Новый аванпост растёт на том, что вы продолжаете возить: провизия, вода, медикаменты и оборудование. Забросите — он вымрет.",
+    ["Requirements"] = "Требуется",
+    ["Specialisation: {spec}"] = "Специализация: {spec}",
+    ["produces {cargo:acc:lc}"] = "производит {cargo:acc:lc}",
+    ["{qty} {qty:t} of {cargo:gen:lc}"] = "{qty} {qty:t} {cargo:gen:lc}",
+    ["World"] = "Мир",
+    ["Supplies left"] = "Припасов осталось",
+    ["Founded"] = "Основана",
+    ["Stockpile"] = "Склад",
+    ["History"] = "Хроника",
+    ["{tier}  pop {pop}"] = "{tier}  насел. {pop}",
+    ["not landed"] = "не на поверхности",
+    ["must be landed"] = "нужно сесть",
+    ["too close to {place}"] = "слишком близко к {place}",
+    ["Cannot found: {reason}"] = "Нельзя основать: {reason}",
+    ["Colony founded: {name}"] = "Основана колония: {name}",
+    ["LEFT/RIGHT specialisation   ENTER select   {key} or ESC to close"] =
+        "ВЛЕВО/ВПРАВО специализация   ENTER выбрать   {key} или ESC закрыть",
+
+    -- ------------------------------------------------------------ настройки
+    ["TAB switches pane   LEFT/RIGHT change   ENTER rebind   ESC close"] =
+        "TAB переключить панель   ВЛЕВО/ВПРАВО менять   ENTER переназначить   ESC закрыть",
+    ["ENTER rebinds the highlighted action. DELETE restores every default binding."] =
+        "ENTER переназначает выбранное действие. DELETE возвращает все клавиши по умолчанию.",
+    ["Press a key, or ESC to cancel."] = "Нажмите клавишу или ESC для отмены.",
+    ["Press a key  (ESC cancels)"] = "Нажмите клавишу  (ESC — отмена)",
+    ["{action} bound to {key}"] = "{action}: назначено {key}",
+    ["Gamepad: {name}"] = "Геймпад: {name}",
+
+    -- -------------------------------------------------------- пауза и гибель
+    ["Saved."] = "Сохранено.",
+    ["Save failed: {reason}"] = "Не удалось сохранить: {reason}",
+    ["Load failed: {reason}"] = "Не удалось загрузить: {reason}",
+    ["Could not load: {reason}"] = "Не удалось загрузить: {reason}",
+    ["smooth"] = "плавно",
+    ["destroyed"] = "уничтожен",
+    ["Claim insurance  -  {cash} cr excess"] = "Получить страховку  -  франшиза {cash} кр",
+    ["Insurance excess: {cash} cr (cannot pay)"] = "Франшиза: {cash} кр (не хватает средств)",
+    ["Declare bankruptcy  -  keep a basic hull, lose your cargo"] =
+        "Объявить банкротство  -  простой корпус, груз теряется",
+    ["Ship lost: {reason}. Rebuilt under insurance."] =
+        "Корабль потерян: {reason}. Восстановлен по страховке.",
+    ["Insurance claim filed by {name}."] = "{name} подал страховое требование.",
+    ["{j} {j:jump}  -  {k} {k:kill}  -  {c} {c:contract}  -  {cash} cr"] =
+        "{j} {j:jump}  -  {k} {k:kill}  -  {c} {c:contract}  -  {cash} кр",
+    ["{class} class  -  {name}"] = "класс {class:lc}  -  {name}",
+
+    -- --------------------------------------------------------------- пешком
+    ["MOUSE"] = "МЫШЬ",
+    ["On foot. {interact} to interact, {board} to board the ship."] =
+        "Вы на ногах. {interact} — действие, {board} — вернуться на борт.",
+    ["{key} to board ship"] = "{key} — на борт",
+    ["{key} to enter {name}"] = "{key} — войти: {name}",
+    ["{key} to step outside"] = "{key} — выйти наружу",
+    ["{body} surface"] = "{body}, поверхность",
+    ["pop {pop}  -  {economy}"] = "насел. {pop}  -  {economy}",
+    ["gravity {g} m/s2"] = "тяготение {g} м/с²",
+
+    -- ------------------------------------------------- службы в помещениях
+    ["Commodity Market"] = "Товарный рынок",
+    ["Black Market"] = "Чёрный рынок",
+    ["Contract Board"] = "Доска контрактов",
+    ["Shipyard"] = "Верфь",
+    ["Outfitting"] = "Оснащение",
+    ["Repair Bay"] = "Ремонтный док",
+    ["Refuelling"] = "Заправка",
+    ["Local Talk"] = "Местные разговоры",
+    ["Navigation Data"] = "Навигационные данные",
+    ["Colony Office"] = "Колониальная контора",
+
+    -- --------------------------------------------------- действия управления
+    ["FLIGHT"] = "ПОЛЁТ",
+    ["COMBAT"] = "БОЙ",
+    ["SHIP"] = "КОРАБЛЬ",
+    ["SCREENS"] = "ЭКРАНЫ",
+    ["Throttle up"] = "Прибавить тягу",
+    ["Throttle down"] = "Убавить тягу",
+    ["Roll left"] = "Крен влево",
+    ["Roll right"] = "Крен вправо",
+    ["Pitch up"] = "Тангаж вверх",
+    ["Pitch down"] = "Тангаж вниз",
+    ["Yaw left"] = "Рыскание влево",
+    ["Yaw right"] = "Рыскание вправо",
+    ["Strafe left"] = "Смещение влево",
+    ["Strafe right"] = "Смещение вправо",
+    ["Thrust up"] = "Тяга вверх",
+    ["Thrust down"] = "Тяга вниз",
+    ["Full throttle"] = "Полная тяга",
+    ["Cut throttle"] = "Сброс тяги",
+    ["Frame shift (hold)"] = "Сверхсвет (удерживать)",
+    ["Toggle auto-level"] = "Автовыравнивание",
+    ["Toggle mouse flight"] = "Управление мышью",
+    ["Next target"] = "Следующая цель",
+    ["Next hostile"] = "Следующий враг",
+    ["Scan target"] = "Сканировать цель",
+    ["Landing gear"] = "Шасси",
+    ["Change view"] = "Сменить вид",
+    ["Dock / enter"] = "Стыковка / вход",
+    ["Disembark / board"] = "Выйти / на борт",
+    ["Galaxy map"] = "Карта галактики",
+    ["Logbook"] = "Журнал",
+    ["Ship info"] = "О корабле",
+    ["Missile"] = "Ракета",
+    ["Pause"] = "Пауза",
+
+    -- ------------------------------------------------------- разделы настроек
+    ["CAMERA"] = "КАМЕРА",
+    ["GRAPHICS"] = "ГРАФИКА",
+    ["LANGUAGE"] = "ЯЗЫК",
+    ["WEAPON"] = "ОРУЖИЕ",
+    ["ENGINE"] = "ДВИГАТЕЛЬ",
+    ["UTILITY"] = "СНАРЯЖЕНИЕ",
+    ["Mouse aims the nose. Off puts attitude on I/K/J/L."] =
+        "Мышь ведёт нос корабля. Выключено — ориентация на I/K/J/L.",
+    ["Bleeds off sideways drift so the ship goes where it points."] =
+        "Гасит боковой снос, и корабль идёт туда, куда смотрит.",
+    ["Rolls the ship upright when a horizon is available."] =
+        "Выравнивает корабль по горизонту, когда тот виден.",
+    ["Gear down near the ground: holds level and hovers."] =
+        "Шасси у земли: удерживает горизонт и зависание.",
+    ["Multiplier on the chase camera's distance from the hull."] =
+        "Множитель дистанции камеры от корпуса.",
+    ["How strongly the view stays level with the ground."] =
+        "Насколько сильно вид держится горизонта.",
+    ["Sets draw distance, star count and body detail in one go. Potato turns off every optional pass."] =
+        "Разом задаёт дальность прорисовки, число звёзд и детализацию тел. «Картошка» отключает все необязательные проходы.",
+    ["0 is smooth shading; low values give hard retro banding."] =
+        "0 — плавная заливка; малые значения дают резкие ретро-ступени.",
+    ["The contextual key list in the corner of the screen."] =
+        "Список нужных сейчас клавиш в углу экрана.",
+    ["Interface language. Missing translations fall back to English."] =
+        "Язык интерфейса. Непереведённое показывается по-английски.",
+
+    -- ----------------------------------------------------- специализации колоний
+    ["Agriculture"] = "Сельское хозяйство",
+    ["Mining"] = "Добыча",
+    ["Refining"] = "Переработка",
+    ["Industry"] = "Промышленность",
+    ["Research"] = "Исследования",
+
+    -- ------------------------------------------------------------ фракции
+    ["Old money, older bureaucracy. Runs the densest trade lanes and taxes every one of them."] =
+        "Старые деньги и ещё более старая бюрократия. Держит самые оживлённые торговые пути и облагает каждый из них.",
+    ["A slow, argumentative union of chartered worlds. Good courts, thin fleets."] =
+        "Медлительный, вечно спорящий союз хартийных миров. Хорошие суды, жидкий флот.",
+    ["Conscription, quotas and a very efficient navy. Trade here is a privilege, not a right."] =
+        "Призыв, квоты и очень действенный флот. Торговля здесь — привилегия, а не право.",
+    ["Not a government so much as an agreement between people who own things."] =
+        "Не столько правительство, сколько уговор между теми, кто чем-то владеет.",
+    ["Independent worlds that agreed on exactly one thing: nobody else gets to tax them."] =
+        "Независимые миры, сошедшиеся ровно в одном: никто чужой их не облагает.",
+    ["Research collectives with warships. They will trade anything except an explanation."] =
+        "Исследовательские коллективы с боевыми кораблями. Продадут что угодно, кроме объяснения.",
+
+    -- ------------------------------------------------------------ оснащение
+    ["Cheap, reliable, unimpressive."] = "Дёшево, надёжно, скучно.",
+    ["The same gun after somebody competent tuned it."] = "То же орудие после рук умелого мастера.",
+    ["Continuous fire, brutal on the power plant."] = "Непрерывный огонь, жестокий к реактору.",
+    ["Kinetic rounds. Shrugs off shield resistance."] = "Кинетические снаряды. Сопротивление щита им безразлично.",
+    ["One shot, one very large hole."] = "Один выстрел — одна очень большая дыра.",
+    ["Cracks ore out of rock. Poor against hulls."] = "Выбивает руду из породы. Против корпусов бесполезен.",
+    ["Standard issue bubble."] = "Штатный пузырь.",
+    ["Dominion surplus. Loud."] = "Излишки Доминиона. Шумный.",
+    ["Conclave design. Recharges while you are still being shot at."] =
+        "Разработка Конклава. Восстанавливается, пока по вам ещё стреляют.",
+    ["No field, just more ship between you and them."] =
+        "Никакого поля — просто больше корабля между вами и ими.",
+    ["More thrust, more heat."] = "Больше тяги, больше жара.",
+    ["For people who intend to leave the map."] = "Для тех, кто намерен уйти за край карты.",
+    ["Longer hyperspace reach."] = "Больший гиперпрыжок.",
+    ["Refuels from a star's corona. Watch the heat."] = "Черпает топливо из короны звезды. Следите за нагревом.",
+    ["Doubles scan range and reveals cargo manifests."] =
+        "Удваивает дальность сканирования и вскрывает грузовые манифесты.",
+    ["Syndicate hardware. Customs officers dislike it."] = "Изделие Синдиката. Таможня его не любит.",
+    ["Slowly rebuilds hull outside combat."] = "Медленно чинит корпус вне боя.",
+    ["Everything needed to plant a settlement, except the people."] =
+        "Всё нужное, чтобы заложить поселение, кроме людей.",
+    ["Emergency shield recharge, four charges."] = "Аварийная подзарядка щита, четыре заряда.",
+    ["Eight more tonnes."] = "Ещё восемь тонн.",
+    ["Twice the capacity, twice the mass."] = "Вдвое больше вместимость, вдвое больше масса.",
+    ["Serious hauling."] = "Серьёзные перевозки.",
+    ["You are a warehouse that moves."] = "Вы — склад, который умеет летать.",
+    ["Twelve tonnes that a routine scan does not find."] =
+        "Двенадцать тонн, которых обычный досмотр не находит.",
+
+    -- ------------------------------------------------------------ репутация
+    ["Allied"] = "Союзник",
+    ["Friendly"] = "Дружественно",
+    ["Cordial"] = "Тепло",
+    ["Neutral"] = "Нейтрально",
+    ["Unfriendly"] = "Прохладно",
+    ["Hostile"] = "Враждебно",
+    ["Enemy"] = "Враг",
+
+    -- ------------------------------------------------------- ступени колоний
+    ["Outpost"] = "Аванпост",
+    ["Township"] = "Посёлок",
+    ["City"] = "Город",
+    ["Metropolis"] = "Метрополия",
+
+    -- --------------------------------------------------------- типы станций
+    ["Coriolis"] = "Кориолис",
+    ["Ring"] = "Кольцо",
+    ["Drum"] = "Барабан",
+
+    -- ------------------------------------------------------------- постройки
+    ["Habitation Block"] = "Жилой блок",
+    ["Habitat Dome"] = "Жилой купол",
+    ["Market Hall"] = "Торговый зал",
+    ["Warehouse"] = "Склад",
+    ["Manufactory"] = "Мануфактура",
+    ["Power Plant"] = "Электростанция",
+    ["Agri Domes"] = "Аграрные купола",
+    ["Mine Head"] = "Шахтный ствол",
+    ["Research Campus"] = "Исследовательский кампус",
+    ["Garrison"] = "Гарнизон",
+    ["Hangar"] = "Ангар",
+    ["Control Tower"] = "Диспетчерская вышка",
+    ["Fuel Depot"] = "Топливный склад",
+    ["Utility Shed"] = "Техническая пристройка",
+    ["Monument"] = "Монумент",
+
+    -- ------------------------------------------------------------ интерьеры
+    ["Residential Lobby"] = "Жилой холл",
+    ["Bonded Warehouse"] = "Таможенный склад",
+    ["Workshop Floor"] = "Цех",
+    ["Control Room"] = "Пункт управления",
+    ["Hangar Floor"] = "Ангарная палуба",
+    ["Hydroponics"] = "Гидропоника",
+    ["Garrison Post"] = "Гарнизонный пост",
+    ["Research Wing"] = "Исследовательское крыло",
 
     -- космос
     ["Derelict"] = "Обломок",

@@ -14,12 +14,14 @@ local palette = require("src.render.palette")
 local interiorGen = require("src.procgen.interior")
 local hud = require("src.render.hud")
 local ui = require("src.ui.widgets")
+local i18n = require("src.i18n")
 
 local Room = class("RoomState")
 
 local sqrt, sin, cos = math.sqrt, math.sin, math.cos
 local W = config.walk
 local C = palette.colors
+local L = i18n.format
 
 local SERVICE_LABEL = {
     market = "Commodity Market", blackMarket = "Black Market", missions = "Contract Board",
@@ -107,14 +109,14 @@ function Room:updatePrompt()
     end
     if best then
         self.prompt = string.format("%s: %s", config.keyName("interact"),
-            SERVICE_LABEL[best.service] or best.service)
+            L(SERVICE_LABEL[best.service] or best.service))
         self.action = { kind = "service", service = best.service }
         return
     end
     local ex = self.room.exit
     local d = sqrt((self.pos.x - ex.x) ^ 2 + (self.pos.z - ex.z) ^ 2)
     if d < 2.6 then
-        self.prompt = config.keyName("interact") .. " to step outside"
+        self.prompt = L("{key} to step outside", { key = config.keyName("interact") })
         self.action = { kind = "exit" }
     end
 end

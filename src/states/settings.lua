@@ -12,10 +12,12 @@ local ui = require("src.ui.widgets")
 local settings = require("src.settings")
 local input = require("src.input")
 local lighting = require("src.render.lighting")
+local i18n = require("src.i18n")
 
 local Settings = class("SettingsState")
 
 local C = palette.colors
+local L = i18n.format
 
 function Settings:init() self.drawUnderlying = true end
 
@@ -31,26 +33,26 @@ end
 function Settings:buildOptions()
     local items = {}
     for _, group in ipairs(settings.schema) do
-        items[#items + 1] = { label = group.section:upper(), disabled = true, color = C.uiDim }
+        items[#items + 1] = { label = L(group.section:upper()), disabled = true, color = C.uiDim }
         for _, item in ipairs(group.items) do
             items[#items + 1] = {
-                label = "  " .. item.name,
-                value = settings.display(item.id),
+                label = "  " .. L(item.name),
+                value = L(settings.display(item.id)),
                 settingId = item.id,
-                help = item.help,
+                help = L(item.help or ""),
             }
         end
     end
     items[#items + 1] = { label = "", disabled = true }
     items[#items + 1] = {
-        label = "  Reset all to defaults", color = C.uiWarn,
+        label = "  " .. L("Reset all to defaults"), color = C.uiWarn,
         action = function()
             settings.reset()
             input.resetBindings()
             self:apply()
             self:buildOptions()
             self:buildBindings()
-            self.status = "Defaults restored."
+            self.status = L("Defaults restored.")
         end,
     }
     local cursor = self.optionMenu and self.optionMenu.cursor or 2
@@ -60,10 +62,10 @@ end
 function Settings:buildBindings()
     local items = {}
     for _, group in ipairs(input.actionOrder) do
-        items[#items + 1] = { label = group[1]:upper(), disabled = true, color = C.uiDim }
+        items[#items + 1] = { label = L(group[1]:upper()), disabled = true, color = C.uiDim }
         for _, action in ipairs(group[2]) do
             items[#items + 1] = {
-                label = "  " .. (input.labels[action] or action),
+                label = "  " .. L(input.labels[action] or action),
                 value = input.bindingList(action),
                 action_id = action,
             }
@@ -97,8 +99,8 @@ function Settings:keypressed(key)
     if self.rebinding then
         if key ~= "escape" then
             input.rebind(self.rebinding, key)
-            self.status = string.format("%s bound to %s",
-                input.labels[self.rebinding] or self.rebinding, key:upper())
+            self.status = L("{action} bound to {key}", {
+                action = L(input.labels[self.rebinding] or self.rebinding), key = key:upper() })
             self:buildBindings()
             settings.save()
         end
@@ -130,12 +132,12 @@ function Settings:keypressed(key)
     elseif self.pane == 2 and item and item.action_id then
         if key == "return" or key == "space" then
             self.rebinding = item.action_id
-            self.status = "Press a key, or ESC to cancel."
+            self.status = L("Press a key, or ESC to cancel.")
             return
         elseif key == "delete" or key == "backspace" then
             input.resetBindings()
             self:buildBindings()
-            self.status = "Bindings reset."
+            self.status = L("Bindings reset.")
             return
         end
     end
@@ -155,16 +157,16 @@ function Settings:draw()
     love.graphics.rectangle("fill", 0, 0, w, h)
     love.graphics.setColor(1, 1, 1, 1)
 
-    ui.text("SETTINGS", 48, 34, C.uiPrimary, "large")
-    ui.text("TAB switches pane   LEFT/RIGHT change   ENTER rebind   ESC close",
+    ui.text(L("SETTINGS"), 48, 34, C.uiPrimary, "large")
+    ui.text(L("TAB switches pane   LEFT/RIGHT change   ENTER rebind   ESC close"),
         48, 68, C.uiDim, "small")
 
     local paneW = (w - 140) * 0.5
     local left, right = 60, 80 + paneW
 
     -- pane headers
-    ui.text("OPTIONS", left, 100, self.pane == 1 and C.uiPrimary or C.uiDim, "normal")
-    ui.text("KEY BINDINGS", right, 100, self.pane == 2 and C.uiPrimary or C.uiDim, "normal")
+    ui.text(L("OPTIONS"), left, 100, self.pane == 1 and C.uiPrimary or C.uiDim, "normal")
+    ui.text(L("KEY BINDINGS"), right, 100, self.pane == 2 and C.uiPrimary or C.uiDim, "normal")
     ui.rule(left, 124, paneW - 20, self.pane == 1 and C.uiPrimary or C.uiLine, self.pane == 1 and 0.8 or 0.3)
     ui.rule(right, 124, paneW - 20, self.pane == 2 and C.uiPrimary or C.uiLine, self.pane == 2 and 0.8 or 0.3)
 
@@ -177,29 +179,30 @@ function Settings:draw()
     local item = self:menu():current()
     local hy = h - 96
     ui.rule(48, hy - 10, w - 96, C.uiLine, 0.3)
-    if item and item.help then
+    if item and item.help and item.help ~= "" then
         ui.paragraph(item.help, 48, hy, w - 96, C.uiText, "small")
     elseif item and item.settingId == "lightingPreset" then
-        ui.text(lighting.get(settings.get("lightingPreset")).blurb, 48, hy, C.uiText, "small")
+        ui.paragraph(L(lighting.get(settings.get("lightingPreset")).blurb),
+            48, hy, w - 96, C.uiText, "small")
     elseif self.pane == 2 then
-        ui.text("ENTER to rebind the highlighted action. DELETE restores every default binding.",
-            48, hy, C.uiText, "small")
+        ui.paragraph(L("ENTER rebinds the highlighted action. DELETE restores every default binding."),
+            48, hy, w - 96, C.uiText, "small")
     end
 
     if self.rebinding then
         local bw, bh = 380, 90
         local bx, by = (w - bw) * 0.5, (h - bh) * 0.5
-        ui.panel(bx, by, bw, bh, "REBIND")
-        ui.textCenter(input.labels[self.rebinding] or self.rebinding,
+        ui.panel(bx, by, bw, bh, L("REBIND"))
+        ui.textCenter(L(input.labels[self.rebinding] or self.rebinding),
             bx + bw * 0.5, by + 26, C.uiPrimary, "normal")
-        ui.textCenter("Press a key  (ESC cancels)", bx + bw * 0.5, by + 54, C.uiText, "small")
+        ui.textCenter(L("Press a key  (ESC cancels)"), bx + bw * 0.5, by + 54, C.uiText, "small")
     end
 
     if self.status then
         ui.textRight(self.status, w - 48, h - 40, C.uiPrimary, "small")
     end
     if input.joystick then
-        ui.text("Gamepad: " .. input.joystick:getName(), 48, h - 40, C.uiDim, "small")
+        ui.text(L("Gamepad: {name}", { name = input.joystick:getName() }), 48, h - 40, C.uiDim, "small")
     end
 end
 

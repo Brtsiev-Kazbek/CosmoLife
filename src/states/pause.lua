@@ -5,10 +5,12 @@ local config = require("src.config")
 local palette = require("src.render.palette")
 local ui = require("src.ui.widgets")
 local hud = require("src.render.hud")
+local i18n = require("src.i18n")
 
 local Pause = class("PauseState")
 
 local C = palette.colors
+local L = i18n.format
 
 function Pause:init()
     self.drawUnderlying = true
@@ -23,38 +25,39 @@ end
 function Pause:rebuild()
     local r = self.game.renderer
     local items = {
-        { label = "Resume", action = function() self.manager:pop() end },
-        { label = "Save game", action = function()
+        { label = L("Resume"), action = function() self.manager:pop() end },
+        { label = L("Save game"), action = function()
             local ok, err = self.game:saveGame()
-            self.status = ok and "Saved." or ("Save failed: " .. tostring(err))
+            self.status = ok and L("Saved.")
+                or L("Save failed: {reason}", { reason = tostring(err) })
         end },
-        { label = "Load game", action = function()
+        { label = L("Load game"), action = function()
             local ok, err = self.game:loadGame()
             if ok then
                 local Flight = require("src.states.flight")
                 self.manager:switch(Flight.new())
             else
-                self.status = "Load failed: " .. tostring(err)
+                self.status = L("Load failed: {reason}", { reason = tostring(err) })
             end
         end },
-        { label = "CRT filter", value = r.settings.post and "on" or "off", action = function()
+        { label = L("CRT filter"), value = r.settings.post and L("on") or L("off"), action = function()
             r.settings.post = not r.settings.post
             self:rebuild()
         end },
-        { label = "Light bands", value = r.env.bands > 0 and tostring(r.env.bands) or "smooth", action = function()
+        { label = L("Light bands"), value = r.env.bands > 0 and tostring(r.env.bands) or L("smooth"), action = function()
             r.env.bands = (r.env.bands + 1) % 9
             self:rebuild()
         end },
-        { label = "Wireframe", value = r.settings.wireframe and "on" or "off", action = function()
+        { label = L("Wireframe"), value = r.settings.wireframe and L("on") or L("off"), action = function()
             r.settings.wireframe = not r.settings.wireframe
             self:rebuild()
         end },
-        { label = "Quit to title", action = function()
+        { label = L("Quit to title"), action = function()
             local Menu = require("src.states.menu")
             hud.clear()
             self.manager:switch(Menu.new())
         end },
-        { label = "Quit to desktop", action = function() love.event.quit() end },
+        { label = L("Quit to desktop"), action = function() love.event.quit() end },
     }
     local cursor = self.menu and self.menu.cursor or 1
     self.menu = ui.menu(items, { visible = 10, cursor = cursor })
@@ -77,7 +80,7 @@ function Pause:draw()
 
     local pw, ph = 380, 340
     local px, py = (w - pw) * 0.5, (h - ph) * 0.5
-    ui.panel(px, py, pw, ph, "PAUSED")
+    ui.panel(px, py, pw, ph, L("PAUSED"))
     ui.text("COSMOLIFE", px + 28, py + 22, C.uiPrimary, "large")
     if self.world then
         ui.text(self.world.player.name .. "  -  " .. self.world:dateString(), px + 28, py + 52, C.uiDim, "small")

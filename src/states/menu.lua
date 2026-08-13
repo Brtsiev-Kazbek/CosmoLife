@@ -9,6 +9,8 @@ local vec3 = require("src.lib.vec3")
 local mat4 = require("src.lib.mat4")
 local util = require("src.lib.util")
 local config = require("src.config")
+local input = require("src.input")
+local i18n = require("src.i18n")
 local palette = require("src.render.palette")
 local ui = require("src.ui.widgets")
 local Rng = require("src.lib.rng")
@@ -18,6 +20,7 @@ local bodies = require("src.render.bodies")
 local Menu = class("MenuState")
 
 local C = palette.colors
+local L = i18n.format
 
 function Menu:init() self.drawUnderlying = false end
 
@@ -43,15 +46,15 @@ end
 
 function Menu:buildMenu()
     local items = {}
-    items[#items + 1] = { label = "New commander", action = function() self:newGame() end }
+    items[#items + 1] = { label = L("New commander"), action = function() self:newGame() end }
     local World = require("src.sim.world")
     self.hasSave = World.new({}):hasSave()
     items[#items + 1] = {
-        label = "Continue", disabled = not self.hasSave,
+        label = L("Continue"), disabled = not self.hasSave,
         action = function() self:loadGame() end,
     }
-    items[#items + 1] = { label = "Controls", action = function() self.showHelp = not self.showHelp end }
-    items[#items + 1] = { label = "Quit", action = function() love.event.quit() end }
+    items[#items + 1] = { label = L("Controls"), action = function() self.showHelp = not self.showHelp end }
+    items[#items + 1] = { label = L("Quit"), action = function() love.event.quit() end }
     self.menu = ui.menu(items, { visible = 6 })
 end
 
@@ -65,7 +68,7 @@ end
 function Menu:loadGame()
     local ok, err = self.game:loadGame()
     if not ok then
-        self.error = "Could not load: " .. tostring(err)
+        self.error = L("Could not load: {reason}", { reason = tostring(err) })
         return
     end
     local Flight = require("src.states.flight")
@@ -134,44 +137,31 @@ function Menu:draw()
     love.graphics.setColor(1, 1, 1, 1)
 
     ui.text("COSMOLIFE", 60, h * 0.5 - 170, C.uiPrimary, "title")
-    ui.text("an elite in an endless galaxy", 66, h * 0.5 - 96, C.uiDim, "normal")
+    ui.text(L("an elite in an endless galaxy"), 66, h * 0.5 - 96, C.uiDim, "normal")
     ui.rule(66, h * 0.5 - 64, 320)
 
     if self.menu then self.menu:draw(90, h * 0.5 - 40, 300, 34, "large") end
 
     ui.text("v" .. config.version, 66, h - 54, C.uiDim, "small")
-    ui.text(self.showcase.roleName .. " class  -  " .. self.showcase.name, 66, h - 34, C.uiDim, "small")
+    ui.text(L("{class} class  -  {name}",
+        { class = L(self.showcase.roleName), name = self.showcase.name }), 66, h - 34, C.uiDim, "small")
 
     if self.error then
         ui.text(self.error, 66, h * 0.5 + 130, C.uiDanger, "small")
     end
 
     if self.showHelp then
-        local lines = {
-            "W S            pitch",
-            "A D            roll",
-            "Q E            yaw",
-            "R F            throttle up / down",
-            "Z X            full / zero throttle",
-            "SHIFT          boost",
-            "J (hold)       frame shift cruise",
-            "SPACE          fire",
-            "T / Y / G      target / hostile / scan",
-            "L              landing gear",
-            "ENTER          dock or enter",
-            "U              disembark on foot",
-            "TAB            galaxy map",
-            "N / C / I      log / colonies / ship",
-            "V              cockpit or chase view",
-            "F5 / F9        save / load",
-            "F1             this list in flight",
-        }
-        local pw = 420
-        local ph = #lines * 19 + 60
+        -- built from the live bindings, so it cannot drift out of date the way
+        -- the hand-written list it replaced had
+        local rows = input.controlRows(input.flightHelp)
+        local pw = 460
+        local ph = #rows * 18 + 60
         local px, py = w - pw - 60, (h - ph) * 0.5
-        ui.panel(px, py, pw, ph, "CONTROLS")
-        for i, l in ipairs(lines) do
-            ui.text(l, px + 24, py + 34 + (i - 1) * 19, C.uiText, "small")
+        ui.panel(px, py, pw, ph, L("CONTROLS"))
+        for i, r in ipairs(rows) do
+            local ry = py + 34 + (i - 1) * 18
+            ui.text(L(r[1]), px + 24, ry, C.uiText, "small")
+            ui.textRight(r[2], px + pw - 24, ry, C.uiPrimary, "small")
         end
     end
 end

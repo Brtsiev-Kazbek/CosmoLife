@@ -11,6 +11,7 @@ local config = require("src.config")
 local palette = require("src.render.palette")
 local ui = require("src.ui.widgets")
 local factions = require("src.sim.factions")
+local i18n = require("src.i18n")
 local commodities = require("src.sim.commodities")
 local hud = require("src.render.hud")
 
@@ -18,6 +19,7 @@ local Map = class("GalaxyMapState")
 
 local floor, min, max, sqrt = math.floor, math.min, math.max, math.sqrt
 local C = palette.colors
+local L = i18n.format
 
 function Map:init()
     self.drawUnderlying = false
@@ -215,13 +217,15 @@ function Map:draw()
     self:drawInfo(w - 372, 40, 332)
 
     -- header + footer
-    ui.text("GALACTIC CHART", 40, 30, C.uiPrimary, "large")
-    ui.text(string.format("centre  %.0f, %.0f, %.0f ly     scale %.1f px/ly", self.cx, self.cy, self.cz, self.scale),
-        40, 62, C.uiDim, "small")
+    ui.text(L("GALACTIC CHART"), 40, 30, C.uiPrimary, "large")
+    ui.text(L("centre {x}, {y}, {z} ly     scale {scale} px/ly", {
+        x = string.format("%.0f", self.cx), y = string.format("%.0f", self.cy),
+        z = string.format("%.0f", self.cz), scale = string.format("%.1f", self.scale),
+    }), 40, 62, C.uiDim, "small")
     ui.rule(40, h - 60, w - 80, C.uiLine, 0.4)
-    ui.text("WASD pan   PGUP/PGDN vertical   +/- zoom   CLICK select   ENTER jump   R range ring   TAB close",
+    ui.text(L("WASD pan   PGUP/PGDN vertical   +/- zoom   ENTER jump   TAB close"),
         40, h - 48, C.uiDim, "small")
-    ui.textRight(string.format("FUEL %.1f / %.1f t", self.player.fuel, self.player.stats.fuel),
+    ui.textRight(L("FUEL") .. string.format(" %.1f / %.1f t", self.player.fuel, self.player.stats.fuel),
         w - 40, h - 48, C.amber, "small")
 end
 
@@ -229,7 +233,7 @@ function Map:drawInfo(x, y, w)
     local s = self.selected
     if not s then return end
     local h = 330
-    ui.panel(x, y, w, h, "SYSTEM")
+    ui.panel(x, y, w, h, L("SYSTEM"))
     local px, py = x + 18, y + 18
     ui.text(s.name, px, py, C.uiPrimary, "large")
     py = py + 32
@@ -241,16 +245,16 @@ function Map:drawInfo(x, y, w)
     local cost = self.world:fuelCost(dist)
 
     local rows = {
-        { "Distance", string.format("%.2f ly", dist) },
-        { "Fuel needed", string.format("%.1f t", cost) },
-        { "Allegiance", faction.name },
-        { "Government", s.governmentName },
-        { "Economy", s.economyName },
-        { "Population", util.money(s.population) },
-        { "Tech level", tostring(s.techLevel) },
-        { "Security", string.format("%.0f%%", s.lawLevel * 100) },
-        { "Star", s.starClass .. " class" },
-        { "Frontier", string.format("%.0f%%", (s.frontier or 0) * 100) },
+        { L("Distance"), string.format("%.2f ly", dist) },
+        { L("Fuel needed"), string.format("%.1f t", cost) },
+        { L("Allegiance"), L(faction.name) },
+        { L("Government"), L(s.governmentName) },
+        { L("Economy"), L(s.economyName) },
+        { L("Population"), util.money(s.population) },
+        { L("Tech level"), tostring(s.techLevel) },
+        { L("Security"), string.format("%.0f%%", s.lawLevel * 100) },
+        { L("Star"), L("class {c}", { c = s.starClass }) },
+        { L("Frontier"), string.format("%.0f%%", (s.frontier or 0) * 100) },
     }
     for _, r in ipairs(rows) do
         ui.text(r[1], px, py, C.uiDim, "small")
@@ -260,13 +264,13 @@ function Map:drawInfo(x, y, w)
 
     py = py + 6
     if dist > self.jumpRange then
-        ui.text("OUT OF JUMP RANGE", px, py, C.uiDanger, "small")
+        ui.text(L("OUT OF JUMP RANGE"), px, py, C.uiDanger, "small")
     elseif cost > self.player.fuel then
-        ui.text("NOT ENOUGH FUEL", px, py, C.uiDanger, "small")
+        ui.text(L("NOT ENOUGH FUEL"), px, py, C.uiDanger, "small")
     elseif s.id == here.id then
-        ui.text("CURRENT SYSTEM", px, py, C.uiPrimary, "small")
+        ui.text(L("CURRENT SYSTEM"), px, py, C.uiPrimary, "small")
     else
-        ui.text("ENTER TO JUMP", px, py, C.uiPrimary, "small")
+        ui.text(L("ENTER TO JUMP"), px, py, C.uiPrimary, "small")
     end
     py = py + 22
 
@@ -275,14 +279,15 @@ function Map:drawInfo(x, y, w)
     for _, war in ipairs(wars) do
         if war.a == s.factionId or war.b == s.factionId then
             local other = (war.a == s.factionId) and war.b or war.a
-            ui.paragraph(string.format("At war with %s", factions.get(other).name), px, py, w - 36, C.uiDanger, "small")
+            ui.paragraph(L("At war with {faction:ins}", { faction = i18n.term(factions.get(other).name) }),
+                px, py, w - 36, C.uiDanger, "small")
             py = py + 18
         end
     end
     if self.player.knownSystems[s.id] then
-        ui.text("Visited", px, py, C.uiPrimary, "small")
+        ui.text(L("Visited"), px, py, C.uiPrimary, "small")
     else
-        ui.text("Unvisited - data from long range survey", px, py, C.uiDim, "small")
+        ui.text(L("Unvisited - long range survey"), px, py, C.uiDim, "small")
     end
 end
 

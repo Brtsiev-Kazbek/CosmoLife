@@ -10,16 +10,18 @@ local util = require("src.lib.util")
 local palette = require("src.render.palette")
 local ui = require("src.ui.widgets")
 local hud = require("src.render.hud")
+local i18n = require("src.i18n")
 
 local GameOver = class("GameOverState")
 
 local C = palette.colors
+local L = i18n.format
 local floor = math.floor
 
 function GameOver:init() self.drawUnderlying = true end
 
 function GameOver:enter(reason, flight)
-    self.reason = reason or "destroyed"
+    self.reason = reason or L("destroyed")
     self.flight = flight
     self.world = self.game.world
     self.player = self.world.player
@@ -32,17 +34,17 @@ function GameOver:enter(reason, flight)
     local items = {}
     items[#items + 1] = {
         label = self.canAfford
-            and ("Claim insurance  -  " .. util.money(self.excess) .. " cr excess")
-            or ("Insurance excess: " .. util.money(self.excess) .. " cr (cannot pay)"),
+            and L("Claim insurance  -  {cash} cr excess", { cash = util.money(self.excess) })
+            or L("Insurance excess: {cash} cr (cannot pay)", { cash = util.money(self.excess) }),
         disabled = not self.canAfford,
         action = function() self:respawn(false) end,
     }
     items[#items + 1] = {
-        label = "Declare bankruptcy  -  keep a basic hull, lose your cargo",
+        label = L("Declare bankruptcy  -  keep a basic hull, lose your cargo"),
         action = function() self:respawn(true) end,
     }
     items[#items + 1] = {
-        label = "Quit to title",
+        label = L("Quit to title"),
         action = function()
             local Menu = require("src.states.menu")
             hud.clear()
@@ -66,8 +68,9 @@ function GameOver:respawn(bankrupt)
     player.hull = player.stats.maxHull
     player.shield = player.stats.maxShield
     player.fuel = player.stats.fuel
-    player:addLog("Ship lost: " .. self.reason .. ". Rebuilt under insurance.", self.world.day, "alert")
-    self.world:addNews("Insurance claim filed by " .. player.name .. ".", "alert")
+    player:addLog(L("Ship lost: {reason}. Rebuilt under insurance.", { reason = self.reason }),
+        self.world.day, "alert")
+    self.world:addNews(L("Insurance claim filed by {name}.", { name = player.name }), "alert")
 
     -- back into space at the system we were in
     local Flight = require("src.states.flight")
@@ -92,13 +95,13 @@ function GameOver:draw()
 
     if fade < 0.4 then return end
 
-    ui.textCenter("SHIP DESTROYED", w * 0.5, h * 0.32, C.uiDanger, "huge")
+    ui.textCenter(L("SHIP DESTROYED"), w * 0.5, h * 0.32, C.uiDanger, "huge")
     ui.textCenter(self.reason, w * 0.5, h * 0.32 + 52, C.uiDim, "normal")
 
     local r = self.player.record
-    ui.textCenter(string.format("%d jumps  -  %d kills  -  %d contracts  -  %s cr",
-        r.jumps, r.kills, r.missionsDone, util.money(self.player.credits)),
-        w * 0.5, h * 0.32 + 82, C.uiText, "small")
+    ui.textCenter(L("{j} {j:jump}  -  {k} {k:kill}  -  {c} {c:contract}  -  {cash} cr", {
+        j = r.jumps, k = r.kills, c = r.missionsDone, cash = util.money(self.player.credits),
+    }), w * 0.5, h * 0.32 + 82, C.uiText, "small")
 
     if self.timer > 1.2 and self.menu then
         self.menu:draw(w * 0.5 - 260, h * 0.55, 520, 30, "normal")

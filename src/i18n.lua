@@ -418,13 +418,19 @@ end
 
 --- The declinable term for an English source string.
 --
--- Returns a noun object when the locale declares one, and otherwise whatever
--- `translate` gives -- a plain string. Call sites that only display a name can
--- keep using `L(name)`; the ones that build a sentence around it use this.
+-- Returns a noun object when the locale declares one, a translated string when
+-- the locale has one, and the text itself otherwise. Call sites that only
+-- display a name can keep using `L(name)`; the ones that build a sentence
+-- around it use this.
+--
+-- Unlike `translate` this does not record a miss: it is routinely handed
+-- procedurally generated proper nouns ("Реен Прима"), which are not dictionary
+-- entries and never will be.
 function i18n.term(text)
+    if type(text) ~= "string" then return text end
     local n = i18n.nouns[text]
     if n then return n end
-    return i18n.translate(text)
+    return i18n.strings[text] or text
 end
 
 -- ---------------------------------------------------------------------------

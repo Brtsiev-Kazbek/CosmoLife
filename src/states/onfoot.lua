@@ -13,15 +13,19 @@ local palette = require("src.render.palette")
 local hud = require("src.render.hud")
 local ui = require("src.ui.widgets")
 local settlementGen = require("src.procgen.settlement")
+local commoditiesMod = require("src.sim.commodities")
 local combat = require("src.sim.combat")
 local settings = require("src.settings")
 local hints = require("src.render.hints")
+local input = require("src.input")
+local i18n = require("src.i18n")
 
 local OnFoot = class("OnFootState")
 
 local sqrt, min, max, cos, sin, pi = math.sqrt, math.min, math.max, math.cos, math.sin, math.pi
 local W = config.walk
 local C = palette.colors
+local L = i18n.format
 
 function OnFoot:enter(opts)
     self.surface = opts.surface
@@ -42,8 +46,9 @@ function OnFoot:enter(opts)
     end
 
     love.mouse.setRelativeMode(true)
-    hud.message("On foot. " .. config.keyName("interact") .. " to interact, " ..
-        config.keyName("disembark") .. " to board the ship.", "info")
+    hud.message(L("On foot. {interact} to interact, {board} to board the ship.", {
+        interact = config.keyName("interact"), board = config.keyName("disembark"),
+    }), "info")
 end
 
 function OnFoot:exit()
@@ -133,7 +138,7 @@ function OnFoot:updatePrompt()
     -- board the ship
     local d = sqrt((self.pos.x - self.shipLocal.x) ^ 2 + (self.pos.z - self.shipLocal.z) ^ 2)
     if d < 14 then
-        self.prompt = config.keyName("disembark") .. " to board ship"
+        self.prompt = L("{key} to board ship", { key = config.keyName("disembark") })
         self.action = { kind = "board" }
     end
 
@@ -146,7 +151,8 @@ function OnFoot:updatePrompt()
                 local ez = site.z + b.entrance.z
                 local bd = sqrt((self.pos.x - ex) ^ 2 + (self.pos.z - ez) ^ 2)
                 if bd < W.interactRange then
-                    self.prompt = string.format("%s to enter %s", config.keyName("interact"), b.name)
+                    self.prompt = L("{key} to enter {name}",
+                        { key = config.keyName("interact"), name = b.name })
                     self.action = { kind = "enter", building = b, site = site }
                     break
                 end
@@ -184,7 +190,7 @@ function OnFoot:keypressed(key)
     end
     if config.is("disembark", key) and self.action and self.action.kind == "board" then
         self.manager:pop()
-        hud.message("Aboard", "info")
+        hud.message(L("Aboard"), "info")
         return
     end
     if (config.is("interact", key)) and self.action and self.action.kind == "enter" then
@@ -248,11 +254,14 @@ function OnFoot:draw(background)
 
     hud.drawWalking({
         player = self.player,
-        locationName = self.site and self.site.place.name or (self.surface.body.name .. " surface"),
+        locationName = self.site and self.site.place.name
+            or L("{body} surface", { body = self.surface.body.name }),
         subtitle = self.site
-            and string.format("pop %s  -  %s", util.money(self.site.place.population),
-                self.site.place.economyId)
-            or string.format("gravity %.1f m/s2", self.surface.body.gravity or 0),
+            and L("pop {pop}  -  {economy}", {
+                pop = util.money(self.site.place.population),
+                economy = L(commoditiesMod.economy(self.site.place.economyId).name),
+            })
+            or L("gravity {g} m/s2", { g = string.format("%.1f", self.surface.body.gravity or 0) }),
         prompt = self.prompt,
     }, w, h)
 
@@ -264,19 +273,14 @@ function OnFoot:draw(background)
     end
 
     if self.game.showHelp then
-        local lines = {
-            { "Move", "W A S D" },
-            { "Run", "SHIFT" },
-            { "Jump", "SPACE" },
-            { "Look", "MOUSE" },
-            { "Interact", config.keyName("interact") },
-            { "Board ship", config.keyName("disembark") },
-            { "Colonies", config.keyName("colony") },
-        }
-        local pw, ph = 300, #lines * 20 + 54
+        local rows = { { L("Move"), "W A S D" }, { L("Look"), L("MOUSE") } }
+        for _, r in ipairs(input.controlRows(input.footHelp)) do
+            rows[#rows + 1] = { L(r[1]), r[2] }
+        end
+        local pw, ph = 320, #rows * 20 + 54
         local px, py = (w - pw) * 0.5, (h - ph) * 0.5
-        ui.panel(px, py, pw, ph, "ON FOOT")
-        for i, l in ipairs(lines) do
+        ui.panel(px, py, pw, ph, L("ON FOOT"))
+        for i, l in ipairs(rows) do
             ui.text(l[1], px + 22, py + 30 + (i - 1) * 20, C.uiText, "small")
             ui.textRight(l[2], px + pw - 22, py + 30 + (i - 1) * 20, C.uiPrimary, "small")
         end

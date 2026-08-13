@@ -1191,7 +1191,7 @@ function Flight:onKill(victim, killer)
         local missionsMod = require("src.sim.missions")
         local touched = missionsMod.recordKill(self.player, faction, victim.pilot)
         for _, m in ipairs(touched) do
-            hud.message(string.format("%s  (%d/%d)", m.title, m.progress or 0, m.quantity), "good")
+            hud.message(string.format("%s  (%d/%d)", missionsMod.title(m), m.progress or 0, m.quantity), "good")
         end
     end
     victim.dead = true

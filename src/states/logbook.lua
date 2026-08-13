@@ -7,10 +7,12 @@ local palette = require("src.render.palette")
 local ui = require("src.ui.widgets")
 local missionsMod = require("src.sim.missions")
 local factions = require("src.sim.factions")
+local i18n = require("src.i18n")
 
 local Logbook = class("LogbookState")
 
 local C = palette.colors
+local L = i18n.format
 local floor = math.floor
 
 function Logbook:init() self.drawUnderlying = false end
@@ -45,18 +47,19 @@ function Logbook:draw()
     local w, h = love.graphics.getWidth(), love.graphics.getHeight()
     love.graphics.clear(0.02, 0.025, 0.035, 1)
 
-    ui.text("COMMANDER " .. self.player.name:upper(), 40, 30, C.uiPrimary, "large")
+    ui.text(L("COMMANDER {name}", { name = self.player.name:upper() }), 40, 30, C.uiPrimary, "large")
     ui.textRight(self.world:dateString(), w - 40, 34, C.uiDim, "small")
-    ui.textRight(util.money(self.player.credits) .. " cr", w - 40, 54, C.amber, "small")
+    ui.textRight(util.money(self.player.credits) .. " " .. L("cr"), w - 40, 54, C.amber, "small")
 
     local tx = 40
     for i, t in ipairs(self.tabs) do
-        local tw = ui.font("small"):getWidth(t) + 26
+        local name = L(t)
+        local tw = ui.font("small"):getWidth(name) + 26
         if i == self.tab then
             ui.setColor(C.uiPrimary, 0.22)
             love.graphics.rectangle("fill", tx, 74, tw, 24)
         end
-        ui.text(t, tx + 13, 78, i == self.tab and C.uiPrimary or C.uiDim, "small")
+        ui.text(name, tx + 13, 78, i == self.tab and C.uiPrimary or C.uiDim, "small")
         tx = tx + tw + 6
     end
     ui.rule(40, 102, w - 80, C.uiLine, 0.4)
@@ -66,14 +69,14 @@ function Logbook:draw()
     else self:drawNews(w, h) end
 
     ui.rule(40, h - 56, w - 80, C.uiLine, 0.4)
-    ui.text("Q/E tabs   W/S or wheel scroll   " .. config.keyName("missions") .. " or ESC to close",
+    ui.text(L("Q/E tabs   W/S scroll   {key} or ESC to close", { key = config.keyName("missions") }),
         40, h - 44, C.uiDim, "small")
 end
 
 function Logbook:drawContracts(w, h)
     local y = 126
     if #self.player.missions == 0 then
-        ui.text("No active contracts. Take work at any station's contract board.", 60, y, C.uiDim, "small")
+        ui.text(L("No active contracts. Take work at any station's contract board."), 60, y, C.uiDim, "small")
         return
     end
     for i, m in ipairs(self.player.missions) do
@@ -81,13 +84,13 @@ function Logbook:drawContracts(w, h)
             if y > h - 110 then break end
             local col = m.illegal and C.magenta or C.uiText
             local overdue = (m.expires - self.world.day) < 2
-            ui.text(m.title, 60, y, col, "normal")
-            ui.textRight(util.money(m.reward) .. " cr", w - 60, y, C.amber, "normal")
+            ui.text(missionsMod.title(m), 60, y, col, "normal")
+            ui.textRight(util.money(m.reward) .. " " .. L("cr"), w - 60, y, C.amber, "normal")
             y = y + 22
             ui.text(missionsMod.status(m, self.world.day), 76, y, overdue and C.uiDanger or C.uiDim, "small")
             ui.textRight(m.employer or "", w - 60, y, C.uiDim, "small")
             y = y + 20
-            y = y + ui.paragraph(m.brief, 76, y, w - 200, C.uiDim, "small") + 14
+            y = y + ui.paragraph(missionsMod.brief(m), 76, y, w - 200, C.uiDim, "small") + 14
             ui.rule(60, y - 6, w - 120, C.uiLine, 0.2)
         end
     end
@@ -97,20 +100,20 @@ function Logbook:drawRecord(w, h)
     local r = self.player.record
     local x, y = 60, 130
     local rows = {
-        { "Ship", self.player.shipDef.roleName .. "  \"" .. self.player.shipDef.name .. "\"" },
-        { "Credits", util.money(self.player.credits) },
-        { "Systems visited", tostring(util.count(self.player.knownSystems)) },
-        { "Hyperspace jumps", tostring(r.jumps) },
-        { "Distance travelled", string.format("%.1f ly", r.distanceLy) },
-        { "Landings", tostring(r.landings) },
-        { "Trades", tostring(r.trades) },
-        { "Trade revenue", util.money(r.profit) .. " cr" },
-        { "Ships destroyed", tostring(r.kills) },
-        { "Ships lost", tostring(r.deaths) },
-        { "Contracts completed", tostring(r.missionsDone) },
-        { "Contracts failed", tostring(r.missionsFailed) },
-        { "Colonies founded", tostring(r.coloniesFounded) },
-        { "Bodies scanned", tostring(r.scanned) },
+        { L("Ship"), L(self.player.shipDef.roleName) .. "  \"" .. self.player.shipDef.name .. "\"" },
+        { L("Credits"), util.money(self.player.credits) },
+        { L("Systems visited"), tostring(util.count(self.player.knownSystems)) },
+        { L("Hyperspace jumps"), tostring(r.jumps) },
+        { L("Distance travelled"), string.format("%.1f ly", r.distanceLy) },
+        { L("Landings"), tostring(r.landings) },
+        { L("Trades"), tostring(r.trades) },
+        { L("Trade revenue"), util.money(r.profit) .. " " .. L("cr") },
+        { L("Ships destroyed"), tostring(r.kills) },
+        { L("Ships lost"), tostring(r.deaths) },
+        { L("Contracts completed"), tostring(r.missionsDone) },
+        { L("Contracts failed"), tostring(r.missionsFailed) },
+        { L("Colonies founded"), tostring(r.coloniesFounded) },
+        { L("Bodies scanned"), tostring(r.scanned) },
     }
     for _, row in ipairs(rows) do
         ui.text(row[1], x, y, C.uiDim, "small")
@@ -120,33 +123,33 @@ function Logbook:drawRecord(w, h)
 
     -- standings
     local sx, sy = w * 0.5 + 40, 130
-    ui.text("STANDINGS", sx, sy, C.uiPrimary, "small")
+    ui.text(L("STANDINGS"), sx, sy, C.uiPrimary, "small")
     sy = sy + 24
     for _, f in ipairs(factions.list) do
         local rep = self.player:reputation(f.id)
-        ui.text(f.name, sx, sy, { f.color[1], f.color[2], f.color[3], 1 }, "small")
-        ui.text(self.player:reputationName(f.id), sx + 210, sy,
+        ui.text(L(f.name), sx, sy, { f.color[1], f.color[2], f.color[3], 1 }, "small")
+        ui.text(L(self.player:reputationName(f.id)), sx + 210, sy,
             rep < -0.1 and C.uiDanger or (rep > 0.1 and C.uiPrimary or C.uiDim), "small")
         ui.bar(sx + 320, sy + 3, 110, 8, (rep + 1) * 0.5, rep < 0 and C.uiDanger or C.uiPrimary)
         sy = sy + 20
         local bounty = self.player:bounty(f.id)
         if bounty > 0 then
-            ui.text("   wanted: " .. util.money(bounty) .. " cr", sx, sy, C.uiDanger, "small")
+            ui.text("   " .. L("wanted: {cash} cr", { cash = util.money(bounty) }), sx, sy, C.uiDanger, "small")
             sy = sy + 18
         end
     end
 
     sy = sy + 14
-    ui.text("COLONIES", sx, sy, C.uiPrimary, "small")
+    ui.text(L("COLONIES"), sx, sy, C.uiPrimary, "small")
     sy = sy + 22
     if #self.player.colonies == 0 then
-        ui.text("none founded", sx, sy, C.uiDim, "small")
+        ui.text(L("none founded"), sx, sy, C.uiDim, "small")
     else
         local colonyMod = require("src.sim.colony")
         for _, c in ipairs(self.player.colonies) do
             ui.text(c.name, sx, sy, C.uiText, "small")
-            ui.text(string.format("%s, pop %s", colonyMod.tierName(c.tier), util.money(floor(c.population))),
-                sx + 210, sy, C.uiDim, "small")
+            ui.text(L("{tier}, pop {pop}", { tier = L(colonyMod.tierName(c.tier)),
+                pop = util.money(floor(c.population)) }), sx + 210, sy, C.uiDim, "small")
             sy = sy + 18
         end
     end
@@ -154,10 +157,10 @@ end
 
 function Logbook:drawNews(w, h)
     local y = 130
-    ui.text("GALACTIC NEWS", 60, y, C.uiPrimary, "small")
+    ui.text(L("GALACTIC NEWS"), 60, y, C.uiPrimary, "small")
     y = y + 26
     if #self.world.news == 0 then
-        ui.text("The wires are quiet.", 60, y, C.uiDim, "small")
+        ui.text(L("The wires are quiet."), 60, y, C.uiDim, "small")
     end
     for i, n in ipairs(self.world.news) do
         if i > self.scroll then
@@ -176,7 +179,7 @@ function Logbook:drawNews(w, h)
     y = math.max(y + 16, h - 230)
     ui.rule(60, y, w - 120, C.uiLine, 0.3)
     y = y + 10
-    ui.text("PERSONAL LOG", 60, y, C.uiPrimary, "small")
+    ui.text(L("PERSONAL LOG"), 60, y, C.uiPrimary, "small")
     y = y + 22
     for i, l in ipairs(self.player.log) do
         if y > h - 70 then break end

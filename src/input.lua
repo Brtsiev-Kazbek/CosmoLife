@@ -217,6 +217,56 @@ function input.bindingList(action)
     return table.concat(out, "  ")
 end
 
+--- Control rows for a help panel: { label, keys } built from the live
+--- bindings.
+--
+-- Every help list in the game used to be a hand-written table, and they drifted
+-- apart from the actual bindings -- the title screen still advertised a scheme
+-- that had been replaced entirely. Generating them from `defaults` plus the
+-- player's rebinds means a help panel cannot be wrong.
+--
+-- `spec` is a list of either an action name, or `{ "actionA", "actionB" }` to
+-- print two opposing actions on one row ("Throttle   W / S").
+function input.controlRows(spec)
+    local rows = {}
+    for _, entry in ipairs(spec) do
+        if type(entry) == "table" then
+            local keys = {}
+            for _, action in ipairs(entry) do keys[#keys + 1] = input.keyName(action) end
+            -- the label of a pair comes from a caption on the entry, falling
+            -- back to the first action's own label
+            rows[#rows + 1] = {
+                entry.label or input.labels[entry[1]] or entry[1],
+                table.concat(keys, " / "),
+            }
+        else
+            rows[#rows + 1] = { input.labels[entry] or entry, input.keyName(entry) }
+        end
+    end
+    return rows
+end
+
+--- The rows shown on the title screen and by F1 in flight.
+input.flightHelp = {
+    { "pitchDown", "pitchUp", label = "Pitch" },
+    { "rollLeft", "rollRight", label = "Roll" },
+    { "yawLeft", "yawRight", label = "Yaw" },
+    { "throttleUp", "throttleDown", label = "Throttle" },
+    { "throttleFull", "throttleZero", label = "Full / cut throttle" },
+    { "strafeLeft", "strafeRight", label = "Strafe" },
+    { "thrustUp", "thrustDown", label = "Thrust" },
+    "boost", "warp", "levelOut", "autopilot", "mouseFlight",
+    "fire", "missile", "target", "nextTarget", "scan",
+    "landingGear", "dock", "disembark", "view",
+    "map", "missions", "colony", "ship", "settings",
+    "save", "load", "help",
+}
+
+--- The rows shown by F1 on foot.
+input.footHelp = {
+    "interact", "jump", "run", "disembark", "colony", "help",
+}
+
 --- Rebinds an action to a single key, keeping its gamepad sources.
 function input.rebind(action, key)
     local controls = input.buildControls()
