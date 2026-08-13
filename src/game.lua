@@ -69,7 +69,7 @@ end
 --- whenever the settings screen changes something.
 function Game:applySettings()
     local r = self.renderer
-    r.settings.post = settings.get("post")
+    r.settings.post = settings.get("post") and settings.q().post
     r.settings.scanline = settings.get("scanline")
     r.settings.vignette = settings.get("vignette")
     r.settings.aberration = settings.get("aberration")

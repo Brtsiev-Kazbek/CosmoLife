@@ -27,6 +27,7 @@ local CFG = config.combat
 
 local SPAWN_RADIUS = 7000
 local DESPAWN_RADIUS = 26000
+local settings = require("src.settings")
 local MAX_NPCS = 14
 
 -- ---------------------------------------------------------------------------
@@ -138,7 +139,7 @@ function npc.maintain(list, sys, player, diplomacy, day, camera, dt, state)
             table.remove(list, i)
         end
     end
-    if #list >= MAX_NPCS or state.spawnTimer > 0 then return nil end
+    if #list >= math.min(MAX_NPCS, settings.q().maxNpcs) or state.spawnTimer > 0 then return nil end
     state.spawnTimer = 2.5 + math.random() * 4
 
     local weights, total = npc.trafficProfile(sys, diplomacy, player)

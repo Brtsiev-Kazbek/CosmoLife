@@ -48,6 +48,7 @@ uniform vec3  u_fillColor;
 uniform vec3  u_rimColor;
 uniform float u_keyIntensity;
 uniform float u_saturation;
+uniform float u_exposure;
 
 vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc)
 {
@@ -83,12 +84,20 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc)
                        + u_fillColor * ndf)
              + u_rimColor * rim;
 
+    // Tone mapping.
+    //
+    // Three lights plus ambient plus a rim add up past 1.0 on anything pale,
+    // and a hard clamp turns a light grey hull into a white silhouette with no
+    // shape left in it. This exponential roll-off keeps mid tones where they
+    // are and compresses the highlights instead of cutting them off.
+    lit = vec3(1.0) - exp(-lit * u_exposure);
+
     // a touch of saturation control lets a preset be graded without
     // re-authoring every palette entry
     float grey = dot(lit, vec3(0.299, 0.587, 0.114));
     lit = mix(vec3(grey), lit, u_saturation);
 
-    lit = mix(lit, base * 1.25, u_emissive);
+    lit = mix(lit, base * 1.15, u_emissive);
 
     float d = length(v_viewPos);
     float f = clamp((d - u_fogNear) / max(u_fogFar - u_fogNear, 1.0), 0.0, 1.0) * u_fogAmount;

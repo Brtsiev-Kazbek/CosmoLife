@@ -37,6 +37,18 @@ palette.colors = {
     white         = c(232, 236, 240),
     black         = c(18, 18, 22),
 
+    -- extra accents.  Kept few and kept muted: the flat-shaded look falls
+    -- apart if every panel is a different saturated colour, so these are for
+    -- trim, signage and one-in-five panels, never for whole hulls.
+    seafoam       = c(120, 196, 168),
+    coral         = c(216, 118, 96),
+    indigo        = c(78, 82, 164),
+    ochre         = c(186, 138, 62),
+    slate         = c(96, 108, 124),
+    plum          = c(132, 74, 110),
+    mint          = c(150, 208, 178),
+    brass         = c(178, 148, 88),
+
     -- glass, screens, lights
     glass         = c(72, 118, 140),
     glassLit      = c(150, 214, 226),
@@ -105,12 +117,12 @@ end
 
 --- Palettes assigned to procedurally generated hulls per faction / role.
 palette.hullSets = {
-    civilian  = { "hull", "hullLight", "steel", "hullDark", "white" },
+    civilian  = { "hull", "hullLight", "steel", "hullDark", "slate", "seafoam" },
     military  = { "hullDark", "steel", "darkGreen", "hull", "black" },
-    pirate    = { "hullDark", "darkRed", "rust", "black", "orange" },
-    trader    = { "hull", "copper", "hullLight", "amber", "steel" },
+    pirate    = { "hullDark", "darkRed", "rust", "black", "coral", "plum" },
+    trader    = { "hull", "copper", "hullLight", "amber", "brass", "ochre" },
     industry  = { "steel", "rust", "hazard", "hullDark", "copper" },
-    highTech  = { "hullBright", "white", "teal", "hullLight", "cyan" },
+    highTech  = { "hullBright", "white", "teal", "hullLight", "mint", "indigo" },
     alien     = { "purple", "magenta", "darkBlue", "teal", "plasma" },
 }
 

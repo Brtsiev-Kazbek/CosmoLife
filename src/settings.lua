@@ -36,6 +36,9 @@ settings.schema = {
         items = {
             { id = "defaultView", name = "Default view", type = "choice", default = "chase",
               choices = { "chase", "cockpit" } },
+            { id = "chaseDistance", name = "Chase distance", type = "number", default = 1.0,
+              min = 0.6, max = 2.5, step = 0.1, format = "%.1f",
+              help = "Multiplier on the chase camera's distance from the hull." },
             { id = "fov", name = "Field of view", type = "number", default = 74,
               min = 55, max = 105, step = 1, format = "%.0f" },
             { id = "cameraShake", name = "Camera shake", type = "number", default = 1.0,
@@ -48,6 +51,9 @@ settings.schema = {
     {
         section = "Graphics",
         items = {
+            { id = "quality", name = "Quality preset", type = "choice", default = "medium",
+              choices = { "potato", "low", "medium", "high" },
+              help = "Sets draw distance, star count and body detail in one go. Potato turns off every optional pass." },
             { id = "lightingPreset", name = "Lighting", type = "choice", default = "cinematic",
               choices = { "classic", "cinematic", "noir", "sunset", "clinical" } },
             { id = "lightBands", name = "Light bands", type = "number", default = 5,
@@ -65,6 +71,41 @@ settings.schema = {
         },
     },
 }
+
+--- Quality presets.
+--
+-- Everything here is a knob that costs frames.  `potato` exists because the
+-- expensive parts of this renderer are all optional: the CRT pass, the
+-- starfield projection, terrain draw distance and sphere tessellation.  Turn
+-- them all down and the game is a few thousand flat-shaded triangles, which
+-- any machine from the last twenty years can push.
+settings.quality = {
+    potato = {
+        terrainRings = 3, starCount = 260, bodyDetail = 20, post = false,
+        scatter = false, nebula = 0.35, settlementRange = 6000, maxNpcs = 4,
+        blurb = "Everything optional is off. Runs on anything.",
+    },
+    low = {
+        terrainRings = 4, starCount = 550, bodyDetail = 28, post = false,
+        scatter = false, nebula = 0.7, settlementRange = 10000, maxNpcs = 7,
+        blurb = "No post pass, short draw distance.",
+    },
+    medium = {
+        terrainRings = 6, starCount = 1100, bodyDetail = 40, post = true,
+        scatter = true, nebula = 1.0, settlementRange = 16000, maxNpcs = 11,
+        blurb = "The intended look.",
+    },
+    high = {
+        terrainRings = 8, starCount = 1800, bodyDetail = 64, post = true,
+        scatter = true, nebula = 1.0, settlementRange = 24000, maxNpcs = 14,
+        blurb = "Long draw distance, dense starfield, finest spheres.",
+    },
+}
+
+--- The active quality table.
+function settings.q()
+    return settings.quality[settings.get("quality")] or settings.quality.medium
+end
 
 settings.values = {}
 

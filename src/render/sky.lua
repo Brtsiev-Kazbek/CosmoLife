@@ -7,6 +7,7 @@
 local class = require("src.lib.class")
 local Rng = require("src.lib.rng")
 local util = require("src.lib.util")
+local settings = require("src.settings")
 
 local Sky = class("Sky")
 
@@ -95,7 +96,8 @@ function Sky:draw(camera, w, h, fade)
     local n = 0
     local sizeGroups = { {}, {}, {} }
 
-    for i = 1, #self.stars do
+    local budget = math.min(#self.stars, settings.q().starCount)
+    for i = 1, budget do
         local s = self.stars[i]
         local sx, sy, sz = s[1], s[2], s[3]
         local zf = sx * fx + sy * fy + sz * fz

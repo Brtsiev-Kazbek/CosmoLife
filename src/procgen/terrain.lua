@@ -183,8 +183,15 @@ end
 function Field:height(x, z)
     local dx, dy, dz = self:directionAt(x, z)
     local metres = self:heightDir(dx, dy, dz)
-    -- water stays perfectly flat; only land gets metre-scale roughness
-    if self.seaLevel > 0 and metres <= self:seaHeight() + 0.5 then return metres end
+    if self.seaLevel > 0 and metres <= self:seaHeight() + 0.5 then
+        -- A mathematically flat sea gives every facet the same normal and the
+        -- same colour, and reads as a sheet of glossy plastic. A swell of a
+        -- few tens of centimetres breaks the normals up without making the
+        -- water un-landable.
+        local swell = noise.perlin2(self.seed + 4441, x / 260, z / 260) * 0.55
+                    + noise.perlin2(self.seed + 4451, x / 61, z / 61) * 0.22
+        return metres + swell
+    end
     return metres + noise.perlin2(self.seed + 1009, x / 140, z / 140) * self.profile.detail * 0.12
 end
 
@@ -229,7 +236,10 @@ function Field:colorForHeight(h, latitude)
         -- the shallow band and so read as water too
         local sea = self:seaHeight()
         local depth = util.clamp((sea - h) / (self.amplitude * 0.4), 0, 1)
-        return palette.mix(ramp[2] or ramp[1], ramp[1], depth)
+        local col = palette.mix(ramp[2] or ramp[1], ramp[1], depth)
+        -- a little variation across facets so a calm sea is not one flat tone
+        local k = 0.94 + ((h - sea) * 0.9 % 0.12)
+        return { col[1] * k, col[2] * k, col[3] * k * 1.03, col[4] or 1 }
     end
     local t = util.clamp((h + self.amplitude) / (self.amplitude * 2), 0, 0.999)
     local idx = 1 + t * (n - 1)

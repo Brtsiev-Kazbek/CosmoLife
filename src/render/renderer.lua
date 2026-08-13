@@ -75,6 +75,7 @@ function Renderer:init()
         rimColor = { 0.40, 0.48, 0.62 },
         keyIntensity = 1.0,
         saturation = 1.1,
+        exposure = 1.15,
     }
 
     self.settings = {
@@ -248,6 +249,7 @@ function Renderer:_setupShader(env)
     self:_send(s, "u_rimColor", env.rimColor or { 0, 0, 0 })
     self:_send(s, "u_keyIntensity", env.keyIntensity or 1)
     self:_send(s, "u_saturation", env.saturation or 1)
+    self:_send(s, "u_exposure", env.exposure or 1.15)
 end
 
 function Renderer:_drawQueue(layer, near, far)

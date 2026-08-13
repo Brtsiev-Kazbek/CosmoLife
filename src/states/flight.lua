@@ -97,7 +97,8 @@ function Flight:enter(spawnOpts)
     self:spawn(spawnOpts)
     -- chase view by default: it is far easier to judge attitude and altitude
     -- with the hull in frame than from inside it
-    self.game.camera.mode = self.game.camera.mode or "chase"
+    self.game.camera.mode = self.game.camera.mode or settings.get("defaultView")
+    self.game.camera.chaseMultiplier = settings.get("chaseDistance")
     self:setMouseFlight(settings.get("mouseFlight"))
 end
 
@@ -282,9 +283,11 @@ function Flight:updateEnvironment(skipHandover)
         }
         env.ground = { base[1] * 0.16, base[2] * 0.15, base[3] * 0.14 }
         env.fogColor = env.horizon
-        env.fogAmount = util.clamp(atmos * 0.85, 0, 0.9)
-        env.fogNear = util.lerp(20000, 1200, atmos)
-        env.fogFar = util.lerp(60000, S.terrainViewRange * 1.1, atmos)
+        -- Fog has to start well past the ship or it paints the ground you are
+        -- standing on, which reads as a flat glossy sheet rather than as haze.
+        env.fogAmount = util.clamp(atmos * 0.55, 0, 0.62)
+        env.fogNear = util.lerp(26000, 5200, atmos)
+        env.fogFar = util.lerp(90000, S.terrainViewRange * 1.6, atmos)
         -- A night side lit only by the sun is a black hole you cannot fly
         -- over.  Starlight, airglow and the ship's own floods put a floor
         -- under it, so the ground stays readable after dark.
@@ -300,6 +303,10 @@ function Flight:updateEnvironment(skipHandover)
         env.fogAmount = 0
         env.ambient = { 0.075, 0.08, 0.105 }
         env.shadeFloor = 0.06
+        -- Each system carries its own nebula palette, derived from its seed and
+        -- warmed towards its star's colour, so jumping somewhere new actually
+        -- looks like somewhere new instead of the same violet fog everywhere.
+        env.zenith = self:nebulaHue()
         self.dayFactor = 1
     end
 
@@ -341,6 +348,35 @@ function Flight:attitude()
         landable = self.surface:isLandable(l.pos.x, l.pos.z, 14)
     end
     return { roll = roll, pitch = pitch, landable = landable }
+end
+
+--- The nebula hue for the current system, cached per system id.
+function Flight:nebulaHue()
+    local id = self.world.stub and self.world.stub.id
+    if self._hueId == id and self._hue then return self._hue end
+    local Rng = require("src.lib.rng")
+    local rng = Rng.new(self.world.stub and self.world.stub.seed or 1, "nebula")
+    -- pick from a set of hues that read well against black, then lean the
+    -- choice towards the star's own colour so the two agree
+    local hues = {
+        { 0.30, 0.10, 0.46 },   -- violet
+        { 0.10, 0.26, 0.44 },   -- deep blue
+        { 0.44, 0.14, 0.22 },   -- crimson
+        { 0.10, 0.36, 0.32 },   -- teal
+        { 0.42, 0.24, 0.10 },   -- amber
+        { 0.32, 0.12, 0.34 },   -- magenta
+        { 0.14, 0.34, 0.16 },   -- green
+    }
+    local h = hues[rng:int(1, #hues)]
+    local star = self.world.system and self.world.system.star.color or { 1, 1, 1 }
+    local k = rng:range(0.15, 0.4)
+    self._hue = {
+        h[1] * (1 - k) + star[1] * k * 0.5,
+        h[2] * (1 - k) + star[2] * k * 0.5,
+        h[3] * (1 - k) + star[3] * k * 0.5,
+    }
+    self._hueId = id
+    return self._hue
 end
 
 --- False once the star has set behind the body we are standing on: the sun
@@ -1042,7 +1078,8 @@ function Flight:submitBodies(renderer)
         if b.kind == "planet" then
             local dist = vec3.distance(b.pos, camPos)
             -- more segments when it fills the sky
-            local detail = (dist < b.radius * 12) and 64 or 32
+            local q = settings.q().bodyDetail
+            local detail = (dist < b.radius * 12) and q or math.max(16, math.floor(q * 0.6))
             local basis = self:bodyBasis(b)
             renderer:draw(bodies.planet(b, detail), b.pos, basis,
                 { scale = b.radius, layer = renderer.LAYER_FAR })
@@ -1060,7 +1097,7 @@ function Flight:submitBodies(renderer)
                 renderer:draw(rings, b.pos, basis, { scale = b.radius, layer = renderer.LAYER_FAR })
             end
             for _, m in ipairs(b.moons) do
-                renderer:draw(bodies.planet(m, 24), m.pos, self:bodyBasis(m),
+                renderer:draw(bodies.planet(m, math.max(12, math.floor(settings.q().bodyDetail * 0.4))), m.pos, self:bodyBasis(m),
                     { scale = m.radius, layer = renderer.LAYER_FAR })
             end
         end

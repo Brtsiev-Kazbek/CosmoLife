@@ -31,6 +31,7 @@ local Surface = class("Surface")
 local floor, sqrt, max, min, abs = math.floor, math.sqrt, math.max, math.min, math.abs
 
 local CHUNK = config.render.terrainChunkSize
+local settings = require("src.settings")
 local RINGS = config.render.terrainRings
 local REORIGIN_DISTANCE = CHUNK * 6
 local BUILD_BUDGET = 3            -- chunks per frame, to avoid hitches
@@ -263,10 +264,11 @@ function Surface:update(x, z, dt, altitude)
 
     -- mark what should be resident
     local wanted = {}
-    for dz = -RINGS, RINGS do
-        for dx = -RINGS, RINGS do
+    local rings = settings.q().terrainRings
+    for dz = -rings, rings do
+        for dx = -rings, rings do
             local d = sqrt(dx * dx + dz * dz)
-            if d <= RINGS + 0.4 then
+            if d <= rings + 0.4 then
                 local cx, cz = cx0 + dx, cz0 + dz
                 local key = chunkKey(cx, cz)
                 wanted[key] = { cx = cx, cz = cz, d = d }
@@ -310,7 +312,8 @@ function Surface:update(x, z, dt, altitude)
     -- settlement meshes for anything close enough to see in detail
     for _, s in ipairs(self.settlements) do
         local d = sqrt((x - s.x) ^ 2 + (z - s.z) ^ 2)
-        if d < self.viewRange and not self.settlementMeshes[s.place.seed] then
+        if d < math.min(self.viewRange, settings.q().settlementRange)
+            and not self.settlementMeshes[s.place.seed] then
             self:_buildSettlement(s)
             break     -- one town per frame is plenty
         end
@@ -357,7 +360,7 @@ function Surface:_buildChunk(cx, cz, ringDistance)
 
     local chunk = { ox = ox, oz = oz, size = CH, model = b:build(), res = res }
     -- scenery is only worth placing at the finest level, where it is visible
-    if ringDistance <= 1.5 and self.lodLevel == 0 then
+    if ringDistance <= 1.5 and self.lodLevel == 0 and settings.q().scatter then
         chunk.scatter = self.field:buildScatter(ox, oz, CH, 1)
     end
     self.chunkCache[chunkKey(cx, cz)] = chunk

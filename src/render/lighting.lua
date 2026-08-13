@@ -25,37 +25,42 @@ lighting.presets = {
     classic = {
         name = "Classic",
         blurb = "One hard sun, flat ambient. The 1984 look.",
-        keyIntensity = 1.00, fillIntensity = 0.0, rimIntensity = 0.0,
+        keyIntensity = 0.95, fillIntensity = 0.0, rimIntensity = 0.0,
         fillColor = { 0.30, 0.38, 0.55 }, rimColor = { 1.0, 1.0, 1.0 },
         ambientScale = 1.0, shadeFloor = 0.06, bands = 4, saturation = 1.0,
+        exposure = 1.30,
     },
     cinematic = {
         name = "Cinematic",
         blurb = "Warm key, cool fill, bright rim. Reads well against space.",
-        keyIntensity = 1.05, fillIntensity = 0.34, rimIntensity = 0.55,
-        fillColor = { 0.26, 0.40, 0.72 }, rimColor = { 0.72, 0.86, 1.0 },
-        ambientScale = 0.85, shadeFloor = 0.05, bands = 5, saturation = 1.12,
+        keyIntensity = 0.85, fillIntensity = 0.26, rimIntensity = 0.30,
+        fillColor = { 0.24, 0.40, 0.78 }, rimColor = { 0.66, 0.84, 1.0 },
+        ambientScale = 0.70, shadeFloor = 0.04, bands = 5, saturation = 1.18,
+        exposure = 1.15,
     },
     noir = {
         name = "Noir",
         blurb = "Hard key, almost no fill, cold rim. Long shadows.",
-        keyIntensity = 1.15, fillIntensity = 0.10, rimIntensity = 0.75,
-        fillColor = { 0.18, 0.22, 0.34 }, rimColor = { 0.60, 0.74, 1.0 },
-        ambientScale = 0.45, shadeFloor = 0.02, bands = 3, saturation = 0.80,
+        keyIntensity = 0.95, fillIntensity = 0.08, rimIntensity = 0.42,
+        fillColor = { 0.16, 0.22, 0.38 }, rimColor = { 0.55, 0.72, 1.0 },
+        ambientScale = 0.40, shadeFloor = 0.02, bands = 3, saturation = 0.85,
+        exposure = 1.35,
     },
     sunset = {
         name = "Sunset",
         blurb = "Amber key against a violet fill.",
-        keyIntensity = 1.00, fillIntensity = 0.45, rimIntensity = 0.45,
-        fillColor = { 0.42, 0.24, 0.62 }, rimColor = { 1.0, 0.72, 0.48 },
-        ambientScale = 0.95, shadeFloor = 0.07, bands = 6, saturation = 1.25,
+        keyIntensity = 0.88, fillIntensity = 0.34, rimIntensity = 0.28,
+        fillColor = { 0.46, 0.22, 0.68 }, rimColor = { 1.0, 0.66, 0.42 },
+        ambientScale = 0.72, shadeFloor = 0.05, bands = 6, saturation = 1.30,
+        exposure = 1.10,
     },
     clinical = {
         name = "Clinical",
         blurb = "Even, bright, unromantic. Best for reading a scene.",
-        keyIntensity = 0.90, fillIntensity = 0.55, rimIntensity = 0.25,
-        fillColor = { 0.62, 0.66, 0.72 }, rimColor = { 0.9, 0.94, 1.0 },
-        ambientScale = 1.35, shadeFloor = 0.12, bands = 0, saturation = 0.95,
+        keyIntensity = 0.80, fillIntensity = 0.38, rimIntensity = 0.14,
+        fillColor = { 0.58, 0.64, 0.72 }, rimColor = { 0.9, 0.94, 1.0 },
+        ambientScale = 0.95, shadeFloor = 0.10, bands = 0, saturation = 1.0,
+        exposure = 1.05,
     },
 }
 
@@ -103,6 +108,7 @@ function lighting.apply(env, presetId, camera)
 
     env.shadeFloor = p.shadeFloor
     env.saturation = p.saturation
+    env.exposure = p.exposure or 1.15
     return env
 end
 

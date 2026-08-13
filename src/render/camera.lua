@@ -70,10 +70,16 @@ function Camera:follow(body, dt, offset)
         self:setBasis(body.right, body.up, body.fwd)
         self._hasSmooth = false
     else
-        local dist = self.chaseDistance * (body.chaseScale or 1)
-        local tx = body.pos.x - body.fwd.x * dist + body.up.x * self.chaseHeight
-        local ty = body.pos.y - body.fwd.y * dist + body.up.y * self.chaseHeight
-        local tz = body.pos.z - body.fwd.z * dist + body.up.z * self.chaseHeight
+        -- Frame the ship by its actual size, with a floor, so a big hull
+        -- cannot swallow the camera and a small one is not a dot. The old
+        -- multiplier was applied to a scale factor rather than to a radius,
+        -- which put the camera inside anything large.
+        local radius = (body.radius or 10)
+        local dist = math.max(radius * 3.4, 22) * (self.chaseMultiplier or 1)
+        local height = dist * 0.22
+        local tx = body.pos.x - body.fwd.x * dist + body.up.x * height
+        local ty = body.pos.y - body.fwd.y * dist + body.up.y * height
+        local tz = body.pos.z - body.fwd.z * dist + body.up.z * height
         if not self._hasSmooth then
             self._smoothPos:set(tx, ty, tz)
             self._hasSmooth = true
@@ -90,6 +96,16 @@ function Camera:follow(body, dt, offset)
             end
         end
         self.pos:copyFrom(self._smoothPos)
+        -- never end up closer than the hull radius, whatever the smoothing did
+        local dx = self.pos.x - body.pos.x
+        local dy = self.pos.y - body.pos.y
+        local dz = self.pos.z - body.pos.z
+        local d = math.sqrt(dx * dx + dy * dy + dz * dz)
+        local minDist = (body.radius or 10) * 1.6
+        if d < minDist and d > 1e-6 then
+            local k = minDist / d
+            self.pos:set(body.pos.x + dx * k, body.pos.y + dy * k, body.pos.z + dz * k)
+        end
         local fwd = (body.pos - self.pos):normalize()
         self:setBasis(body.right, body.up, fwd)
     end
