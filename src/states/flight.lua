@@ -31,6 +31,7 @@ local factions = require("src.sim.factions")
 local equipment = require("src.sim.equipment")
 local hud = require("src.render.hud")
 local ui = require("src.ui.widgets")
+local settings = require("src.settings")
 
 local Flight = class("FlightState")
 
@@ -97,7 +98,7 @@ function Flight:enter(spawnOpts)
     -- chase view by default: it is far easier to judge attitude and altitude
     -- with the hull in frame than from inside it
     self.game.camera.mode = self.game.camera.mode or "chase"
-    self:setMouseFlight(true)
+    self:setMouseFlight(settings.get("mouseFlight"))
 end
 
 --- Places the ship somewhere sensible on entering the state.
@@ -302,6 +303,8 @@ function Flight:updateEnvironment(skipHandover)
         self.dayFactor = 1
     end
 
+    self.game:applyLighting()
+
     -- how bright the settlement windows should be
     self.nightGlow = util.clamp(1.25 - (self.dayFactor or 1) * 1.05, 0.18, 1.25)
 
@@ -407,7 +410,7 @@ function Flight:readRotation(dt, basis, agility)
         local tiltFwd = basis.fwd.y
         roll = roll - util.clamp(tiltRight * 3.2, -1, 1)
         pitch = pitch - util.clamp(tiltFwd * 3.2, -1, 1)
-    elseif self.autoLevel and self.surface then
+    elseif (self.autoLevel ~= false and settings.get("autoLevel")) and self.surface then
         local tiltRight = basis.right.y
         roll = roll - util.clamp(tiltRight * 2.6, -1, 1)
     end
@@ -524,7 +527,7 @@ function Flight:updateShip(dt)
     -- holds level (see readRotation), the main drive is capped to a taxi
     -- speed, and the translation thrusters take over -- so setting down is
     -- flying a hovering craft, not aiming a fighter at the dirt.
-    self.hoverMode = onSurface and self.gearDown
+    self.hoverMode = settings.get("landingAssist") and onSurface and self.gearDown
         and (self.altitude or 1e9) < FL.hoverAltitude
         and self.warpState == "off"
     if self.hoverMode then topSpeed = min(topSpeed, FL.hoverSpeed) end
@@ -981,6 +984,7 @@ function Flight:update(dt, background)
     -- lock while landing, tapering off to none by the top of the atmosphere.
     if self.upVec and self.altitude then
         local strength = util.clamp(1 - (self.altitude / 30000), 0, 1)
+            * settings.get("horizonLock")
         if self.hoverMode then strength = 1 end
         if strength > 0 then
             camera:levelToHorizon(self.upVec, strength * (1 - math.exp(-9 * dt)))
@@ -1370,14 +1374,17 @@ end
 
 function Flight:mousemoved(x, y, dx, dy)
     if self.mouseSteer then
-        local s = config.flight.mouseSensitivity
-        self.mouseDx = util.clamp((self.mouseDx or 0) + dx * s, -1.6, 1.6)
-        self.mouseDy = util.clamp((self.mouseDy or 0) + dy * s, -1.6, 1.6)
+        local sens = settings.get("mouseSensitivity")
+        local invert = settings.get("invertY") and -1 or 1
+        self.mouseDx = util.clamp((self.mouseDx or 0) + dx * sens, -1.6, 1.6)
+        self.mouseDy = util.clamp((self.mouseDy or 0) + dy * sens * invert, -1.6, 1.6)
     end
 end
 
 function Flight:wheelmoved(x, y)
-    self.throttle = util.clamp(self.throttle + y * 0.1, -0.4, 1)
+    if settings.get("throttleWheel") then
+        self.throttle = util.clamp(self.throttle + y * 0.1, -0.4, 1)
+    end
 end
 
 function Flight:resume()

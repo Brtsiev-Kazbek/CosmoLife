@@ -70,6 +70,11 @@ function Renderer:init()
         worldUp = vec3(0, 1, 0),
         bands = 5,
         shadeFloor = 0.06,
+        fillDir = vec3(0, 1, 0),
+        fillColor = { 0.09, 0.13, 0.24 },
+        rimColor = { 0.40, 0.48, 0.62 },
+        keyIntensity = 1.0,
+        saturation = 1.1,
     }
 
     self.settings = {
@@ -236,6 +241,13 @@ function Renderer:_setupShader(env)
     self:_send(s, "u_fogAmount", env.fogAmount)
     self:_send(s, "u_bands", env.bands)
     self:_send(s, "u_shadeFloor", env.shadeFloor)
+    -- three-point lighting (see render.lighting)
+    local fd = env.fillDir or env.sunDir
+    self:_send(s, "u_fillDir", { fd.x, fd.y, fd.z })
+    self:_send(s, "u_fillColor", env.fillColor or { 0, 0, 0 })
+    self:_send(s, "u_rimColor", env.rimColor or { 0, 0, 0 })
+    self:_send(s, "u_keyIntensity", env.keyIntensity or 1)
+    self:_send(s, "u_saturation", env.saturation or 1)
 end
 
 function Renderer:_drawQueue(layer, near, far)

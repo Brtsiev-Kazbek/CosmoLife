@@ -43,6 +43,11 @@ uniform float u_bands;       // 0 = smooth shading, >0 = quantised bands
 uniform float u_emissive;    // 0 = fully lit, 1 = self illuminated
 uniform vec4  u_tint;
 uniform float u_shadeFloor;  // how dark the unlit side is allowed to get
+uniform vec3  u_fillDir;     // soft opposing light, travels this way
+uniform vec3  u_fillColor;
+uniform vec3  u_rimColor;
+uniform float u_keyIntensity;
+uniform float u_saturation;
 
 vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc)
 {
@@ -53,14 +58,36 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc)
     // we render with culling disabled, so flip the normal towards the camera.
     if (dot(n, v_viewPos) > 0.0) n = -n;
 
+    vec3 toEye = normalize(-v_viewPos);
+
+    // key light: the star.  Quantised into bands for the retro look.
     float ndl = max(dot(n, -u_lightDir), 0.0);
     if (u_bands > 0.5) {
         ndl = floor(ndl * u_bands + 0.5) / u_bands;
     }
-    // a soft rim keeps silhouettes readable against black space
-    float rim = pow(1.0 - max(dot(n, normalize(-v_viewPos)), 0.0), 3.0) * 0.18;
 
-    vec3 lit = base * (u_ambient + u_shadeFloor + u_lightColor * ndl) + rim * u_lightColor;
+    // fill light: soft, wrapped so it lifts the terminator rather than
+    // adding a second hard edge
+    float ndf = dot(n, -u_fillDir);
+    ndf = max(ndf * 0.5 + 0.5, 0.0);
+    ndf *= ndf;
+
+    // rim light: a band along the silhouette, gated to the lit hemisphere so
+    // an object's dark side does not glow for no reason
+    float fresnel = pow(1.0 - max(dot(n, toEye), 0.0), 3.0);
+    float rimGate = clamp(dot(n, -u_lightDir) * 0.5 + 0.75, 0.0, 1.0);
+    float rim = fresnel * rimGate;
+
+    vec3 lit = base * (u_ambient + u_shadeFloor
+                       + u_lightColor * ndl * u_keyIntensity
+                       + u_fillColor * ndf)
+             + u_rimColor * rim;
+
+    // a touch of saturation control lets a preset be graded without
+    // re-authoring every palette entry
+    float grey = dot(lit, vec3(0.299, 0.587, 0.114));
+    lit = mix(vec3(grey), lit, u_saturation);
+
     lit = mix(lit, base * 1.25, u_emissive);
 
     float d = length(v_viewPos);

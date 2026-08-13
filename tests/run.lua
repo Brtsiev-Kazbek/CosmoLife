@@ -774,6 +774,166 @@ end)
 
 -- ---------------------------------------------------------------------------
 
+local settings = require("src.settings")
+local lighting = require("src.render.lighting")
+
+test("settings validate, clamp and round trip", function(assert_)
+    settings.reset()
+    assert_(settings.get("fov") == 74, "default missing")
+
+    settings.set("fov", 500)
+    assert_(settings.get("fov") == 105, "number not clamped high: " .. settings.get("fov"))
+    settings.set("fov", -20)
+    assert_(settings.get("fov") == 55, "number not clamped low")
+
+    settings.set("lightingPreset", "nonsense")
+    assert_(settings.get("lightingPreset") == "cinematic", "invalid choice accepted")
+
+    settings.set("post", "yes")
+    assert_(settings.get("post") == true, "bool not coerced")
+
+    -- stepping wraps choices and moves numbers
+    settings.set("lightingPreset", "classic")
+    settings.step("lightingPreset", -1)
+    assert_(settings.get("lightingPreset") == "clinical", "choice did not wrap backwards")
+    local before = settings.get("scanline")
+    settings.step("scanline", 1)
+    assert_(settings.get("scanline") > before, "number step did nothing")
+
+    local text = serialize.encode({ values = settings.values })
+    local back = serialize.decode(text)
+    assert_(back and back.values.fov == settings.get("fov"), "settings did not survive a round trip")
+    settings.reset()
+end)
+
+test("every schema entry is well formed", function(assert_)
+    local seen = {}
+    for _, group in ipairs(settings.schema) do
+        for _, item in ipairs(group.items) do
+            check("every schema entry is well formed", not seen[item.id], "duplicate id " .. item.id)
+            seen[item.id] = true
+            check("every schema entry is well formed", item.default ~= nil, item.id .. " has no default")
+            if item.type == "number" then
+                check("every schema entry is well formed",
+                    item.min and item.max and item.step, item.id .. " missing range")
+                check("every schema entry is well formed",
+                    item.default >= item.min and item.default <= item.max,
+                    item.id .. " default outside its range")
+            elseif item.type == "choice" then
+                local ok = false
+                for _, c in ipairs(item.choices or {}) do if c == item.default then ok = true end end
+                check("every schema entry is well formed", ok, item.id .. " default not among choices")
+            end
+        end
+    end
+end)
+
+test("lighting presets produce a usable environment", function(assert_)
+    local vec = require("src.lib.vec3")
+    for _, id in ipairs(lighting.order) do
+        local env = { sunDir = vec(0, -1, 0), worldUp = vec(0, 1, 0) }
+        lighting.apply(env, id)
+        check("lighting presets produce a usable environment", env.fillDir ~= nil, id .. ": no fill direction")
+        check("lighting presets produce a usable environment",
+            math.abs(env.fillDir:length() - 1) < 1e-6, id .. ": fill direction not unit length")
+        check("lighting presets produce a usable environment",
+            env.fillColor and env.rimColor, id .. ": missing light colours")
+        -- the fill must oppose the key, or it is a second key light
+        local dot = vec.dot(env.sunDir, env.fillDir)
+        check("lighting presets produce a usable environment", dot < 0.9,
+            id .. ": fill is parallel to the key")
+    end
+    assert_(lighting.get("nonsense").name ~= nil, "unknown preset did not fall back")
+end)
+
+test("input bindings resolve and rebind", function(assert_)
+    local input = require("src.input")
+    settings.bindings = nil
+    input.controls = nil
+    assert_(input.is("boost", "lshift"), "default binding not found")
+    assert_(not input.is("boost", "p"), "unbound key matched")
+    assert_(input.keyName("throttleUp") == "W", "keyName wrong: " .. input.keyName("throttleUp"))
+
+    -- rebinding keeps gamepad sources and takes effect immediately
+    settings.bindings = { boost = { "key:p", "button:leftstick" } }
+    input.controls = nil
+    assert_(input.is("boost", "p"), "rebound key not active")
+    assert_(not input.is("boost", "lshift"), "old binding still active")
+    settings.bindings = nil
+    input.controls = nil
+end)
+
+test("every action in the binding UI exists and is labelled", function(assert_)
+    local input = require("src.input")
+    for _, group in ipairs(input.actionOrder) do
+        for _, action in ipairs(group[2]) do
+            check("every action in the binding UI exists and is labelled",
+                input.defaults[action] ~= nil, action .. " is listed but has no default binding")
+            check("every action in the binding UI exists and is labelled",
+                input.labels[action] ~= nil, action .. " has no label")
+        end
+    end
+end)
+
+test("ECS runs its systems", function(assert_)
+    local ecs = require("src.ecs")
+    local vec = require("src.lib.vec3")
+
+    local hits = {}
+    local world = ecs.newWorld({
+        onKill = function(v, k) hits[#hits + 1] = v end,
+        onImpact = function() end,
+    })
+
+    local target = ecs.add(world, {
+        transform = ecs.components.transform(0, 0, -300),
+        health = ecs.components.health(30, 0),
+        radius = 20,
+        shieldRecharge = 5,
+    })
+    local bolt = ecs.add(world, {
+        transform = ecs.components.transform(0, 0, 0),
+        velocity = ecs.components.velocity(0, 0, -2000),
+        projectile = ecs.components.projectile(50),
+        lifetime = ecs.components.lifetime(2),
+    })
+
+    for _ = 1, 30 do ecs.update(world, 1 / 60) end
+    assert_(target.health.hull <= 0, "the bolt never hit: hull " .. target.health.hull)
+    assert_(#hits == 1, "onKill fired " .. #hits .. " times")
+
+    -- lifetimes retire entities
+    local spark = ecs.add(world, {
+        transform = ecs.components.transform(),
+        velocity = ecs.components.velocity(),
+        lifetime = ecs.components.lifetime(0.1),
+    })
+    for _ = 1, 20 do ecs.update(world, 1 / 60) end
+    local found = false
+    for _, e in ipairs(world.entities) do if e == spark then found = true end end
+    assert_(not found, "an expired entity was not removed")
+
+    -- movement integrates and gravity pulls along context up
+    world.context.up = vec(0, 1, 0)
+    local rock = ecs.add(world, {
+        transform = ecs.components.transform(0, 100, 0),
+        velocity = ecs.components.velocity(0, 0, 0),
+        gravity = 10,
+    })
+    for _ = 1, 60 do ecs.update(world, 1 / 60) end
+    assert_(rock.transform.pos.y < 100, "gravity did not pull the entity down")
+end)
+
+test("vendored libraries are present and load", function(assert_)
+    for _, name in ipairs({ "lib.tiny", "lib.baton", "lib.flux" }) do
+        local ok, mod = pcall(require, name)
+        check("vendored libraries are present and load", ok and mod ~= nil,
+            name .. ": " .. tostring(mod))
+    end
+end)
+
+-- ---------------------------------------------------------------------------
+
 io.write("\n", string.rep("-", 52), "\n")
 io.write(string.format("%d passed, %d failed\n", passed, failed))
 if failed > 0 then

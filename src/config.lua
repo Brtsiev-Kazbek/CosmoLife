@@ -166,82 +166,30 @@ config.render = {
 -- people already know: the mouse aims the nose, the keyboard does everything
 -- that is not aiming.  Pitch and yaw are never on the same keys as the mouse
 -- axes, which is what made the first layout so confusing to fly.
-config.keys = {
-    -- flight: the mouse aims, the keyboard does the rest
-    throttleUp   = { "w", "up" },
-    throttleDown = { "s", "down" },
-    rollLeft     = { "a", "left" },
-    rollRight    = { "d", "right" },
-    strafeLeft   = { "q" },
-    strafeRight  = { "e" },
-    thrustUp     = { "r" },
-    thrustDown   = { "f" },
-    throttleZero = { "x" },
-    throttleFull = { "z" },
-    boost        = { "lshift", "rshift" },
-    warp         = { "lctrl", "rctrl" },
-    levelOut     = { "h" },
-    mouseFlight  = { "tab" },
+-- Key bindings live in `src.input` now (they are player-editable and can be
+-- gamepad sources, which a flat table cannot express).  This proxy keeps the
+-- old `config.keys.<action>[1]` spelling working and always reflects the live
+-- binding rather than a stale copy.
+config.keys = setmetatable({}, {
+    __index = function(_, action)
+        local name = require("src.input").keyName(action)
+        return { name:lower() }
+    end,
+})
 
-    -- keyboard-only attitude, for anyone who turns the mouse off
-    pitchUp      = { "k" },
-    pitchDown    = { "i" },
-    yawLeft      = { "j" },
-    yawRight     = { "l" },
-
-    -- combat and systems
-    fire         = { "space" },
-    missile      = { "2" },
-    target       = { "t" },
-    nextTarget   = { "y" },
-    scan         = { "b" },
-    landingGear  = { "g" },
-    dock         = { "return" },
-    disembark    = { "u" },
-    view         = { "v" },
-
-    -- screens
-    map          = { "m" },
-    missions     = { "n" },
-    colony       = { "c" },
-    ship         = { "o" },
-    market       = { "period" },
-
-    -- on foot
-    interact     = { "e", "return" },
-    jump         = { "space" },
-    run          = { "lshift" },
-
-    -- meta
-    pause        = { "escape" },
-    help         = { "f1" },
-    save         = { "f5" },
-    load         = { "f9" },
-}
-
---- True when any key bound to `action` is currently held.
+--- Control queries delegate to `src.input`, which owns the live bindings and
+--- the baton player.  These wrappers exist because most of the codebase calls
+--- `config.down("boost")`, and there is no value in touching all of it.
 function config.down(action)
-    local list = config.keys[action]
-    if not list then return false end
-    for i = 1, #list do
-        if love.keyboard.isDown(list[i]) then return true end
-    end
-    return false
+    return require("src.input").down(action)
 end
 
---- True when `key` is bound to `action`.
 function config.is(action, key)
-    local list = config.keys[action]
-    if not list then return false end
-    for i = 1, #list do
-        if list[i] == key then return true end
-    end
-    return false
+    return require("src.input").is(action, key)
 end
 
 function config.keyName(action)
-    local list = config.keys[action]
-    return list and list[1]:upper() or "?"
+    return require("src.input").keyName(action)
 end
 
 return config

@@ -303,6 +303,40 @@ step(335, "chase view and wireframe", function(game)
     game.renderer.settings.post = false
 end)
 
+step(342, "settings screen and lighting presets", function(game)
+    local SettingsState = require("src.states.settings")
+    local settings = require("src.settings")
+    local lighting = require("src.render.lighting")
+    game.manager:push(SettingsState.new(), game.manager:current())
+    local scr = game.manager:current()
+    assert(scr.optionMenu and scr.bindMenu, "settings panes missing")
+    -- walk both panes and draw them
+    for pane = 1, 2 do
+        scr.pane = pane
+        for _ = 1, 12 do
+            scr:keypressed("down")
+            scr:draw()
+        end
+    end
+    -- cycle every lighting preset through the live renderer
+    scr.pane = 1
+    for _, id in ipairs(lighting.order) do
+        settings.set("lightingPreset", id)
+        scr:apply()
+        game:applyLighting()
+        scr:draw()
+    end
+    -- rebind a key and put it back
+    scr.pane = 2
+    scr.rebinding = "boost"
+    scr:keypressed("p")
+    local input = require("src.input")
+    assert(input.is("boost", "p"), "rebinding did not take effect")
+    input.resetBindings()
+    scr:keypressed("escape")
+    assert(game.manager:current() ~= scr, "settings screen did not close")
+end)
+
 step(350, "title screen renders", function(game)
     local Menu = require("src.states.menu")
     game.manager:switch(Menu.new())

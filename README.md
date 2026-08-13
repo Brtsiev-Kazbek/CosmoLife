@@ -171,7 +171,12 @@ from a station to a planet and down to its surface a single continuous motion.
 ```
 main.lua              entry point and error handler
 conf.lua              LÖVE configuration
-src/config.lua        all tuning: scales, flight model, economy, keys
+src/config.lua        all tuning: scales, flight model, economy
+src/settings.lua      player settings schema + persistence
+src/input.lua         action bindings on top of baton (keyboard/mouse/gamepad)
+
+lib/                  vendored MIT libraries (see lib/README.md)
+src/ecs/              components and systems running on tiny-ecs
 
 src/lib/              class, vec3, mat4, deterministic rng, noise, serialisation
 src/render/           renderer, shaders, mesh builder, geometry, camera,
@@ -181,10 +186,10 @@ src/procgen/          galaxy, systems, terrain, surface streaming, ships,
 src/sim/              economy, commodities, factions and diplomacy, missions,
                       colonies, equipment, player, NPC AI, combat, world clock
 src/states/           menu, flight, on foot, interiors, port, galaxy map,
-                      logbook, colonies, pause, game over
+                      logbook, colonies, settings, pause, game over
 src/ui/               immediate-mode widgets
 
-tests/run.lua         head-less suite: 280 assertions, no LÖVE needed
+tests/run.lua         head-less suite: 451 assertions, no LÖVE needed
 tests/selftest.lua    scripted run through every screen, under real LÖVE
 ```
 

@@ -10,17 +10,23 @@ local ui = require("src.ui.widgets")
 local hud = require("src.render.hud")
 local World = require("src.sim.world")
 local Manager = require("src.states.manager")
+local settings = require("src.settings")
+local input = require("src.input")
+local lighting = require("src.render.lighting")
+local flux = require("lib.flux")
 
 local Game = class("Game")
 
 function Game:init()
     ui.load()
+    settings.load()
+    input.load()
     self.renderer = Renderer.new()
     self.camera = Camera.new()
     self.camera.fov = config.render.fov
     self.sky = Sky.new(1337)
-    self.renderer.env.bands = config.render.lightBands
-    self.renderer.settings.post = config.render.post
+    self.lightingPreset = settings.get("lightingPreset")
+    self:applySettings()
     self.manager = Manager.new(self)
     self.world = nil
     self.showHelp = false
@@ -59,9 +65,32 @@ end
 -- LOVE callbacks
 -- ---------------------------------------------------------------------------
 
+--- Pushes persisted settings into the live systems.  Called at startup and
+--- whenever the settings screen changes something.
+function Game:applySettings()
+    local r = self.renderer
+    r.settings.post = settings.get("post")
+    r.settings.scanline = settings.get("scanline")
+    r.settings.vignette = settings.get("vignette")
+    r.settings.aberration = settings.get("aberration")
+    r.env.bands = settings.get("lightBands")
+    self.lightingPreset = settings.get("lightingPreset")
+    self.camera.fov = math.rad(settings.get("fov"))
+    self.camera.mode = settings.get("defaultView")
+end
+
+--- Applies the current lighting preset for this frame's sun direction.
+function Game:applyLighting()
+    lighting.apply(self.renderer.env, self.lightingPreset or "cinematic", self.camera)
+    -- a preset may override the band count; the explicit setting wins
+    self.renderer.env.bands = settings.get("lightBands")
+end
+
 function Game:update(dt)
     -- a long stall (window drag, disk hitch) must not teleport the ship
     dt = math.min(dt, 1 / 20)
+    input.update()
+    flux.update(dt)
     self.frameTime = self.frameTime * 0.9 + dt * 0.1
     self.fps = love.timer.getFPS()
     hud.update(dt)
@@ -99,6 +128,11 @@ function Game:resize(w, h)
 end
 
 function Game:keypressed(key, scancode, isrepeat)
+    if key == "f10" then
+        local SettingsState = require("src.states.settings")
+        self.manager:push(SettingsState.new(), self.manager:current())
+        return
+    end
     if key == "f11" then
         local full = love.window.getFullscreen()
         love.window.setFullscreen(not full)
