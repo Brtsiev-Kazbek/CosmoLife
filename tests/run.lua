@@ -2179,6 +2179,25 @@ end)
 
 -- ---------------------------------------------------------------------------
 
+-- No source file may read a global that does not exist, or write one at all.
+--
+-- Lua reports neither at compile time: `cos(a)` is a call of a nil global and
+-- only fails on the frame that runs it. Flight:submitCanisters shipped exactly
+-- that, and stayed hidden because the function returns early unless loose
+-- cargo is in the world. Coverage cannot be relied on to reach every branch of
+-- a renderer, so this reads the bytecode -- where every global access is
+-- listed whether the line runs or not.
+test("no file touches an undefined global", function(assert_)
+    local lint = require("tools.lint_globals")
+    local bad = lint.scan()
+    local report = {}
+    for _, b in ipairs(bad) do
+        report[#report + 1] = string.format("%s: %s '%s'", b.file, b.mode, b.name)
+    end
+    assert_(#bad == 0, table.concat(report, "; "))
+    assert_(#lint.sources() > 50, "the lint scanned almost nothing; check the paths")
+end)
+
 io.write("\n", string.rep("-", 52), "\n")
 io.write(string.format("%d passed, %d failed\n", passed, failed))
 if failed > 0 then

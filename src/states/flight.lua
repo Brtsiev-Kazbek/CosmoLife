@@ -2100,9 +2100,9 @@ function Flight:submitCanisters(renderer)
     for i = 1, #list do
         local c = list[i]
         local a = c.spin
-        basis.right:set(cos(a), 0, -sin(a))
+        basis.right:set(math.cos(a), 0, -math.sin(a))
         basis.up:set(0, 1, 0)
-        basis.fwd:set(-sin(a), 0, -cos(a))
+        basis.fwd:set(-math.sin(a), 0, -math.cos(a))
         -- the beacon fades with the canister's remaining life, so a field of
         -- them reads as "hurry up" rather than as scenery
         local urgency = util.clamp(c.life / salvage.LIFETIME, 0, 1)

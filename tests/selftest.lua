@@ -1029,6 +1029,30 @@ step(348, "a wreck spills cargo that can be scooped", function(game)
         "loose cargo alongside offered no scoop: " .. tostring(f.dockPrompt and f.dockPrompt.kind))
     assert(f:contextAction(), "the context key refused to scoop")
     assert(f.player:cargoUsed() > before, "scooping put nothing in the hold")
+
+    -- Leave one in the world.
+    --
+    -- This step used to end with `f.canisters = {}`, and because it all
+    -- happened inside one update, the list was empty again before anything was
+    -- drawn. Flight:submitCanisters returns early on an empty list, so its
+    -- body had never executed in 52 steps -- and it contained a call to a
+    -- global `cos` that crashed the game the first time a player saw loose
+    -- cargo. Anything a submit* function only does when its list is non-empty
+    -- has to be given a frame in which the list is non-empty.
+    f.canisters = {}
+    salvage.fromWreck(f.canisters, {
+        seed = 99, cargoValue = 12000, aiKind = "pirate", radius = 6,
+        pos = f.ship.pos, vel = f.ship.vel,
+    })
+    assert(#f.canisters > 0, "nothing was left in the world to draw")
+end)
+
+step(349, "loose cargo is drawn without crashing", function(game)
+    local f = game.manager:current()
+    -- The draw of frame 348 ran Flight:submitCanisters with a full list; had it
+    -- thrown, the selftest would already be dead. All that is left is to prove
+    -- the list really survived the frame, and to clear it.
+    assert(#f.canisters > 0, "the canisters vanished before a frame was drawn")
     f.canisters = {}
 end)
 
