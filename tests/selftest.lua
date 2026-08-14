@@ -838,6 +838,37 @@ step(260, "open the galaxy map", function(game)
     selftest.map = map
 end)
 
+-- Clicking a star must select the star you clicked.
+--
+-- Each system is drawn lifted off the chart plane by its height above it, but
+-- the hit test used the *foot* of that rail, so the target sat wherever the
+-- star would have been if it had no height -- and clicking the circle itself
+-- missed by exactly the length of the stalk.
+step(266, "clicking a star on the chart selects that star", function(game)
+    local map = selftest.map
+    assert(map and map.dotOf, "the galaxy map was not open for the click test")
+    local w, h = love.graphics.getWidth(), love.graphics.getHeight()
+
+    -- a system with a real height offset, otherwise the defect is invisible
+    local target
+    for _, sys in ipairs(map.systems) do
+        local _, y = map:screenOf(sys, w, h)
+        local _, dy = map:dotOf(sys, w, h)
+        if math.abs(y - dy) > 12 and dy > 40 and dy < h - 40 then target = sys break end
+    end
+    assert(target, "no system on screen stands far enough off the plane to test with")
+
+    local realPos = love.mouse.getPosition
+    local tx, ty = map:dotOf(target, w, h)
+    love.mouse.getPosition = function() return tx, ty end
+    local ok, hit = pcall(map.nearestToCursor, map, w, h)
+    love.mouse.getPosition = realPos
+    assert(ok, "the hit test errored: " .. tostring(hit))
+    assert(hit, "clicking directly on a star hit nothing")
+    assert(hit.id == target.id, string.format(
+        "clicking %s selected %s instead", target.name, hit.name))
+end)
+
 step(275, "hyperspace jump", function(game)
     local map = selftest.map
     if not map then return end

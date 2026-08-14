@@ -41,6 +41,7 @@ local objectives = require("src.sim.objectives")
 local input = require("src.input")
 local commodities = require("src.sim.commodities")
 local salvage = require("src.sim.salvage")
+local weather = require("src.sim.weather")
 local context = require("src.sim.context")
 
 local Flight = class("FlightState")
@@ -338,6 +339,20 @@ function Flight:updateEnvironment(skipHandover)
         env.fogAmount = util.clamp(atmos * 0.55, 0, 0.62)
         env.fogNear = util.lerp(26000, 5200, atmos)
         env.fogFar = util.lerp(90000, S.terrainViewRange * 1.6, atmos)
+
+        -- Weather, once there is ground close enough for it to be over.
+        --
+        -- Every biome has always declared what its sky does and nothing read
+        -- any of it, so a dune sea and a rainforest had the same clear air.
+        self:updateWeather(body)
+        local cond = self.weather
+        if cond and cond.strength > 0 then
+            env.fogColor = weather.tint(cond, env.fogColor)
+            env.fogAmount = util.clamp(env.fogAmount + cond.fog * 0.55, 0, 0.92)
+            -- a storm closes in around you rather than sitting on the horizon
+            env.fogNear = env.fogNear * util.lerp(1, 0.12, cond.fog)
+            env.fogFar = env.fogFar * util.lerp(1, 0.35, cond.fog)
+        end
         -- A night side lit only by the sun is a black hole you cannot fly
         -- over.  Starlight, airglow and the ship's own floods put a floor
         -- under it, so the ground stays readable after dark.
@@ -1658,6 +1673,27 @@ function Flight:submitBodies(renderer)
 
     -- give the far layer a near plane that clears whatever we are standing on
     renderer:setFarClearance(self.altitude)
+end
+
+--- The weather over the ship, when it is low enough to be under any.
+--
+-- Sampled at a couple of hertz rather than every frame: fronts move over
+-- kilometres and hours, so sixty evaluations a second of a noise field would
+-- be sixty times the cost for an answer that has not changed.
+function Flight:updateWeather(body)
+    if not self.surface or not self.altitude or self.altitude > S.atmosphereHeight then
+        self.weather = nil
+        self.weatherTimer = 0
+        return
+    end
+    self.weatherTimer = (self.weatherTimer or 0) - (self.lastDt or 0.016)
+    if self.weather and self.weatherTimer > 0 then return end
+    self.weatherTimer = 0.5
+
+    local x, z = self.local_.pos.x, self.local_.pos.z
+    local biome = self.surface.field:biomeAt(x, z)
+    self.weather = weather.at(body, biome, x, z, self.world.day, self.weather)
+    self.weatherBiome = biome
 end
 
 --- A world's cloud deck and its atmosphere, seen from outside.

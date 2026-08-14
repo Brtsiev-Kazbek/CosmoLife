@@ -259,20 +259,61 @@ function Field:waterColor(h)
     return { col[1] * k, col[2] * k, col[3] * k * 1.03, col[4] or 1 }
 end
 
+-- A cheap deterministic value in 0..1 for a patch of ground, with no noise
+-- stack behind it: three multiplies and a modulo. Used for per-facet
+-- variation, where the *only* requirement is that neighbours differ and that
+-- the answer is the same every time the chunk is rebuilt.
+local function facetHash(seed, x, z)
+    local ix = floor(x * 0.22) % 8192
+    local iz = floor(z * 0.22) % 8192
+    local n = (ix * 3719 + iz * 6421 + seed % 65536 * 131) % 65521
+    n = (n * 1103515 + 12345) % 65521
+    return n / 65521
+end
+
 --- The colour a biome gives to ground at height `h`.
 --
 -- Each biome carries three stops rather than sharing one seven-stop ramp for
 -- the whole planet, which is what used to make every terran world the same
 -- beach-grass-forest gradient from pole to pole.
-function Field:biomeColor(b, h)
+--
+-- The three stops alone are still not enough on the ground. They are spread
+-- over the planet's whole relief -- kilometres -- while a chunk spans tens of
+-- metres, so every facet in sight resolved to within a percent of the same
+-- colour and the ground read as a single flat wash of paint. Two things break
+-- that up, and neither costs a noise stack: a mid-frequency field that moves
+-- the mix between the stops over tens of metres, so there are patches of
+-- lighter and darker soil, and a per-facet hash worth a few percent of
+-- brightness, which is what stops adjacent triangles from being identical.
+--
+-- `x, z` are optional: the orbital sphere passes none, because at that scale
+-- the variation is smaller than a pixel and would only be noise.
+function Field:biomeColor(b, h, x, z)
     local sea = self:seaHeight()
     local base = (sea > -math.huge) and sea or -self.amplitude
     local span = max(self.amplitude * 1.6, 1)
     local t = util.clamp((h - base) / span, 0, 1)
-    if t < 0.5 then
-        return palette.mix(b.low, b.mid, t * 2)
+
+    if x then
+        -- patches of tone over ~90 m, which is the scale a hillside varies on
+        local patch = noise.perlin2(self.seed + 9901, x / 90, z / 90)
+        t = util.clamp(t + patch * 0.22, 0, 1)
     end
-    return palette.mix(b.mid, b.high, (t - 0.5) * 2)
+
+    local col
+    if t < 0.5 then
+        col = palette.mix(b.low, b.mid, t * 2)
+    else
+        col = palette.mix(b.mid, b.high, (t - 0.5) * 2)
+    end
+
+    if x then
+        -- facet to facet variation: small, but it is the difference between
+        -- ground and a painted plane
+        local k = 0.90 + facetHash(self.seed, x, z) * 0.20
+        col = { col[1] * k, col[2] * k, col[3] * k, col[4] or 1 }
+    end
+    return col
 end
 
 --- Colour for a point on the sphere, used by the orbital mesh.
@@ -318,7 +359,7 @@ function Field:colorAt(x, z, h, ny)
     if self:isWater(h) then return self:waterColor(h) end
 
     local b = self:biomeAt(x, z, h)
-    local col = self:biomeColor(b, h)
+    local col = self:biomeColor(b, h, x, z)
 
     -- steep ground shows the biome's rock regardless of altitude
     if not ny then
@@ -476,7 +517,19 @@ function Field:buildScatter(ox, oz, size, density, hs, res)
                     -- against that density so a sparse biome stays sparse
                     local pick = list[rng:int(1, #list)]
                     if rng:float() < util.clamp(pick.density, 0, 1) * clump then
-                        b:push():translate(x, h, z)
+                        -- Push it into the hill by the drop across its own
+                        -- base. Everything here stands upright while the
+                        -- ground does not, so on a slope an object planted
+                        -- exactly on the surface has one side of its base
+                        -- hanging in the air; sinking it by half the drop
+                        -- plants both sides. The footprint is the kind's
+                        -- nominal one, because the exact size is not known
+                        -- until the object has been built and rebuilding it
+                        -- would consume the rng and produce a different one.
+                        local foot = (flora.FOOTPRINT[pick.kind] or 1) * (pick.scale or 1)
+                        local slope = sqrt(max(1 - ny * ny, 0)) / max(ny, 0.2)
+                        local sink = min(foot * slope * 0.5, foot * 0.8)
+                        b:push():translate(x, h - sink, z)
                         b:rotateY(rng:range(0, math.pi * 2))
                         flora.build(pick.kind, b, rng, pick.scale or 1)
                         b:pop()

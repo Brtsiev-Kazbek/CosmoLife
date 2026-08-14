@@ -54,10 +54,24 @@ function Map:refreshIfMoved()
     if key ~= self._viewKey then self:refresh() end
 end
 
+-- Where a system's *base* sits: its x/z projected onto the chart plane. This
+-- is the foot of the height rail, not where the star is drawn.
 function Map:screenOf(sys, w, h)
     local x = w * 0.5 + (sys.x - self.cx) * self.scale
     local y = h * 0.5 + (sys.z - self.cz) * self.scale
     return x, y
+end
+
+--- Where a system's marker is actually drawn: the base, lifted by its height
+--- above the chart plane.
+--
+-- Everything that has to agree with what the player can see -- the hit test,
+-- the labels, the range ring, the jump line -- has to use this. The click
+-- test used `screenOf`, so the target was the foot of the rail and clicking
+-- the circle itself missed by however tall the star stood.
+function Map:dotOf(sys, w, h)
+    local x, y = self:screenOf(sys, w, h)
+    return x, y - (sys.y - self.cy) * self.scale
 end
 
 function Map:update(dt)
@@ -76,7 +90,7 @@ function Map:nearestToCursor(w, h)
     local mx, my = love.mouse.getPosition()
     local best, bestD = nil, 26
     for _, s in ipairs(self.systems) do
-        local x, y = self:screenOf(s, w, h)
+        local x, y = self:dotOf(s, w, h)
         local d = sqrt((x - mx) ^ 2 + (y - my) ^ 2)
         if d < bestD then best, bestD = s, d end
     end
@@ -153,7 +167,7 @@ function Map:draw()
 
     -- jump range ring around the current system
     if self.showRange then
-        local hx, hy = self:screenOf(here, w, h)
+        local hx, hy = self:dotOf(here, w, h)
         ui.setColor(C.uiPrimary, 0.16)
         love.graphics.circle("fill", hx, hy, self.jumpRange * self.scale)
         ui.setColor(C.uiPrimary, 0.5)
@@ -178,9 +192,23 @@ function Map:draw()
             local faction = factions.get(s.factionId)
             local col = faction.color
             local dy = (s.y - self.cy)
-            -- height rail: the stalk shows the third axis
-            ui.setColor(C.uiLine, 0.25)
-            love.graphics.line(x, y, x, y - dy * self.scale)
+            -- Height rail: the stalk that shows the third axis.
+            --
+            -- Drawn for every system in view, at a quarter opacity, this was
+            -- a field of vertical streaks across the whole chart -- more ink
+            -- than the stars themselves, and unreadable. The height only tells
+            -- the player anything where it decides whether a system is
+            -- reachable, so the rails are now on the current system, the
+            -- selected one, and whatever is inside the jump range.
+            local near = self.showRange
+                and ((s.x - here.x) ^ 2 + (s.y - here.y) ^ 2 + (s.z - here.z) ^ 2)
+                    < (self.jumpRange * 1.15) ^ 2
+            if s.id == here.id or (self.selected and s.id == self.selected.id) or near then
+                ui.setColor(C.uiLine, 0.35)
+                love.graphics.line(x, y, x, y - dy * self.scale)
+                ui.setColor(C.uiLine, 0.5)
+                love.graphics.circle("fill", x, y, 1.5)
+            end
 
             local r = util.clamp(2 + math.log(1 + s.population) * 0.22, 2, 8)
             local visited = self.player.knownSystems[s.id] ~= nil
@@ -215,12 +243,12 @@ function Map:draw()
 
     -- route line
     if self.selected and self.selected.id ~= here.id then
-        local hx, hy = self:screenOf(here, w, h)
-        local sx, sy = self:screenOf(self.selected, w, h)
+        local hx, hy = self:dotOf(here, w, h)
+        local sx, sy = self:dotOf(self.selected, w, h)
         local dist = sqrt((self.selected.x - here.x) ^ 2 + (self.selected.y - here.y) ^ 2 + (self.selected.z - here.z) ^ 2)
         ui.setColor(dist <= self.jumpRange and C.uiPrimary or C.uiDanger, 0.7)
         love.graphics.setLineWidth(1)
-        love.graphics.line(hx, hy - (here.y - self.cy) * self.scale, sx, sy - (self.selected.y - self.cy) * self.scale)
+        love.graphics.line(hx, hy, sx, sy)
     end
 
     -- The chart furniture sits over the star field, so it gets a wash behind
