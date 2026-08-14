@@ -440,6 +440,17 @@ test("settlements lay out without overlapping buildings", function(assert_)
     end
     assert_(padClear, "a landing pad is inside a building")
     assert_(#s.interiors > 0, "no enterable buildings")
+
+    -- The far stand-in has to be cheaper than the thing it stands in for, and
+    -- has to cover the same ground: a silhouette that is not the town's shape
+    -- is a different town appearing as you approach.
+    local lod = settlement.generateLod({ seed = 4242 }, s)
+    assert_(lod ~= nil, "no silhouette mesh produced")
+    assert_(lod.triangles < s.model.triangles * 0.5, string.format(
+        "the silhouette is %d triangles against the town's %d -- no saving",
+        lod.triangles, s.model.triangles))
+    assert_(lod.radius > s.radius * 0.5, string.format(
+        "the silhouette covers %.0f m against the town's %.0f", lod.radius, s.radius))
 end)
 
 test("terrain is deterministic and continuous", function(assert_)

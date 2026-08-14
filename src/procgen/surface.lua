@@ -48,6 +48,11 @@ local AO_SCALE = 0.55
 local AO_FADE_FULL = 150
 local AO_FADE_END = 400
 
+-- Distance at which a town drops to its silhouette mesh, in metres. Past this
+-- a window or a walkway is well under a pixel, so what the swap changes is the
+-- triangle count rather than the picture.
+local SETTLEMENT_DETAIL_RANGE = 3200
+
 local CHUNK = config.render.terrainChunkSize
 local settings = require("src.settings")
 local RINGS = config.render.terrainRings
@@ -607,6 +612,14 @@ function Surface:_buildSettlement(s)
         services = place.services,
         player = place.player,
     })
+    -- The far stand-in, built once alongside the town it stands in for.
+    --
+    -- settlement.generateLod had been written and never called, so a town was
+    -- drawn at full detail from the moment it appeared to the moment you
+    -- walked into it -- tens of thousands of triangles for a smudge on the
+    -- horizon. It reuses the layout that has already been computed, so the
+    -- only extra cost is the simplified mesh itself.
+    detail.lodModel = settlementGen.generateLod(place, detail)
     self.settlementMeshes[place.seed] = detail
     return detail
 end
@@ -671,12 +684,28 @@ function Surface:draw(renderer, opts)
         local mesh = self.settlementMeshes[s.place.seed]
         if mesh then
             self:toWorld(s.x, s.h, s.z, pos)
-            if mesh.model then
-                renderer:draw(mesh.model, pos, basis, { layer = renderer.LAYER_NEAR })
+            -- Silhouette from a distance, the real town up close.
+            --
+            -- The cutover is beyond the range at which a window or a walkway
+            -- is more than a pixel, so what changes is the triangle count and
+            -- not the picture. The lit windows go with the detail: at this
+            -- range they are a glow the size of a full stop.
+            local far = false
+            if eye and mesh.lodModel then
+                local dx, dz = s.x - eye.x, s.z - eye.z
+                local dy = eye.y or 0
+                far = sqrt(dx * dx + dz * dz + dy * dy) > SETTLEMENT_DETAIL_RANGE
             end
-            if mesh.glowModel then
-                renderer:draw(mesh.glowModel, pos, basis,
-                    { layer = renderer.LAYER_NEAR, emissive = opts and opts.nightGlow or 1 })
+            if far then
+                renderer:draw(mesh.lodModel, pos, basis, { layer = renderer.LAYER_NEAR })
+            else
+                if mesh.model then
+                    renderer:draw(mesh.model, pos, basis, { layer = renderer.LAYER_NEAR })
+                end
+                if mesh.glowModel then
+                    renderer:draw(mesh.glowModel, pos, basis,
+                        { layer = renderer.LAYER_NEAR, emissive = opts and opts.nightGlow or 1 })
+                end
             end
         end
     end
@@ -692,6 +721,7 @@ function Surface:release()
     for _, m in pairs(self.settlementMeshes) do
         if m.model and m.model.mesh and m.model.mesh.release then m.model.mesh:release() end
         if m.glowModel and m.glowModel.mesh and m.glowModel.mesh.release then m.glowModel.mesh:release() end
+        if m.lodModel and m.lodModel.mesh and m.lodModel.mesh.release then m.lodModel.mesh:release() end
     end
     self.settlementMeshes = {}
     self.primed = false
