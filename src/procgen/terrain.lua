@@ -18,6 +18,7 @@ local noise = require("src.lib.noise")
 local config = require("src.config")
 local MeshBuilder = require("src.render.mesh")
 local palette = require("src.render.palette")
+local biomeMod = require("src.procgen.biome")
 
 local terrain = {}
 
@@ -69,6 +70,16 @@ function Field:init(body)
     self.ramp = {}
     for i, name in ipairs(ramp) do self.ramp[i] = palette.colors[name] end
 
+    -- Landform parameters the biome relief modifiers work in. They belong to
+    -- the body rather than to a biome, so two deserts on the same planet share
+    -- a wind direction and a dune size, the way they would on a real one.
+    self.duneAngle = rng:range(0, math.pi)
+    self.duneWavelength = rng:range(180, 420)
+    self.duneHeight = rng:range(14, 42)
+    self.mesaStep = self.amplitude * rng:range(0.06, 0.14)
+
+    self.climate = biomeMod.climate(self, body)
+
     -- cached chunks, keyed by "cx,cz,step"
     self.chunks = {}
     self.chunkOrder = {}
@@ -118,12 +129,25 @@ function Field:heightDir(dx, dy, dz)
 
     local metres = (h - 0.5) * self.amplitude * 2
 
+    -- Landforms from the biome: dunes, mesa terraces, glacial troughs, lava
+    -- fissures. Worked out in equirectangular metres, the same construction
+    -- the crater grid uses, so a dune field is the same dune field whether it
+    -- is seen from orbit or walked across.
+    local lat, lon, u, v
+    if self.climate or self.craterAmount > 0.01 then
+        lat = math.asin(util.clamp(dy, -1, 1))
+        lon = (math.atan2 or math.atan)(dz, dx)
+        u = lon * R * math.cos(lat)
+        v = lat * R
+    end
+    if self.climate then
+        metres = self.climate:relief(lat, lon, u, v, metres)
+    end
+
     -- craters carved on airless worlds, laid out in an equirectangular grid
     if self.craterAmount > 0.01 then
-        local lat = math.asin(util.clamp(dy, -1, 1))
-        local lon = (math.atan2 or math.atan)(dz, dx)
-        local cu = lon * R * math.cos(lat) / self.craterScale
-        local cv = lat * R / self.craterScale
+        local cu = u / self.craterScale
+        local cv = v / self.craterScale
         local w = noise.worley2(s + 811, cu, cv)
         if w < 0.42 then
             local t = w / 0.42
@@ -224,26 +248,56 @@ function Field:slope(x, z)
     return math.acos(util.clamp(ny, -1, 1))
 end
 
---- Colour for a height, straight off the class ramp.  Used by the orbital
---- sphere mesh, which has no slope information.
+--- Water colour, shared by the ground and by the orbital sphere.
+function Field:waterColor(h)
+    local ramp = self.ramp
+    local sea = self:seaHeight()
+    local depth = util.clamp((sea - h) / (self.amplitude * 0.4), 0, 1)
+    local col = palette.mix(ramp[2] or ramp[1], ramp[1], depth)
+    -- a little variation across facets so a calm sea is not one flat tone
+    local k = 0.94 + ((h - sea) * 0.9 % 0.12)
+    return { col[1] * k, col[2] * k, col[3] * k * 1.03, col[4] or 1 }
+end
+
+--- The colour a biome gives to ground at height `h`.
+--
+-- Each biome carries three stops rather than sharing one seven-stop ramp for
+-- the whole planet, which is what used to make every terran world the same
+-- beach-grass-forest gradient from pole to pole.
+function Field:biomeColor(b, h)
+    local sea = self:seaHeight()
+    local base = (sea > -math.huge) and sea or -self.amplitude
+    local span = max(self.amplitude * 1.6, 1)
+    local t = util.clamp((h - base) / span, 0, 1)
+    if t < 0.5 then
+        return palette.mix(b.low, b.mid, t * 2)
+    end
+    return palette.mix(b.mid, b.high, (t - 0.5) * 2)
+end
+
+--- Colour for a point on the sphere, used by the orbital mesh.
+--
+-- It takes a direction rather than a latitude so that it can ask the same
+-- biome question the ground asks: the brown wedge of desert seen from orbit
+-- has to be the desert that is landed in.
+function Field:colorDir(dx, dy, dz, h)
+    if self:isWater(h) then return self:waterColor(h) end
+    local lat = math.asin(util.clamp(dy, -1, 1))
+    local lon = (math.atan2 or math.atan)(dz, dx)
+    local b = self.climate:at(lat, lon, h)
+    return self:biomeColor(b, h)
+end
+
+--- Colour for a height with no direction available.  Kept for callers that
+--- only have a height (the galaxy map's little world icons).
 function Field:colorForHeight(h, latitude)
     local ramp = self.ramp
     local n = #ramp
-    if self:isWater(h) then
-        -- shallows near the waterline, deep water further down; rivers land in
-        -- the shallow band and so read as water too
-        local sea = self:seaHeight()
-        local depth = util.clamp((sea - h) / (self.amplitude * 0.4), 0, 1)
-        local col = palette.mix(ramp[2] or ramp[1], ramp[1], depth)
-        -- a little variation across facets so a calm sea is not one flat tone
-        local k = 0.94 + ((h - sea) * 0.9 % 0.12)
-        return { col[1] * k, col[2] * k, col[3] * k * 1.03, col[4] or 1 }
-    end
+    if self:isWater(h) then return self:waterColor(h) end
     local t = util.clamp((h + self.amplitude) / (self.amplitude * 2), 0, 0.999)
     local idx = 1 + t * (n - 1)
     local i0 = floor(idx)
     local col = palette.mix(ramp[max(i0, 1)], ramp[min(i0 + 1, n)], idx - i0)
-    -- ice caps: everything past the polar circles whitens out
     if latitude then
         local polar = util.smoothstep(1.05, 1.42, abs(latitude))
         if polar > 0 then col = palette.mix(col, palette.colors.snow, polar) end
@@ -260,32 +314,31 @@ end
 -- argument is worth roughly a fivefold cut in the cost of building a chunk,
 -- the most expensive operation in the game.
 function Field:colorAt(x, z, h, ny)
-    local ramp = self.ramp
-    local n = #ramp
-    local t = util.clamp((h + self.amplitude) / (self.amplitude * 2), 0, 0.999)
-    -- water first: sea and river channels use the two lowest ramp stops
-    local sea = self:seaHeight()
-    if self:isWater(h) then
-        local depth = util.clamp((sea - h) / (self.amplitude * 0.4), 0, 1)
-        return palette.mix(ramp[2] or ramp[1], ramp[1], depth)
-    end
-    local idx = 1 + t * (n - 1)
-    local i0 = floor(idx)
-    local i1 = min(i0 + 1, n)
-    local f = idx - i0
-    local col = palette.mix(ramp[max(i0, 1)], ramp[i1], f)
+    -- water first: sea and river channels
+    if self:isWater(h) then return self:waterColor(h) end
 
-    if self:isWater(h) then return col end
-    -- steep ground shows rock regardless of altitude
+    local b = self:biomeAt(x, z, h)
+    local col = self:biomeColor(b, h)
+
+    -- steep ground shows the biome's rock regardless of altitude
     if not ny then
         local _, computed = self:normal(x, z, 30)
         ny = computed
     end
     if ny < 0.82 then
-        local rock = palette.colors.rockGrey
-        col = palette.mix(col, rock, util.clamp((0.82 - ny) / 0.35, 0, 1))
+        col = palette.mix(col, b.rock or palette.colors.rockGrey,
+            util.clamp((0.82 - ny) / 0.35, 0, 1))
     end
     return col
+end
+
+--- The biome at a point in the local tangent plane.
+function Field:biomeAt(x, z, h)
+    local lat0 = self.originLat or 0
+    local R = self.radius
+    local lat = lat0 + z / R
+    local lon = (self.originLon or 0) + x / (R * max(math.cos(lat0), 0.02))
+    return (self.climate:at(lat, lon, h or self:height(x, z)))
 end
 
 -- ---------------------------------------------------------------------------

@@ -72,8 +72,11 @@ function bodies.planet(body, detail)
             local lat = (v - 0.5) * pi
             local lon = u * TAU
             local cl = cos(lat)
-            local h = field:heightDir(cl * cos(lon), sin(lat), cl * sin(lon))
-            return field:colorForHeight(h, lat)
+            local dx, dy, dz = cl * cos(lon), sin(lat), cl * sin(lon)
+            local h = field:heightDir(dx, dy, dz)
+            -- the same biome question the ground asks, so the wedge of desert
+            -- aimed at from orbit is the desert that gets landed in
+            return field:colorDir(dx, dy, dz, h)
         end)
     end
     return remember(key, b:build())

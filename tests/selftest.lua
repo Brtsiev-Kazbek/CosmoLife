@@ -33,6 +33,54 @@ step(2, "new commander in flight", function(game)
     assert(game.world.system, "no system")
 end)
 
+-- Which way does the mouse turn you?
+--
+-- Asked of the cockpit, because mouse flight steers the ship rather than the
+-- camera and is therefore a separate code path with its own chance of a sign
+-- error. The test is deliberately not algebra: it puts a landmark where the
+-- screen shows it on the right, moves the mouse right, and requires the
+-- landmark to come *towards* the centre. Nothing about the frame's handedness,
+-- the view matrix or the projection can be wrong without this failing.
+step(19, "mouse flight turns the way the mouse moves", function(game)
+    local f = game.manager:current()
+    local camera = game.camera
+    local w, h = game.renderer.width, game.renderer.height
+    f:setMouseFlight(true)
+
+    -- a landmark 2 km off to the right of where the nose points
+    local s = f.ship
+    local mx = s.pos.x + s.right.x * 700 + s.fwd.x * 2000
+    local my = s.pos.y + s.right.y * 700 + s.fwd.y * 2000
+    local mz = s.pos.z + s.right.z * 700 + s.fwd.z * 2000
+    local function x() return (camera:project(mx, my, mz, w, h)) end
+    local before = x()
+
+    f.mouseDx, f.mouseDy = 0, 0
+    f:mousemoved(0, 0, 60, 0)               -- mouse to the right
+    for _ = 1, 30 do f:update(1 / 60) end
+    local after = x()
+    assert(before and after, "the landmark was not on screen to begin with")
+    assert(after < before, string.format(
+        "cockpit: mouse right turned away from the right-hand landmark (%.0f -> %.0f px)",
+        before, after))
+
+    -- and pitch: a landmark above the nose should come down towards centre
+    local ux = s.pos.x + s.up.x * 700 + s.fwd.x * 2000
+    local uy = s.pos.y + s.up.y * 700 + s.fwd.y * 2000
+    local uz = s.pos.z + s.up.z * 700 + s.fwd.z * 2000
+    local function y() local _, sy = camera:project(ux, uy, uz, w, h) return sy end
+    local by = y()
+    f.mouseDx, f.mouseDy = 0, 0
+    f:mousemoved(0, 0, 0, -60)              -- mouse up
+    for _ = 1, 30 do f:update(1 / 60) end
+    local ay = y()
+    assert(by and ay, "the high landmark was not on screen to begin with")
+    assert(ay > by, string.format(
+        "cockpit: mouse up turned away from the landmark above the nose (%.0f -> %.0f px)",
+        by, ay))
+    f.mouseDx, f.mouseDy = 0, 0
+end)
+
 step(20, "fly in normal space", function(game)
     local f = game.manager:current()
     f.throttle = 1
@@ -372,9 +420,45 @@ step(150, "walk around", function(game)
     assert(s.onGround ~= nil, "ground contact not evaluated")
 end)
 
--- The camera bug, asserted against the live pipeline rather than against the
--- controller's own arithmetic: move the mouse right, and whatever was on the
--- right of the screen must come towards the middle.
+-- Where does a landmark to the player's east actually land on the screen?
+--
+-- The on-foot camera has been reported inverted twice, and both times the
+-- reasoning that said it was correct was algebra about handedness. This asks
+-- the renderer instead: it projects three known directions and requires east
+-- to be right of centre, west to be left of it, and a real mouse event to move
+-- the eastern one towards the middle.
+step(151, "east is on the right of the screen, and the mouse agrees", function(game)
+    local s = game.manager:current()
+    s.walker.yaw = 0
+    s.walker.pitch = 0
+    s:updateCamera(0.016)
+    local camera = game.camera
+    local surface = s.surface
+    local w = game.renderer.width
+
+    local function screenX(lx, lz)
+        local p = surface:toWorld(s.pos.x + lx, s.pos.y + 1.7, s.pos.z + lz)
+        return (camera:project(p.x, p.y, p.z, w, game.renderer.height))
+    end
+    local east, north, west = screenX(30, 60), screenX(0, 60), screenX(-30, 60)
+    assert(east and north and west, "the probe landmarks are not on screen")
+    assert(math.abs(north - w / 2) < 2, string.format(
+        "facing north, north is not dead ahead (x=%.0f, centre %.0f)", north, w / 2))
+    assert(east > w / 2, string.format("east renders on the LEFT of the screen (x=%.0f)", east))
+    assert(west < w / 2, string.format("west renders on the RIGHT of the screen (x=%.0f)", west))
+
+    -- and a real mouse event has to bring the eastern one towards the middle
+    local before = screenX(30, 60)
+    s:mousemoved(0, 0, 40, 0)                 -- mouse to the right
+    s:updateCamera(0.016)
+    local after = screenX(30, 60)
+    assert(after < before, string.format(
+        "on foot: mouse right turned away from the eastern landmark (%.0f -> %.0f px)",
+        before, after))
+    s:mousemoved(0, 0, -40, 0)
+    s:updateCamera(0.016)
+end)
+
 step(152, "mouse right turns right on the real camera", function(game)
     local s = game.manager:current()
     local camera = game.camera
@@ -470,6 +554,38 @@ step(165, "enter a building interior", function(game)
     onfoot:enterBuilding(target, site)
     local room = game.manager:current()
     assert(room.room and room.room.model, "interior mesh missing")
+end)
+
+-- Interiors are drawn in world axes, which are the opposite handedness to the
+-- planet surface, so they get the same question asked.
+step(182, "interiors turn the same way as the surface does", function(game)
+    local room = game.manager:current()
+    if not room.walker then return end
+    local camera = game.camera
+    local w, h = game.renderer.width, game.renderer.height
+    room.walker.yaw, room.walker.pitch = 0, 0
+    room:updateCamera(0.016)
+
+    -- a marker 6 m ahead and 3 m to camera-right
+    local mx = camera.pos.x + camera.fwd.x * 6 + camera.right.x * 3
+    local my = camera.pos.y + camera.fwd.y * 6 + camera.right.y * 3
+    local mz = camera.pos.z + camera.fwd.z * 6 + camera.right.z * 3
+    local function x() return (camera:project(mx, my, mz, w, h)) end
+    local before = x()
+    room:mousemoved(0, 0, 40, 0)
+    room:updateCamera(0.016)
+    local after = x()
+    assert(before and after, "the interior marker was not on screen")
+    assert(after < before, string.format(
+        "interior: mouse right turned away from the right-hand marker (%.0f -> %.0f px)",
+        before, after))
+
+    -- and the strafe key, which was the defect in here: A and D were swapped
+    local rx, _, rz = room.walker:right()
+    local sx, sz = room.walker:wishDir(1, 0)
+    assert(sx * rx + sz * rz > 0.99, "interior: the strafe key steps the wrong way")
+    room:mousemoved(0, 0, -40, 0)
+    room:updateCamera(0.016)
 end)
 
 step(185, "open a service terminal", function(game)
