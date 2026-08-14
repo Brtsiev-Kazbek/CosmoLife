@@ -105,13 +105,23 @@ function Field:init(body)
     -- take the most, because they have the least colour of their own and are
     -- the worlds that were reading as grey; living worlds take the least,
     -- because green ground already means something.
+    --
+    -- These numbers used to be two to four times higher, and they were chosen
+    -- while every mesh was being drawn white -- against a picture that could
+    -- not respond to them. At 0.72 the accent does not tint a world, it
+    -- repaints it: rust (0.48, 0.31, 0.20) came out as (0.08, 0.37, 0.62) and
+    -- sand came out blue, so every biome on a world collapsed to one hue.
+    -- The point is to tell worlds apart at a glance while grass stays green
+    -- and sand stays sandy.
     local BY_CLASS = {
-        barren = 0.72, ice = 0.62, volcanic = 0.60, desert = 0.50,
-        toxic = 0.46, ocean = 0.34, terran = 0.30,
+        barren = 0.22, ice = 0.20, volcanic = 0.16, desert = 0.13,
+        toxic = 0.15, ocean = 0.10, terran = 0.08,
     }
     self.accentStrength = (BY_CLASS[kind] or 0.5) * rng:range(0.8, 1.15)
-    -- and a saturation lift on top, so what colour there is is not timid
-    self.saturate = rng:range(1.25, 1.75)
+    -- and a small saturation lift on top. This was 1.25..1.75, stacked on the
+    -- preset's own saturation in the shader; with the albedo actually reaching
+    -- the GPU that pushed the ground to 0.95 saturation -- poster paint.
+    self.saturate = rng:range(1.02, 1.16)
     -- kept for anything still reading the old field name
     self.worldTint = self.accent
 

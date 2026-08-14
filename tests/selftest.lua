@@ -1187,6 +1187,37 @@ for slot = 1, TOUR_SLOTS do
         -- first one -- which is exactly what it did until the averages came
         -- back identical to four decimal places.
         f:leaveSurface()
+
+        -- Turn the planet until this spot is in daylight.
+        --
+        -- Every stop of the tour used to land on the night side, and a night
+        -- photograph cannot answer "is the ground the right colour" -- it only
+        -- shows the ambient term. The spot is chosen by climate, so the
+        -- longitude is not free; the rotation phase is. Aim for a sun about
+        -- 37 degrees up rather than straight overhead: a vertical sun flattens
+        -- relief, which is the other thing these frames are for.
+        local terrainMod = require("src.procgen.terrain")
+        local body = entry.body
+        local sys = game.world.system
+        local TAU = math.pi * 2
+        local best, bestErr = body.spin, math.huge
+        for i = 0, 127 do
+            body.spin = i / 128 * TAU
+            local _, up, _, origin = terrainMod.tangentFrame(body, entry.lat, entry.lon)
+            local sx = sys.star.pos.x - origin.x
+            local sy = sys.star.pos.y - origin.y
+            local sz = sys.star.pos.z - origin.z
+            local sl = math.sqrt(sx * sx + sy * sy + sz * sz)
+            local dot = (sl > 0) and (up.x * sx + up.y * sy + up.z * sz) / sl or -1
+            local err = math.abs(dot - 0.80)
+            if err < bestErr then bestErr, best = err, body.spin end
+        end
+        body.spin = best
+        -- updateOrbits recomputes spin from the phase every frame, so the
+        -- phase is what has to change for the sun to stay up
+        local day = sys.day or 0
+        body.rotationPhase = (best - (day / (body.dayLength or 1)) * TAU) % TAU
+
         f:enterSurface(entry.body, entry.lat, entry.lon)
         local surf = f.surface
         assert(surf, "no surface after entering one")
@@ -1247,24 +1278,24 @@ for slot = 1, TOUR_SLOTS do
         assert(count > 0, "nowhere dry to sample at " .. entry.biome.id)
         entry.average = { r / count, g / count, bl / count }
 
-        -- No frame-buffer readback here.
-        --
-        -- There was one, and it lied: `renderer.color:newImageData()` returned
-        -- the same averages to two decimal places for sample windows covering
-        -- completely different parts of the frame, which no real image does.
-        -- It is not reading the frame that was just drawn, and two commit
-        -- messages quoted its "screen saturation 0.21 against 0.76 at the
-        -- vertices" as if it were a measurement. It was not. The vertex
-        -- colours below are measured; anything about what the shading does
-        -- with them has to come from looking at the screenshots until a
-        -- readback that actually works is in place.
-        -- ask for a frame sample: it is taken in love.draw, where the canvas
-        -- actually holds the frame
+        -- How high is the sun? Without this the frame numbers are unreadable:
+        -- a dark ground is a bug at noon and correct at midnight, and the tour
+        -- has no other way to say which one it photographed.
+        local sun = game.renderer.env.sunDir
+        local up = f.upVec
+        entry.sunUp = up and -(sun.x * up.x + sun.y * up.y + sun.z * up.z) or 0
+
+        -- Ask for a frame sample. It is taken in love.draw, where the canvas
+        -- actually holds the frame -- the first version of this read from a
+        -- test step, that is from love.update, and returned the same averages
+        -- for completely different parts of the screen because the canvas it
+        -- read had not been drawn into yet.
         selftest.sampleWanted = { slot = slot }
         io.write(string.format(
-            "    TOUR %-10s %-9s vertex %.2f %.2f %.2f  chunks=%d\n",
+            "    TOUR %-10s %-9s vertex %.2f %.2f %.2f  sun %+.2f  chunks=%d\n",
             entry.biome.id, tostring(entry.body.terrain),
-            entry.average[1], entry.average[2], entry.average[3], n))
+            entry.average[1], entry.average[2], entry.average[3],
+            entry.sunUp, n))
         io.flush()
     end)
 end
@@ -1300,12 +1331,28 @@ step(TOUR_START + (TOUR_SLOTS + 1) * TOUR_STRIDE, "the tour actually showed vari
         if e.screen and e.sat then measured[#measured + 1] = e end
     end
     assert(#measured >= 3, "only " .. #measured .. " frames were read back")
+
+    -- The test is not "every biome must be colourful" -- an ash plain is
+    -- supposed to be grey, and demanding a saturation floor of every stop is
+    -- how a game ends up in poster paint, which was the other half of the
+    -- complaint. What must hold is that the screen *tracks the palette*: a
+    -- biome's frame may be no less saturated than its own vertex colours, give
+    -- or take what the lighting does. Broken, this read 0.20 against 0.76.
+    local peak = 0
     for _, e in ipairs(measured) do
-        assert(e.sat >= 0.45, string.format(
-            "%s reached the screen at saturation %.2f (%.3f %.3f %.3f): the "
-            .. "ground is grey again", e.biome.id, e.sat,
-            e.screen[1], e.screen[2], e.screen[3]))
+        local v = e.average
+        local vmax, vmin = math.max(v[1], v[2], v[3]), math.min(v[1], v[2], v[3])
+        local vsat = (vmax > 0) and (vmax - vmin) / vmax or 0
+        assert(e.sat >= vsat * 0.6 - 0.02, string.format(
+            "%s: vertices at saturation %.2f reach the screen at %.2f "
+            .. "(%.3f %.3f %.3f) -- the shading is painting over the palette",
+            e.biome.id, vsat, e.sat, e.screen[1], e.screen[2], e.screen[3]))
+        if e.sat > peak then peak = e.sat end
     end
+    -- and a whole tour of nothing but grey is still a failure
+    assert(peak >= 0.30, string.format(
+        "the most colourful biome on the tour reached the screen at "
+        .. "saturation %.2f: the ground is grey again", peak))
     for i = 1, #measured do
         for j = i + 1, #measured do
             local a, b = measured[i].screen, measured[j].screen

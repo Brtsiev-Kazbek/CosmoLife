@@ -127,15 +127,15 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc)
     // an object's dark side does not glow for no reason.
     //
     // It multiplies the surface colour rather than being added on top of it.
-    // Added, it was the single thing draining the colour out of every planet:
-    // the fresnel term peaks where the surface turns away from the eye, and a
-    // ground plane seen from a metre and a half above it is at a grazing angle
-    // *everywhere*, so the whole landscape was being flooded with a flat
-    // blue-grey regardless of what colour it was. Measured on the biome tour,
-    // ground whose vertices were 0.24/0.90/0.99 reached the screen as
-    // 0.33/0.35/0.40 -- and so did every other biome, which is what "it is all
-    // grey" meant. A rim light is still a light: it should light what is there,
-    // not paint over it.
+    // Added, it washed over the picture: the fresnel term peaks where the
+    // surface turns away from the eye, and a ground plane seen from a metre and
+    // a half above it is at a grazing angle *everywhere*, so a flat blue-grey
+    // was laid over the whole landscape whatever colour it was.
+    //
+    // Its strength was also multiplied by 1.7 while the real cause of the flat
+    // picture was still unfound -- vertex colours were clamping to white on
+    // their way to the GPU, see mesh.lua -- and it is back at 1.0 now that
+    // there is an albedo underneath for it to light.
     float fresnel = pow(1.0 - max(dot(n, toEye), 0.0), 3.0);
     float rimGate = clamp(dot(n, -u_lightDir) * 0.5 + 0.75, 0.0, 1.0);
     float rim = fresnel * rimGate;
@@ -143,7 +143,7 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc)
     vec3 lit = base * (u_ambient + u_shadeFloor
                        + u_lightColor * ndl * u_keyIntensity
                        + u_fillColor * ndf
-                       + u_rimColor * rim * 1.7);
+                       + u_rimColor * rim);
 
     // Tone mapping.
     //
