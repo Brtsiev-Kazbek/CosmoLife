@@ -131,7 +131,11 @@ function bodies.clouds(body)
     local seed = (body.seed or 1) + 5501
     local cols, rows = 96, 48
     -- how much of the sky is covered, from the thickness of the air
-    local threshold = util.lerp(0.62, 0.30, util.clamp((air - 0.25) / 1.2, 0, 1))
+    -- Cover. This was low enough that almost every cell passed, so the deck
+    -- was a solid shell painted over the whole planet -- the flat pale disc
+    -- that hid the surface colour entirely. Weather covers part of a world,
+    -- never all of it.
+    local threshold = util.lerp(0.88, 0.66, util.clamp((air - 0.25) / 1.2, 0, 1))
     local b = MeshBuilder.new()
     local any = false
 
@@ -158,7 +162,7 @@ function bodies.clouds(body)
             if c > threshold then
                 -- denser cloud is brighter and more opaque
                 local t = util.clamp((c - threshold) / 0.22, 0, 1)
-                local col = { white[1], white[2], white[3], 0.10 + t * 0.30 }
+                local col = { white[1], white[2], white[3], 0.16 + t * 0.34 }
                 local function p(lat, lon)
                     local cl = cos(lat)
                     return cl * cos(lon), sin(lat), cl * sin(lon)
