@@ -49,14 +49,13 @@ function hints.flight(ctx)
     if not ctx.hoverMode and not ctx.landed then
         add(input.keyName("warp"), "Cruise", ctx.warpState == "cruise")
     end
-    add(input.keyName("landingGear"), "Gear", ctx.gearDown)
-    if ctx.dockPrompt then
-        add(input.keyName("dock"), ctx.dockPromptIsPlace and "Enter" or "Dock", true)
+    -- The context key: one line, and it names what the key would actually do
+    -- rather than listing a key per situation.
+    if ctx.contextVerb then
+        add(input.keyName("interact"), ctx.contextVerb, true)
     end
-    if ctx.landed then
-        add(input.keyName("disembark"), "Disembark", true)
-    end
-    add(input.keyName("map") .. "/" .. input.keyName("missions"), "Map")
+    add(input.keyName("panel"), "Panel")
+    add(input.keyName("utility"), "Systems")
     add("F1", "more")
     return list
 end
@@ -66,13 +65,13 @@ function hints.onFoot(ctx)
     local function add(keys, label, highlight)
         list[#list + 1] = { keys = keys, label = L(label), highlight = highlight }
     end
-    add("WASD", "Move")
+    add(input.keyName("walkForward") .. input.keyName("walkLeft")
+        .. input.keyName("walkBack") .. input.keyName("walkRight"), "Move")
     add("MOUSE", "Look")
     add(input.keyName("run"), "Run")
     add(input.keyName("jump"), "Jump")
-    if ctx.canInteract then add(input.keyName("interact"), "Interact", true) end
-    if ctx.canBoard then add(input.keyName("disembark"), "Board", true) end
-    add(input.keyName("colony"), "Colonies")
+    if ctx.contextVerb then add(input.keyName("interact"), ctx.contextVerb, true) end
+    add(input.keyName("panel"), "Panel")
     add("F1", "more")
     return list
 end

@@ -38,7 +38,10 @@ local pois = require("src.procgen.pois")
 local mining = require("src.sim.mining")
 local tutorial = require("src.sim.tutorial")
 local objectives = require("src.sim.objectives")
+local input = require("src.input")
 local commodities = require("src.sim.commodities")
+local salvage = require("src.sim.salvage")
+local context = require("src.sim.context")
 
 local Flight = class("FlightState")
 
@@ -104,6 +107,8 @@ function Flight:enter(spawnOpts)
     self.autopilot = nil
     self.pois = {}
     self.surfacePois = {}
+    -- cargo spilled by wrecks, waiting to be scooped
+    self.canisters = {}
 
     -- Objectives. One line and one marker serve the tutorial, contracts and
     -- the next rank, in that priority: a screen with three competing arrows
@@ -1225,6 +1230,48 @@ function Flight:targetNearestPort()
     return best
 end
 
+-- Things that used to be keys.
+--
+-- Scanning and firing a shield cell were bindings the player had to remember
+-- to press, and both have exactly one right moment to press them: scan when a
+-- target has been held in the reticle long enough for the scanner to lock, and
+-- fire a cell when the shield is about to fail. A key that is only ever
+-- correct at one moment is a chore, not a decision, so the ship does it.
+-- Both are settings, for anyone who wants the chore back.
+function Flight:updateAutomation(dt)
+    -- scanner lock
+    if settings.get("autoScan") ~= false then
+        local t = self.target
+        local range = self.player.stats.scanRange or config.combat.scanRange
+        local unscanned = t and ((t.entity and not t.entity.scanned) or (t.body and not t.bodyScanned))
+        if t and unscanned and (t.distance or 1e12) < range
+            and self.game.camera:angleTo(t.pos.x, t.pos.y, t.pos.z) < 0.12 then
+            self.scanHold = (self.scanHold or 0) + dt
+            if self.scanHold >= 2.0 then
+                self.scanHold = 0
+                if t.body then t.bodyScanned = true end
+                self:scanTarget()
+            end
+        else
+            self.scanHold = 0
+        end
+    end
+
+    -- shield cells, at the last moment they are still worth anything
+    if settings.get("autoShieldCell") ~= false and (self.player.shieldCells or 0) > 0 then
+        local maxShield = self.player.stats.maxShield or 0
+        if maxShield > 0 and self.player.shield < maxShield * 0.15 then
+            self:useShieldCell()
+        end
+    end
+end
+
+--- How long the scanner has been holding the current target, 0..1.
+function Flight:scanProgress()
+    if not self.scanHold or self.scanHold <= 0 then return 0 end
+    return util.clamp(self.scanHold / 2.0, 0, 1)
+end
+
 function Flight:scanTarget()
     local t = self.target
     if not t then hud.message(L("No target"), "warn") return end
@@ -1254,58 +1301,109 @@ end
 -- Docking and landing
 -- ---------------------------------------------------------------------------
 
+-- What the context key would do right now.
+--
+-- Docking, entering a settlement, disembarking and scooping cargo were four
+-- keys and four prompts; they are one key and one prompt, and both come from
+-- src/sim/context so they cannot disagree about which it is.
 function Flight:updateDockPrompt()
-    self.dockPrompt = nil
     self.relativeTo = nil
-    if self.warpState == "cruise" then return end
+    if self.warpState == "cruise" then self.dockPrompt = nil return end
     local ship = self.ship
+
+    local s = self._ctx or {}
+    self._ctx = s
+    s.station, s.stationBlocked, s.blockedReason = nil, nil, nil
+    s.landedPlace, s.landed, s.canister, s.canisterName = nil, nil, nil, nil
+    s.key = config.keyName("interact")
 
     -- orbital stations
     for _, st in ipairs(self.world.system.stations) do
         local mesh = self:stationMesh(st)
-        local mx, my, mz, nx, ny, nz = stationGen.mouthWorld(st, mesh)
+        local mx, my, mz = stationGen.mouthWorld(st, mesh)
         local dx, dy, dz = ship.pos.x - mx, ship.pos.y - my, ship.pos.z - mz
         local d = sqrt(dx * dx + dy * dy + dz * dz)
         if d < st.size * 0.55 then
+            s.station = st
             if st.derelict then
-                self.dockPrompt = { text = st.name .. " is derelict - no docking control", station = st, blocked = true }
+                s.stationBlocked = true
+                s.blockedReason = L("{name} is derelict - no docking control", { name = st.name })
             elseif self:relativeSpeed(st.vel) > 120 then
                 -- relative to the station, not to the stars: it is orbiting at
                 -- around 100 m/s itself, so a world-frame limit made the
                 -- window between "fast enough to catch it" and "slow enough to
                 -- be allowed in" about twenty metres per second wide
-                self.dockPrompt = { text = L("Slow to under 120 m/s to dock"), station = st, blocked = true }
-            else
-                self.dockPrompt = {
-                    text = L("{key} to dock at {name}",
-                        { key = config.keyName("dock"), name = st.name }),
-                    station = st,
-                }
+                s.stationBlocked = true
+                s.blockedReason = L("Slow to under 120 m/s to dock")
             end
             -- Inside a station's approach the HUD reports closing speed rather
             -- than speed against the stars: next to something orbiting at
             -- 100 m/s, the world-frame number tells the player nothing about
             -- whether they are allowed to dock.
             self.relativeTo = st.vel
-            return
+            break
         end
     end
 
-    -- landed at a settlement pad
-    if self.landedOn and self.landedPlace then
-        self.dockPrompt = {
-            text = L("{key} to enter {name}",
-                { key = config.keyName("dock"), name = self.landedPlace.name }),
-            place = self.landedPlace,
-        }
+    if not s.station then
+        if self.landedOn then
+            s.landed = true
+            s.landedPlace = self.landedPlace
+        else
+            local can = salvage.nearest(self.canisters, ship.pos.x, ship.pos.y, ship.pos.z)
+            if can then
+                s.canister = can
+                s.canisterName = L(commodities.get(can.id).name)
+            end
+        end
+    end
+
+    local action = context.resolve(s)
+    if not action then self.dockPrompt = nil return end
+    -- the old field names are what the HUD, the hints and the self-test read
+    self.dockPrompt = {
+        text = action.text,
+        kind = action.kind,
+        blocked = action.blocked,
+        station = action.kind == "dock" and action.target or nil,
+        place = action.kind == "enterSettlement" and action.target or nil,
+        canister = action.kind == "scoop" and action.target or nil,
+        surface = action.kind == "disembark" or nil,
+    }
+end
+
+--- Runs whatever the context key is offering.
+function Flight:contextAction()
+    local p = self.dockPrompt
+    if not p then return false end
+    if p.blocked then
+        hud.message(p.text, "warn")
+        return false
+    end
+    if p.kind == "dock" or p.kind == "enterSettlement" then
+        self:dock()
+    elseif p.kind == "disembark" then
+        self:disembark()
+    elseif p.kind == "scoop" then
+        self:scoop(p.canister)
+    else
+        return false
+    end
+    return true
+end
+
+--- Pulls a cargo canister into the hold.
+function Flight:scoop(canister)
+    if not canister then return end
+    local id, tonnes = salvage.scoop(self.canisters, canister, self.player)
+    if not id then
+        hud.message(L("Hold is full."), "warn")
         return
     end
-    if self.landedOn then
-        self.dockPrompt = {
-            text = L("{key} to disembark", { key = config.keyName("disembark") }),
-            surface = true,
-        }
-    end
+    hud.message(L("Scooped {n} {n:t} of {cargo:gen:lc}", {
+        n = tonnes, cargo = i18n.term(commodities.get(id).name) }), "good")
+    local rec = self.player.record
+    rec.scooped = (rec.scooped or 0) + tonnes
 end
 
 function Flight:dock()
@@ -1418,7 +1516,9 @@ function Flight:update(dt, background)
     end
 
     self:updateMining()
+    salvage.update(self.canisters, dt)
     self:updateContacts()
+    self:updateAutomation(dt)
     self:updateObjective()
     -- spawn() cannot pick a target because the contact list does not exist
     -- until the first update; this hands the new arrival something to fly to
@@ -1466,6 +1566,13 @@ function Flight:onKill(victim, killer)
         for _, m in ipairs(touched) do
             hud.message(string.format("%s  (%d/%d)", missionsMod.title(m), m.progress or 0, m.quantity), "good")
         end
+    end
+    -- A hold does not evaporate with the ship around it. The scanner has
+    -- always told the player what a target was carrying; now that number can
+    -- actually be collected.
+    local spilled = salvage.fromWreck(self.canisters, victim)
+    if spilled > 0 and killer == self.ship then
+        hud.message(L("Cargo scattered - scoop it before it drifts"), "info")
     end
     victim.dead = true
 end
@@ -1843,6 +1950,30 @@ function Flight:submitShips(renderer)
     end
 end
 
+--- Cargo canisters tumbling where a ship used to be.
+function Flight:submitCanisters(renderer)
+    local list = self.canisters
+    if #list == 0 then return end
+    local mesh = bodies.canister()
+    local basis = self._canBasis or { right = vec3(), up = vec3(0, 1, 0), fwd = vec3() }
+    self._canBasis = basis
+    for i = 1, #list do
+        local c = list[i]
+        local a = c.spin
+        basis.right:set(cos(a), 0, -sin(a))
+        basis.up:set(0, 1, 0)
+        basis.fwd:set(-sin(a), 0, -cos(a))
+        -- the beacon fades with the canister's remaining life, so a field of
+        -- them reads as "hurry up" rather than as scenery
+        local urgency = util.clamp(c.life / salvage.LIFETIME, 0, 1)
+        renderer:draw(mesh, c.pos, basis, { scale = salvage.RADIUS })
+        renderer:drawAt(combat.boltMesh(C.amber), c.pos.x, c.pos.y + salvage.RADIUS, c.pos.z, {
+            scale = salvage.RADIUS * 0.32, additive = true,
+            alpha = 0.35 + 0.45 * urgency, emissive = 1,
+        })
+    end
+end
+
 function Flight:submitEffects(renderer)
     local arena = self.arena
     for i = 1, arena.nProjectiles do
@@ -1893,6 +2024,7 @@ function Flight:draw(background)
         self.surface:draw(renderer, { nightGlow = self.nightGlow, eye = self.local_.pos })
     end
     self:submitShips(renderer)
+    self:submitCanisters(renderer)
     self:submitEffects(renderer)
 
     local sys = self.world.system
@@ -1948,6 +2080,8 @@ function Flight:draw(background)
             warpState = self.warpState, gearDown = self.gearDown,
             dockPrompt = self.dockPrompt, landed = self.landedOn ~= nil,
             dockPromptIsPlace = self.dockPrompt and self.dockPrompt.place ~= nil,
+            contextVerb = context.verb(self.dockPrompt and not self.dockPrompt.blocked
+                and self.dockPrompt.kind or nil),
         }
         -- above the left gauge cluster, not on top of the target panel:
         -- both used to be drawn at (26, 26)
@@ -1960,37 +2094,34 @@ function Flight:draw(background)
     if self.game.showHelp then self:drawHelp(w, h) end
 end
 
+-- The controls panel.
+--
+-- Every row is generated from the live bindings. The old one was a hand
+-- written table that had drifted a long way from reality: it advertised Q/E
+-- for strafing, TAB for mouse flight and SPACE for firing, none of which were
+-- true. Two columns, because the point of the scheme is that the left one is
+-- all you need.
 function Flight:drawHelp(w, h)
-    local lines = {
-        { "Aim (pitch / yaw)", "MOUSE" },
-        { "Roll", "A / D" },
-        { "Throttle", "W / S" },
-        { "Full / cut throttle", "Z / X" },
-        { "Strafe left / right", "Q / E" },
-        { "Thrust up / down", "R / F" },
-        { "Boost", "SHIFT" },
-        { "Frame shift cruise (hold)", "CTRL" },
-        { "Fire / missile", "SPACE / 2" },
-        { "Landing gear (landing mode)", "G" },
-        { "Auto-level / mouse flight", "H / TAB" },
-        { "Target / hostile / scan", "T / Y / B" },
-        { "Dock or enter", "ENTER" },
-        { "Disembark on foot", "U" },
-        { "Galaxy map / log / colonies", "M / N / C" },
-        { "Cockpit or chase view", "V" },
-        { "Save / load", "F5 / F9" },
-        { "Wireframe / debug / CRT", "F2 / F3 / F4" },
-    }
-    local pw, ph = 420, #lines * 20 + 74
+    local core = input.controlRows(input.flightHelp)
+    local extra = input.controlRows(input.advancedHelp)
+    local rows = math.max(#core, #extra)
+    local colW = 300
+    local pw, ph = colW * 2 + 44, rows * 20 + 92
     local px, py = (w - pw) * 0.5, (h - ph) * 0.5
-    ui.panel(px, py, pw, ph, "CONTROLS")
-    for i, l in ipairs(lines) do
-        ui.text(l[1], px + 22, py + 30 + (i - 1) * 20, C.uiText, "small")
-        ui.textRight(l[2], px + pw - 22, py + 30 + (i - 1) * 20, C.uiPrimary, "small")
+    ui.panel(px, py, pw, ph, L("CONTROLS"))
+
+    local function column(list, x, title)
+        ui.text(L(title), x, py + 28, C.uiPrimary, "small")
+        for i, r in ipairs(list) do
+            local y = py + 50 + (i - 1) * 20
+            ui.textFit(L(r[1]), x, y, colW - 96, C.uiText, "small")
+            ui.textRight(r[2], x + colW - 22, y, C.uiPrimary, "small")
+        end
     end
-    ui.textCenter("Gear down near the ground engages LANDING MODE:",
-        px + pw * 0.5, py + ph - 42, C.uiDim, "small")
-    ui.textCenter("the ship holds level and hovers. F1 to close.",
+    column(core, px + 22, "BASICS")
+    column(extra, px + 22 + colW, "ADVANCED")
+
+    ui.textCenter(L("Everything on the left is the whole game. F1 to close."),
         px + pw * 0.5, py + ph - 26, C.uiDim, "small")
 end
 
@@ -2024,6 +2155,20 @@ function Flight:keypressed(key)
     if config.is("target", key) then self:cycleTarget(false) return end
     if config.is("nextTarget", key) then self:cycleTarget(true) return end
     if config.is("scan", key) then self:scanTarget() return end
+    -- One key, and what it does is exactly what the HUD says it will do.
+    if config.is("interact", key) then
+        if self:contextAction() then return end
+    end
+    if config.is("panel", key) then
+        local Panel = require("src.states.panel")
+        self.manager:push(Panel.new(), self)
+        return
+    end
+    if config.is("utility", key) then
+        local Wheel = require("src.states.wheel")
+        self.manager:push(Wheel.new(), self, key)
+        return
+    end
     if config.is("mouseFlight", key) then
         self:setMouseFlight(not self.mouseSteer)
         hud.message(self.mouseSteer and L("Mouse flight on") or L("Mouse flight off"), "info")

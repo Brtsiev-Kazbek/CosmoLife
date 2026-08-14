@@ -20,6 +20,7 @@ local hints = require("src.render.hints")
 local input = require("src.input")
 local i18n = require("src.i18n")
 local Walker = require("src.sim.walker")
+local context = require("src.sim.context")
 
 local OnFoot = class("OnFootState")
 
@@ -53,8 +54,8 @@ function OnFoot:enter(opts)
     end
 
     love.mouse.setRelativeMode(true)
-    hud.message(L("On foot. {interact} to interact, {board} to board the ship.", {
-        interact = config.keyName("interact"), board = config.keyName("disembark"),
+    hud.message(L("On foot. {key} does whatever the prompt says.", {
+        key = config.keyName("interact"),
     }), "info")
 end
 
@@ -128,17 +129,18 @@ function OnFoot:update(dt, background)
 end
 
 function OnFoot:updatePrompt()
-    self.prompt = nil
-    self.action = nil
+    local s = self._ctx or {}
+    self._ctx = s
+    s.walking = true
+    s.key = config.keyName("interact")
+    s.building, s.nearShip = nil, nil
 
     -- board the ship
     local d = sqrt((self.pos.x - self.shipLocal.x) ^ 2 + (self.pos.z - self.shipLocal.z) ^ 2)
-    if d < 14 then
-        self.prompt = L("{key} to board ship", { key = config.keyName("disembark") })
-        self.action = { kind = "board" }
-    end
+    s.nearShip = d < 14
 
-    -- building doors
+    -- building doors; a door in reach outranks the ship, which is what the
+    -- player means when they are standing in one
     local site, mesh = self.site, self.siteMesh
     if site and mesh then
         for _, b in ipairs(mesh.interiors) do
@@ -147,13 +149,22 @@ function OnFoot:updatePrompt()
                 local ez = site.z + b.entrance.z
                 local bd = sqrt((self.pos.x - ex) ^ 2 + (self.pos.z - ez) ^ 2)
                 if bd < W.interactRange then
-                    self.prompt = L("{key} to enter {name}",
-                        { key = config.keyName("interact"), name = b.name })
-                    self.action = { kind = "enter", building = b, site = site }
+                    s.building = b
+                    self._ctxSite = site
                     break
                 end
             end
         end
+    end
+
+    local action = context.resolve(s)
+    self.prompt = action and action.text or nil
+    if not action then
+        self.action = nil
+    elseif action.kind == "enterBuilding" then
+        self.action = { kind = "enter", building = action.target, site = self._ctxSite }
+    else
+        self.action = { kind = action.kind }
     end
 end
 
@@ -191,13 +202,22 @@ function OnFoot:keypressed(key)
         self.onGround = false
         return
     end
-    if config.is("disembark", key) and self.action and self.action.kind == "board" then
-        self.manager:pop()
-        hud.message(L("Aboard"), "info")
-        return
+    -- One key, and what it does is what the prompt says: enter the door in
+    -- front of you, or climb back into the ship.
+    if config.is("interact", key) or config.is("disembark", key) then
+        local a = self.action
+        if a and a.kind == "enter" then
+            self:enterBuilding(a.building, a.site)
+            return
+        elseif a and a.kind == "board" then
+            self.manager:pop()
+            hud.message(L("Aboard"), "info")
+            return
+        end
     end
-    if (config.is("interact", key)) and self.action and self.action.kind == "enter" then
-        self:enterBuilding(self.action.building, self.action.site)
+    if config.is("panel", key) then
+        local Panel = require("src.states.panel")
+        self.manager:push(Panel.new(), self.flight)
         return
     end
     if config.is("colony", key) then
@@ -270,9 +290,9 @@ function OnFoot:draw(background)
 
     if settings.get("showHints") and not self.game.showHelp then
         local top = h - 100
+        local kind = self.action and self.action.kind
         hints.draw(hints.onFoot({
-            canInteract = self.action and self.action.kind == "enter",
-            canBoard = self.action and self.action.kind == "board",
+            contextVerb = context.verb(kind == "enter" and "enterBuilding" or kind),
         }), 26, top, { anchor = "bottom", maxLines = hints.rowsFor(top - 40) })
     end
 

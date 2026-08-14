@@ -1551,13 +1551,233 @@ test("hints react to context", function(assert_)
     -- landing mode swaps combat hints for translation thrusters
     assert_(has(landing, "Strafe") or has(landing, "Смещение"), "landing hints lack strafe")
     assert_(not (has(landing, "Fire") or has(landing, "Огонь")), "landing hints still show weapons")
-    -- the dock hint only appears when there is something to dock with
+    -- The context line names the action rather than the situation, and only
+    -- appears when there is one: this is the single row that replaced the
+    -- separate dock / enter / disembark / board hints.
     assert_(not (has(plain, "Dock") or has(plain, "Стыковка")), "dock hint shown with nothing to dock")
-    local docking = hints.flight({ dockPrompt = true })
+    local gameContext2 = require("src.sim.context")
+    local docking = hints.flight({ contextVerb = gameContext2.verb("dock") })
     assert_(has(docking, "Dock") or has(docking, "Стыковка"), "dock hint missing when docking")
+    local scooping = hints.flight({ contextVerb = gameContext2.verb("scoop") })
+    assert_(not (has(scooping, "Dock") or has(scooping, "Стыковка")),
+        "the context hint still says dock when it would scoop")
 
-    local foot = hints.onFoot({ canBoard = true })
+    local foot = hints.onFoot({ contextVerb = gameContext2.verb("board") })
     assert_(#foot > 3, "no on-foot hints")
+    assert_(has(foot, "Board") or has(foot, "На борт"), "boarding hint missing next to the ship")
+end)
+
+-- ---------------------------------------------------------------------------
+-- The control scheme.
+--
+-- The whole point of the rework is that the scheme cannot grow back. These
+-- tests are the thing stopping it.
+
+test("the core scheme fits on a dozen keys", function(assert_)
+    local input = require("src.input")
+    -- keyboard only: the mouse buttons are not part of the count, and neither
+    -- is anything outside CORE
+    local keys = {}
+    for _, action in ipairs(input.CORE) do
+        assert_(input.defaults[action] ~= nil, action .. " is in CORE but is not bound")
+        for _, src in ipairs(input.defaults[action]) do
+            local k = src:match("^key:(.+)$") or src:match("^sc:(.+)$")
+            if k then keys[k] = true break end
+        end
+    end
+    local distinct = 0
+    for _ in pairs(keys) do distinct = distinct + 1 end
+    -- twelve for playing, plus escape and F1
+    assert_(distinct <= 14, "the core scheme uses " .. distinct .. " distinct keys")
+    -- and the help panels must only ever show core bindings
+    for _, entry in ipairs(input.flightHelp) do
+        local list = type(entry) == "table" and entry or { entry }
+        for _, action in ipairs(list) do
+            assert_(input.isCore[action], "flightHelp lists a non-core action: " .. action)
+        end
+    end
+end)
+
+test("no two core actions fight over the same key in the same place", function(assert_)
+    local input = require("src.input")
+    -- Some pairs share a key on purpose, because only one of the two is ever
+    -- live: WASD flies the ship in the cockpit and walks the player outside
+    -- it, space is cruise in the ship and jump on foot, shift is boost and
+    -- sprint. That is the same key doing the same *kind* of thing in both
+    -- places, which is the point. Anything else sharing a key is a conflict.
+    local allowed = {
+        ["jump|warp"] = true, ["boost|run"] = true,
+        ["throttleUp|walkForward"] = true, ["throttleDown|walkBack"] = true,
+        ["rollLeft|walkLeft"] = true, ["rollRight|walkRight"] = true,
+    }
+    local byKey = {}
+    for _, action in ipairs(input.CORE) do
+        for _, src in ipairs(input.defaults[action] or {}) do
+            local k = src:match("^key:(.+)$") or src:match("^sc:(.+)$")
+            if k then
+                byKey[k] = byKey[k] or {}
+                table.insert(byKey[k], action)
+            end
+        end
+    end
+    for k, list in pairs(byKey) do
+        if #list > 1 then
+            table.sort(list)
+            assert_(allowed[table.concat(list, "|")],
+                "key " .. k .. " is bound to " .. table.concat(list, ", "))
+        end
+    end
+end)
+
+test("every bound action has a label and appears in the rebinding screen", function(assert_)
+    local input = require("src.input")
+    local listed = {}
+    for _, section in ipairs(input.actionOrder) do
+        for _, action in ipairs(section[2]) do listed[action] = true end
+    end
+    for action in pairs(input.defaults) do
+        assert_(input.labels[action] ~= nil, action .. " has no label")
+        if action ~= "save" and action ~= "load" then
+            assert_(listed[action], action .. " cannot be rebound: it is in no section")
+        end
+    end
+end)
+
+-- ---------------------------------------------------------------------------
+-- The context action.
+
+local gameContext = require("src.sim.context")
+
+test("the context key offers one action, in priority order", function(assert_)
+    local station = { name = "Alpha" }
+    local place = { name = "Beta" }
+
+    local a = gameContext.resolve({ station = station, landed = true, canister = {} })
+    assert_(a and a.kind == "dock", "docking did not win")
+
+    a = gameContext.resolve({ station = station, stationBlocked = true, blockedReason = "too fast" })
+    assert_(a and a.kind == "dock" and a.blocked, "a blocked dock is not reported as blocked")
+    assert_(a.text == "too fast", "the blocked reason was not passed through")
+
+    a = gameContext.resolve({ landedPlace = place, landed = true })
+    assert_(a and a.kind == "enterSettlement", "landing at a settlement did not offer the settlement")
+
+    a = gameContext.resolve({ landed = true })
+    assert_(a and a.kind == "disembark", "landed with nothing around did not offer disembark")
+
+    a = gameContext.resolve({ canister = { id = "ore" }, canisterName = "Ore" })
+    assert_(a and a.kind == "scoop", "loose cargo was not offered")
+
+    assert_(gameContext.resolve({}) == nil, "an empty situation produced an action")
+end)
+
+test("on foot the door beats the ship", function(assert_)
+    local a = gameContext.resolve({ walking = true, nearShip = true,
+                                    building = { name = "Market Hall" } })
+    assert_(a and a.kind == "enterBuilding", "standing in a doorway offered the ship instead")
+    a = gameContext.resolve({ walking = true, nearShip = true })
+    assert_(a and a.kind == "board", "next to the ship, boarding was not offered")
+    -- and a walking player is never offered something only a ship can do
+    a = gameContext.resolve({ walking = true, station = { name = "Alpha" }, canister = {} })
+    assert_(a == nil, "a pedestrian was offered a docking clamp")
+end)
+
+test("the prompt always names the action the key will run", function(assert_)
+    -- the defect this replaces: the prompt said "U to disembark" while the key
+    -- that did it had been rebound, because they were written out separately
+    for _, s in ipairs({
+        { station = { name = "Alpha" }, key = "Q" },
+        { landedPlace = { name = "Beta" }, key = "Q" },
+        { landed = true, key = "Q" },
+        { walking = true, nearShip = true, key = "Q" },
+    }) do
+        local a = gameContext.resolve(s)
+        assert_(a ~= nil, "no action for a situation that has one")
+        assert_(a.text:find("Q", 1, true) ~= nil,
+            "the prompt does not mention the key: " .. tostring(a.text))
+    end
+end)
+
+-- ---------------------------------------------------------------------------
+-- Salvage.
+
+local salvage = require("src.sim.salvage")
+
+local function fakeWreck(seed, value, kind)
+    return {
+        seed = seed, cargoValue = value, aiKind = kind or "trader", radius = 12,
+        pos = vec3(100, 0, 0), vel = vec3(0, 0, 0),
+    }
+end
+
+test("a wreck spills a manifest that matches what it was carrying", function(assert_)
+    local rich = salvage.manifest(fakeWreck(7, 40000, "trader"))
+    local poor = salvage.manifest(fakeWreck(7, 300, "trader"))
+    local empty = salvage.manifest(fakeWreck(7, 0, "trader"))
+    local function tonnes(m)
+        local t = 0
+        for _, item in ipairs(m) do t = t + item.tonnes end
+        return t
+    end
+    assert_(tonnes(rich) > tonnes(poor), "a rich hold spilled no more than a poor one")
+    assert_(#empty == 0, "a ship with no cargo still spilled some")
+    -- deterministic: the same wreck always spills the same thing
+    local again = salvage.manifest(fakeWreck(7, 40000, "trader"))
+    assert_(#again == #rich, "the same wreck spilled a different number of canisters")
+    for i, item in ipairs(rich) do
+        assert_(again[i].id == item.id and again[i].tonnes == item.tonnes,
+            "salvage is not deterministic")
+    end
+    -- and a commodity that exists
+    local commoditiesMod = require("src.sim.commodities")
+    for _, item in ipairs(rich) do
+        assert_(commoditiesMod.get(item.id) ~= nil, "spilled an unknown commodity: " .. item.id)
+    end
+end)
+
+test("canisters drift, expire, and can be found by proximity", function(assert_)
+    local list = {}
+    salvage.fromWreck(list, fakeWreck(11, 30000, "pirate"))
+    assert_(#list > 0, "a pirate with a full hold spilled nothing")
+    local first = list[1]
+    local x0 = first.pos.x
+    salvage.update(list, 1.0)
+    assert_(first.pos.x ~= x0 or first.vel.x == 0, "canisters do not drift")
+
+    local found, dist = salvage.nearest(list, first.pos.x, first.pos.y, first.pos.z, 1000)
+    assert_(found ~= nil and dist < 1, "the nearest canister was not the one underfoot")
+    assert_(salvage.nearest(list, 1e9, 0, 0, salvage.SCOOP_RANGE) == nil,
+        "a canister half a system away was in scoop range")
+
+    salvage.update(list, salvage.LIFETIME + 1)
+    assert_(#list == 0, "canisters never expire")
+end)
+
+test("scooping fills the hold and leaves the remainder behind", function(assert_)
+    local Player = require("src.sim.player")
+    local list = {}
+    local can = { id = "ore", tonnes = 10, pos = vec3(), vel = vec3(), life = 60 }
+    list[1] = can
+
+    local player = Player.new()
+    player.cargo = {}
+    -- fill all but three tonnes
+    local free = player:cargoFree()
+    if free > 3 then player:addCargo("water", free - 3) end
+
+    local id, taken = salvage.scoop(list, can, player)
+    assert_(id == "ore", "the scoop returned the wrong commodity")
+    assert_(taken == 3, "took " .. tostring(taken) .. " tonnes into three tonnes of space")
+    assert_(can.tonnes == 7, "the remainder was not left in the canister")
+    assert_(#list == 1, "a partly emptied canister was removed")
+
+    local _, reason = salvage.scoop(list, can, player)
+    assert_(reason == "full", "scooping into a full hold did not report it")
+
+    -- emptying it removes it
+    player.cargo = {}
+    salvage.scoop(list, can, player)
+    assert_(#list == 0, "an emptied canister stayed in the world")
 end)
 
 -- ---------------------------------------------------------------------------

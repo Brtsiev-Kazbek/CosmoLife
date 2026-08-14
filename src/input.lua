@@ -21,42 +21,61 @@ local input = {}
 ---   mouse:<n>    mouse button
 ---   button:<n>   gamepad button
 ---   axis:<name>  gamepad axis, suffixed + or -
+-- The scheme is deliberately small.  Everything a player needs is on twelve
+-- keys plus the mouse (`input.CORE`); the rest still works, still rebinds, and
+-- is kept out of every help panel (`input.ADVANCED`).  Three things make that
+-- possible: one context key that does whatever the situation calls for, one
+-- panel key instead of five screen keys, and automation for the toggles that
+-- used to be chores -- gear, scanning, shield cells.
 input.defaults = {
-    -- flight
-    throttleUp   = { "key:w", "key:up", "axis:lefty-" },
-    throttleDown = { "key:s", "key:down", "axis:lefty+" },
-    rollLeft     = { "key:a", "key:left", "axis:leftx-" },
-    rollRight    = { "key:d", "key:right", "axis:leftx+" },
+    -- ---- core: flight ----
+    throttleUp   = { "key:w", "axis:lefty-" },
+    throttleDown = { "key:s", "axis:lefty+" },
+    rollLeft     = { "key:a", "axis:leftx-" },
+    rollRight    = { "key:d", "axis:leftx+" },
+    boost        = { "key:lshift", "key:rshift", "button:leftstick" },
+    warp         = { "key:space", "key:lctrl", "key:rctrl", "button:x" },
+    autopilot    = { "key:f", "button:dpup" },
+
+    -- ---- core: combat ----
+    fire         = { "mouse:1", "axis:triggerright" },
+    missile      = { "mouse:2", "button:b" },
+    target       = { "key:t", "button:dpright" },
+
+    -- ---- core: everything else ----
+    -- one key for docking, landing, boarding, entering, scooping and mining;
+    -- what it does is whatever the HUD says it will do (see src/sim/context)
+    interact     = { "key:e", "key:return", "button:a" },
+    panel        = { "key:tab", "button:back" },
+    utility      = { "key:q", "button:y" },
+    view         = { "key:v", "button:rightstick" },
+    jump         = { "key:space", "button:a" },
+    run          = { "key:lshift", "button:leftstick" },
+
+    -- ---- advanced: attitude and translation ----
     pitchUp      = { "key:k", "axis:righty+" },
     pitchDown    = { "key:i", "axis:righty-" },
     yawLeft      = { "key:j", "axis:triggerleft" },
     yawRight     = { "key:l", "axis:triggerright" },
-    strafeLeft   = { "key:q", "button:leftshoulder" },
-    strafeRight  = { "key:e", "button:rightshoulder" },
-    thrustUp     = { "key:r", "button:y" },
-    thrustDown   = { "key:f", "button:a" },
+    strafeLeft   = { "key:left", "button:leftshoulder" },
+    strafeRight  = { "key:right", "button:rightshoulder" },
+    thrustUp     = { "key:pageup" },
+    thrustDown   = { "key:pagedown" },
     throttleFull = { "key:z" },
     throttleZero = { "key:x" },
-    boost        = { "key:lshift", "key:rshift", "button:leftstick" },
-    warp         = { "key:lctrl", "key:rctrl", "button:x" },
     levelOut     = { "key:h" },
-    autopilot    = { "key:tab", "button:dpup" },
     mouseFlight  = { "key:backspace" },
 
-    -- combat and systems
-    fire         = { "key:space", "mouse:1", "axis:triggerright" },
-    missile      = { "key:2", "mouse:3" },
-    target       = { "key:t", "button:dpright" },
-    nextTarget   = { "key:y" },
+    -- ---- advanced: systems with an automatic path ----
     scan         = { "key:b", "button:dpleft" },
     shieldCell   = { "key:4" },
     landingGear  = { "key:g", "button:dpdown" },
-    view         = { "key:v", "button:rightstick" },
+    nextTarget   = { "key:y" },
     dock         = { "key:return", "button:start" },
     disembark    = { "key:u" },
 
-    -- screens
-    map          = { "key:m", "button:back" },
+    -- ---- advanced: direct screen shortcuts (all of these are panel tabs) ----
+    map          = { "key:m" },
     missions     = { "key:n" },
     colony       = { "key:c" },
     ship         = { "key:o" },
@@ -73,9 +92,6 @@ input.defaults = {
     walkBack     = { "sc:s", "sc:down", "axis:lefty+" },
     walkLeft     = { "sc:a", "sc:left", "axis:leftx-" },
     walkRight    = { "sc:d", "sc:right", "axis:leftx+" },
-    interact     = { "key:e", "key:return", "button:a" },
-    jump         = { "key:space", "button:a" },
-    run          = { "key:lshift", "button:leftstick" },
 
     -- meta
     pause        = { "key:escape", "button:start" },
@@ -84,18 +100,38 @@ input.defaults = {
     load         = { "key:f9" },
 }
 
+--- The twelve keys the game is actually played on.
+--
+-- Help panels, the tutorial and the title screen are all built from this list
+-- and nothing else, so the scheme cannot quietly grow back into the thirty-odd
+-- bindings it used to be. Anything not in here is reachable, rebindable and
+-- deliberately out of sight.
+input.CORE = {
+    "throttleUp", "throttleDown", "rollLeft", "rollRight",
+    "boost", "warp", "autopilot",
+    "fire", "missile", "target",
+    "interact", "panel", "utility", "view",
+    "walkForward", "walkBack", "walkLeft", "walkRight", "run", "jump",
+    "pause", "help",
+}
+
+input.isCore = {}
+for _, a in ipairs(input.CORE) do input.isCore[a] = true end
+
 --- Human readable order and labels for the rebinding screen.
 input.actionOrder = {
-    { "Flight", { "throttleUp", "throttleDown", "rollLeft", "rollRight",
-                  "pitchUp", "pitchDown", "yawLeft", "yawRight",
-                  "strafeLeft", "strafeRight", "thrustUp", "thrustDown",
-                  "throttleFull", "throttleZero", "boost", "warp",
-                  "levelOut", "mouseFlight", "autopilot" } },
-    { "Combat", { "fire", "missile", "target", "nextTarget", "scan", "shieldCell" } },
-    { "Ship",   { "landingGear", "view", "dock", "disembark" } },
-    { "Screens", { "map", "missions", "colony", "ship", "settings", "pause", "help" } },
+    { "Basics", { "throttleUp", "throttleDown", "rollLeft", "rollRight",
+                  "boost", "warp", "autopilot", "fire", "missile", "target",
+                  "interact", "panel", "utility", "view" } },
     { "On foot", { "walkForward", "walkBack", "walkLeft", "walkRight",
-                   "interact", "jump", "run" } },
+                   "run", "jump" } },
+    { "Advanced flight", { "pitchUp", "pitchDown", "yawLeft", "yawRight",
+                  "strafeLeft", "strafeRight", "thrustUp", "thrustDown",
+                  "throttleFull", "throttleZero", "levelOut", "mouseFlight" } },
+    { "Advanced systems", { "landingGear", "scan", "shieldCell", "nextTarget",
+                  "dock", "disembark" } },
+    { "Screens", { "map", "missions", "colony", "ship", "settings", "pause",
+                   "help", "save", "load" } },
 }
 
 input.labels = {
@@ -116,10 +152,12 @@ input.labels = {
     dock = "Dock / enter", disembark = "Disembark / board",
     map = "Galaxy map", missions = "Logbook", colony = "Colonies",
     ship = "Ship info", settings = "Settings", pause = "Pause",
-    help = "Controls", interact = "Interact", jump = "Jump", run = "Run",
+    help = "Controls", interact = "Action", jump = "Jump", run = "Run",
     walkForward = "Walk forward", walkBack = "Walk back",
     walkLeft = "Step left", walkRight = "Step right",
     walk = "Move", look = "Look",
+    panel = "Commander panel", utility = "Utility wheel (hold)",
+    save = "Quick save", load = "Quick load",
 }
 
 -- ---------------------------------------------------------------------------
@@ -207,7 +245,11 @@ function input.is(action, key)
     return false
 end
 
---- What to print in the UI for an action, e.g. "W" or "LSHIFT".
+-- Mouse buttons have names, not numbers.  Printing "1" next to "Fire" was
+-- read as the 1 key, which is bound to nothing.
+local MOUSE_NAME = { ["1"] = "LMB", ["2"] = "RMB", ["3"] = "MMB" }
+
+--- What to print in the UI for an action, e.g. "W", "LSHIFT" or "LMB".
 function input.keyName(action)
     local controls = input.controls or input.buildControls()
     input.controls = controls
@@ -216,6 +258,10 @@ function input.keyName(action)
     for _, src in ipairs(sources) do
         local key = src:match("^key:(.+)$") or src:match("^sc:(.+)$")
         if key then return key:upper() end
+    end
+    for _, src in ipairs(sources) do
+        local button = src:match("^mouse:(%d+)$")
+        if button then return MOUSE_NAME[button] or ("MOUSE " .. button) end
     end
     return (sources[1]:gsub("^%a+:", "")):upper()
 end
@@ -226,9 +272,13 @@ function input.bindingList(action)
     input.controls = controls
     local out = {}
     for _, src in ipairs(controls[action] or {}) do
-        out[#out + 1] = (src:gsub("^key:", ""):gsub("^sc:", "")
-                            :gsub("^mouse:", "MOUSE "):gsub("^button:", "PAD ")
-                            :gsub("^axis:", "AXIS ")):upper()
+        local button = src:match("^mouse:(%d+)$")
+        if button then
+            out[#out + 1] = MOUSE_NAME[button] or ("MOUSE " .. button)
+        else
+            out[#out + 1] = (src:gsub("^key:", ""):gsub("^sc:", "")
+                                :gsub("^button:", "PAD "):gsub("^axis:", "AXIS ")):upper()
+        end
     end
     return table.concat(out, "  ")
 end
@@ -263,26 +313,35 @@ function input.controlRows(spec)
 end
 
 --- The rows shown on the title screen and by F1 in flight.
+--
+-- Core only.  The old list was twenty-eight rows -- longer than the screen and
+-- longer than anyone reads -- because it listed every binding that existed
+-- rather than the ones the game is played on.
 input.flightHelp = {
-    { "pitchDown", "pitchUp", label = "Pitch" },
-    { "rollLeft", "rollRight", label = "Roll" },
-    { "yawLeft", "yawRight", label = "Yaw" },
     { "throttleUp", "throttleDown", label = "Throttle" },
-    { "throttleFull", "throttleZero", label = "Full / cut throttle" },
-    { "strafeLeft", "strafeRight", label = "Strafe" },
-    { "thrustUp", "thrustDown", label = "Thrust" },
-    "boost", "warp", "levelOut", "autopilot", "mouseFlight",
-    "fire", "missile", "target", "nextTarget", "scan", "shieldCell",
-    "landingGear", "dock", "disembark", "view",
-    "map", "missions", "colony", "ship", "settings",
-    "save", "load", "help",
+    { "rollLeft", "rollRight", label = "Roll" },
+    "boost", "warp", "autopilot",
+    "fire", "missile", "target",
+    "interact", "panel", "utility", "view", "help",
 }
 
 --- The rows shown by F1 on foot.
 input.footHelp = {
     { "walkForward", "walkBack", label = "Move" },
     { "walkLeft", "walkRight", label = "Step" },
-    "run", "jump", "interact", "disembark", "colony", "help",
+    "run", "jump", "interact", "panel", "help",
+}
+
+--- Everything the core list leaves out, for the "advanced" help page.
+input.advancedHelp = {
+    { "pitchDown", "pitchUp", label = "Pitch" },
+    { "yawLeft", "yawRight", label = "Yaw" },
+    { "strafeLeft", "strafeRight", label = "Strafe" },
+    { "thrustUp", "thrustDown", label = "Thrust" },
+    { "throttleFull", "throttleZero", label = "Full / cut throttle" },
+    "levelOut", "mouseFlight", "landingGear", "scan", "shieldCell",
+    "nextTarget", "map", "missions", "colony", "ship", "settings",
+    "save", "load",
 }
 
 --- Rebinds an action to a single key, keeping its gamepad sources.

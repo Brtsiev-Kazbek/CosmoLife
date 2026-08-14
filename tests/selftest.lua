@@ -653,6 +653,82 @@ step(342, "settings screen and lighting presets", function(game)
     assert(game.manager:current() ~= scr, "settings screen did not close")
 end)
 
+step(344, "the commander panel hosts every screen", function(game)
+    local config = require("src.config")
+    local f = game.manager:current()
+    local Panel = require("src.states.panel")
+    f:keypressed(config.keys.panel[1])
+    local panel = game.manager:current()
+    assert(panel ~= f, "the panel key opened nothing")
+    assert(panel.child, "the panel has no hosted screen")
+    -- cycling with the same key walks every tab, and each one draws
+    local seen = {}
+    for _ = 1, #Panel.TABS do
+        seen[Panel.TABS[panel.tab].id] = true
+        panel:draw()
+        panel:keypressed(config.keys.panel[1])
+    end
+    for _, t in ipairs(Panel.TABS) do
+        assert(seen[t.id], "the panel never showed the " .. t.id .. " tab")
+    end
+    panel:keypressed("escape")
+end)
+
+step(346, "the utility wheel replaces the keys it took over", function(game)
+    local config = require("src.config")
+    -- get back to flight whatever the panel left on the stack
+    local Flight = require("src.states.flight")
+    while #game.manager.stack > 1 and not game.manager:current():isInstanceOf(Flight) do
+        game.manager:pop()
+    end
+    local f = game.manager:current()
+    assert(f:isInstanceOf(Flight), "did not get back to flight after the panel")
+    local Wheel = require("src.states.wheel")
+    local gear = f.gearDown
+    f:keypressed(config.keys.utility[1])
+    local wheel = game.manager:current()
+    assert(wheel ~= f, "the utility key opened nothing")
+
+    -- every slot has to be able to describe itself without blowing up
+    for i, slot in ipairs(Wheel.SLOTS) do
+        wheel.selected = i
+        assert(type(slot.state(f)) == "string", slot.id .. " has no readable state")
+        wheel:draw()
+    end
+
+    -- point at the landing gear and release: hold, point, release
+    wheel.selected = 1
+    wheel:keyreleased(config.keys.utility[1])
+    assert(game.manager:current() == f, "releasing the key did not close the wheel")
+    assert(f.gearDown ~= gear, "the wheel did not run the slot it was pointing at")
+    f.gearDown = gear
+end)
+
+step(348, "a wreck spills cargo that can be scooped", function(game)
+    local f = game.manager:current()
+    local salvage = require("src.sim.salvage")
+    local before = f.player:cargoUsed()
+
+    -- put a canister right on top of the ship and take the context action
+    f.canisters = {}
+    salvage.fromWreck(f.canisters, {
+        seed = 4242, cargoValue = 26000, aiKind = "trader", radius = 6,
+        pos = f.ship.pos, vel = f.ship.vel,
+    })
+    assert(#f.canisters > 0, "a loaded trader spilled nothing")
+    for _, c in ipairs(f.canisters) do
+        c.pos:set(f.ship.pos.x, f.ship.pos.y, f.ship.pos.z)
+        c.vel:set(0, 0, 0)
+    end
+
+    f:updateDockPrompt()
+    assert(f.dockPrompt and f.dockPrompt.kind == "scoop",
+        "loose cargo alongside offered no scoop: " .. tostring(f.dockPrompt and f.dockPrompt.kind))
+    assert(f:contextAction(), "the context key refused to scoop")
+    assert(f.player:cargoUsed() > before, "scooping put nothing in the hold")
+    f.canisters = {}
+end)
+
 step(350, "title screen renders", function(game)
     local Menu = require("src.states.menu")
     game.manager:switch(Menu.new())

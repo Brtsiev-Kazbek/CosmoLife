@@ -173,6 +173,28 @@ function bodies.settlementGlow()
     return remember(key, b:build())
 end
 
+--- A cargo canister: a stubby ribbed drum with a coloured band, drawn at unit
+--- radius and scaled at draw time.
+function bodies.canister()
+    local key = "canister"
+    if cache[key] then return cache[key] end
+    local b = MeshBuilder.new()
+    local C = palette.colors
+    -- body
+    geometry.cylinder(b, 0.55, 1.6, 10, C.hull, palette.shade(C.hull, 0.8), 1, true)
+    -- end caps, darker so the shape reads end-on as well as side-on
+    for _, y in ipairs({ -0.82, 0.82 }) do
+        b:push():translate(0, y, 0)
+        geometry.cylinder(b, 0.62, 0.14, 10, C.hullDark, C.steel, 1, true)
+        b:pop()
+    end
+    -- hazard band around the middle
+    b:push():translate(0, 0, 0)
+    geometry.cylinder(b, 0.58, 0.34, 10, C.amber, palette.shade(C.amber, 0.7), 1, false)
+    b:pop()
+    return remember(key, b:build())
+end
+
 function bodies.clear()
     for _, m in pairs(cache) do
         if m and m.mesh and m.mesh.release then m.mesh:release() end
