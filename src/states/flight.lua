@@ -44,6 +44,7 @@ local salvage = require("src.sim.salvage")
 local weather = require("src.sim.weather")
 local context = require("src.sim.context")
 local autopilot = require("src.flight.autopilot")
+local rocks = require("src.flight.rocks")
 
 local Flight = class("FlightState")
 
@@ -1538,37 +1539,9 @@ function Flight:bodyBasis(body, spinScale)
     return b
 end
 
---- Draws the drifting things that make space feel occupied.
---- Draws the asteroid field when the ship is inside a belt.
---
--- Belts have existed since the system generator was written and were never
--- rendered, so a "belt" was an invisible annulus that only affected which
--- NPCs spawned. bodies.asteroids() had no callers at all.
-function Flight:submitRocks(renderer)
-    self.rockDamage = self.rockDamage or {}
-    self.rocks = self.rocks or {}
-    local ship = self.ship
-    mining.near(self.world.system, ship.pos.x, ship.pos.y, ship.pos.z, self.rockDamage, self.rocks)
-    if #self.rocks == 0 then return end
-
-    local set = bodies.asteroids(self.world.system.seed)
-    local basis = self._rockBasis or { right = vec3(), up = vec3(0, 1, 0), fwd = vec3() }
-    self._rockBasis = basis
-    local pos = self._rockPos or vec3()
-    self._rockPos = pos
-
-    for _, r in ipairs(self.rocks) do
-        local a = r.phase + self.time * r.spin
-        basis.right:set(math.cos(a), 0, -math.sin(a))
-        basis.up:set(0, 1, 0)
-        basis.fwd:set(-math.sin(a), 0, -math.cos(a))
-        mat4.orthonormalize(basis.right, basis.up, basis.fwd)
-        pos:set(r.x, r.y, r.z)
-        -- a chipped rock is visibly smaller
-        local wear = 0.55 + 0.45 * (r.health / max(r.maxHealth, 1))
-        renderer:draw(set[r.variant], pos, basis, { scale = r.radius * wear })
-    end
-end
+-- Asteroids -- the working set, the ore a mining bolt frees and the drawing of
+-- them -- live in src/flight/rocks.lua.
+function Flight:submitRocks(renderer) return rocks.submit(self, renderer) end
 
 --- Re-evaluates what the player should be doing, and says so when it changes.
 function Flight:updateObjective()
@@ -1623,55 +1596,8 @@ function Flight:objectiveHint(obj)
 end
 
 --- The nearest live rock to a point, for an NPC miner to work.
-function Flight:rockNear(pos)
-    self.rockDamage = self.rockDamage or {}
-    local list = mining.near(self.world.system, pos.x, pos.y, pos.z, self.rockDamage, self._npcRocks)
-    self._npcRocks = list
-    local best, bestD = nil, math.huge
-    for _, r in ipairs(list) do
-        local d = (r.x - pos.x) ^ 2 + (r.y - pos.y) ^ 2 + (r.z - pos.z) ^ 2
-        if d < bestD then best, bestD = r, d end
-    end
-    return best
-end
-
---- Mining bolts that reach a rock free ore into the hold.
---
--- combat.lua has tagged projectiles `p.mining` since the mining laser was
--- added; nothing read the tag, so the laser was a weapon that did less damage
--- than the cheapest gun and nothing else.
-function Flight:updateMining()
-    local rocks = self.rocks
-    if not rocks or #rocks == 0 then return end
-    local arena = self.arena
-    for i = 1, arena.nProjectiles do
-        local p = arena.projectiles[i]
-        if p and p.life > 0 and p.mining and p.owner == self.ship then
-            for _, r in ipairs(rocks) do
-                local dx, dy, dz = p.pos.x - r.x, p.pos.y - r.y, p.pos.z - r.z
-                if dx * dx + dy * dy + dz * dz < r.radius * r.radius then
-                    local ore, tonnes = mining.hit(r, p.damage or 8, self.rockDamage)
-                    -- expire the bolt; combat.update compacts the array
-                    p.life = 0
-                    combat.effect(arena, p.pos.x, p.pos.y, p.pos.z, r.radius * 0.12, "hit",
-                        r.ore == "gems" and { 0.8, 0.9, 1.0 } or { 0.9, 0.75, 0.5 })
-                    if ore and tonnes then
-                        local free = self.player:cargoFree()
-                        local taken = min(tonnes, free)
-                        if taken > 0 then
-                            self.player:addCargo(ore, taken)
-                            hud.message(L("Mined {n} {n:t} of {cargo:gen:lc}", {
-                                n = taken, cargo = i18n.term(commodities.get(ore).name) }), "good")
-                        else
-                            hud.message(L("Hold is full."), "warn")
-                        end
-                    end
-                    break
-                end
-            end
-        end
-    end
-end
+function Flight:rockNear(pos) return rocks.near(self, pos) end
+function Flight:updateMining() return rocks.updateMining(self) end
 
 function Flight:submitPois(renderer)
     local seed = self.world.system.seed
