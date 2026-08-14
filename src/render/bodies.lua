@@ -277,6 +277,40 @@ function bodies.canister()
     return remember(key, b:build())
 end
 
+--- A cube of falling particles, for rain, snow and blown dust.
+--
+-- One mesh, drawn once, moved as a whole: the cube is `SIZE` metres on a side
+-- and is drawn centred on the camera with an offset that wraps at `SIZE`, so
+-- the particles fall continuously and the seam never arrives. Animating them
+-- individually would need either a shader or a rebuilt mesh every frame, and
+-- neither buys anything a wrapping cube does not already give.
+--
+-- `long` stretches each particle into a streak, which is the difference
+-- between rain and snow at a glance.
+function bodies.precipitation(long)
+    local key = long and "precipL" or "precipS"
+    if cache[key] then return cache[key] end
+    local rng = Rng.new(9182, "precip", long and 1 or 0)
+    local b = MeshBuilder.new()
+    local SIZE = bodies.PRECIP_SIZE
+    local n = 520
+    local col = { 1, 1, 1, 1 }
+    for _ = 1, n do
+        local x = rng:range(-SIZE * 0.5, SIZE * 0.5)
+        local y = rng:range(-SIZE * 0.5, SIZE * 0.5)
+        local z = rng:range(-SIZE * 0.5, SIZE * 0.5)
+        local w = long and 0.05 or 0.11
+        local h = long and rng:range(0.9, 2.2) or rng:range(0.1, 0.22)
+        -- a two-triangle sliver; it is always seen against the sky or the
+        -- ground, never end-on for long enough to matter
+        b:quad(x - w, y, z, x + w, y, z, x + w, y + h, z, x - w, y + h, z, col)
+        b:quad(x, y, z - w, x, y, z + w, x, y + h, z + w, x, y + h, z - w, col)
+    end
+    return remember(key, b:build())
+end
+
+bodies.PRECIP_SIZE = 70
+
 function bodies.clear()
     for _, m in pairs(cache) do
         if m and m.mesh and m.mesh.release then m.mesh:release() end

@@ -2050,6 +2050,46 @@ function Flight:submitShips(renderer)
     end
 end
 
+--- Rain, snow or blown dust around the camera.
+--
+-- The whole field is one mesh moved as a unit: it is drawn centred on the
+-- camera with an offset that wraps at the cube's own size, so it falls
+-- continuously without a seam and without being rebuilt.
+function Flight:submitWeather(renderer, camera)
+    local cond = self.weather
+    if not cond or cond.strength < 0.15 then return end
+    if cond.kind ~= "rain" and cond.kind ~= "snow" and cond.kind ~= "dust" then return end
+    if not settings.q().scatter then return end
+
+    local long = (cond.kind ~= "snow")
+    local mesh = bodies.precipitation(long)
+    if not mesh then return end
+
+    local SIZE = bodies.PRECIP_SIZE
+    -- fall speed, and the wind carrying it sideways
+    local fall = (cond.kind == "snow") and 2.4 or (cond.kind == "dust" and 1.2 or 14)
+    local drift = cond.wind * 0.6
+    local t = self.time
+    local function wrap(v) return v - math.floor(v / SIZE) * SIZE - SIZE * 0.5 end
+    local ox = wrap(math.cos(cond.windAngle) * drift * t)
+    local oy = wrap(-fall * t)
+    local oz = wrap(math.sin(cond.windAngle) * drift * t)
+
+    local TINT = {
+        rain = { 0.62, 0.72, 0.88 },
+        snow = { 0.95, 0.97, 1.0 },
+        dust = { 0.78, 0.62, 0.40 },
+    }
+    local pos = self._precipPos or vec3()
+    self._precipPos = pos
+    pos:set(camera.pos.x + ox, camera.pos.y + oy, camera.pos.z + oz)
+    renderer:draw(mesh, pos, nil, {
+        additive = true, emissive = 1,
+        tint = TINT[cond.kind],
+        alpha = util.clamp(cond.strength * 0.85, 0, 1),
+    })
+end
+
 --- Cargo canisters tumbling where a ship used to be.
 function Flight:submitCanisters(renderer)
     local list = self.canisters
@@ -2125,6 +2165,7 @@ function Flight:draw(background)
     end
     self:submitShips(renderer)
     self:submitCanisters(renderer)
+    self:submitWeather(renderer, camera)
     self:submitEffects(renderer)
 
     local sys = self.world.system

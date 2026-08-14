@@ -1686,6 +1686,88 @@ test("ground cover follows the biome and sits on the drawn ground", function(ass
     assert_(not none or none.triangles == 0, "density 0 still grew something")
 end)
 
+test("two worlds of the same class do not come out the same colour", function(assert_)
+    -- A planet class only unlocks a handful of biomes, and they share their
+    -- palettes, so every barren world used to be the same drab grey-brown as
+    -- every other barren world. Each body carries its own cast now.
+    local terrainMod = require("src.procgen.terrain")
+    local galaxy = require("src.procgen.galaxy").new(20250811)
+    local sysMod = require("src.procgen.system")
+    local diplo = require("src.sim.factions").Diplomacy.new(20250811)
+
+    local byKind = {}
+    local start = galaxy:findStartSystem()
+    local stubs = galaxy:systemsNear(start.x, start.y, start.z, 80, 40)
+    for i = 1, math.min(#stubs, 26) do
+        local sys = sysMod.build(stubs[i], diplo, 5)
+        for _, b in ipairs(sysMod.landables(sys)) do
+            if b.landable and not b.giant then
+                local f = terrainMod.field(b)
+                byKind[f.kind] = byKind[f.kind] or {}
+                table.insert(byKind[f.kind], f.worldTint)
+            end
+        end
+    end
+
+    local checked = 0
+    for kind, tints in pairs(byKind) do
+        if #tints >= 3 then
+            checked = checked + 1
+            -- the ratio of red to blue is what separates a rusty world from a
+            -- cold one; it must not be the same number for all of them
+            local lo, hi = math.huge, -math.huge
+            for _, t in ipairs(tints) do
+                local ratio = t[1] / t[3]
+                lo, hi = math.min(lo, ratio), math.max(hi, ratio)
+            end
+            assert_(hi - lo > 0.15, kind .. " worlds all share the same cast ("
+                .. #tints .. " of them, spread " .. string.format("%.3f", hi - lo) .. ")")
+        end
+    end
+    assert_(checked > 0, "not enough worlds of any one class to compare")
+end)
+
+test("ground colour varies from facet to facet", function(assert_)
+    local terrainMod = require("src.procgen.terrain")
+    local galaxy = require("src.procgen.galaxy").new(20250811)
+    local sysMod = require("src.procgen.system")
+    local sys = sysMod.build(galaxy:findStartSystem(),
+        require("src.sim.factions").Diplomacy.new(20250811), 5)
+    local body
+    for _, b in ipairs(sysMod.landables(sys)) do
+        if b.landable and not b.giant then body = b break end
+    end
+    local field = terrainMod.field(body)
+    field:setOrigin(0.12, 0.4)
+
+    -- across a patch the size of a chunk, neighbouring facets must differ:
+    -- identical colours over tens of metres is the flat wash of paint this
+    -- replaces
+    local lo, hi = math.huge, -math.huge
+    local samples = 0
+    for i = 0, 20 do
+        for j = 0, 20 do
+            local x, z = i * 40, j * 40
+            local h = field:height(x, z)
+            if not field:isWater(h) then
+                local c = field:colorAt(x, z, h, 0.95)
+                local lum = c[1] * 0.3 + c[2] * 0.59 + c[3] * 0.11
+                lo, hi = math.min(lo, lum), math.max(hi, lum)
+                samples = samples + 1
+            end
+        end
+    end
+    assert_(samples > 50, "not enough dry ground to sample")
+    assert_(hi - lo > 0.03, "the ground is one flat tone (spread "
+        .. string.format("%.4f", hi - lo) .. ")")
+
+    -- and it must still be deterministic
+    local h = field:height(200, 200)
+    local a = field:colorAt(200, 200, h, 0.95)
+    local b = field:colorAt(200, 200, h, 0.95)
+    for i = 1, 3 do assert_(a[i] == b[i], "ground colour is not deterministic") end
+end)
+
 -- ---------------------------------------------------------------------------
 -- Walking around a settlement.
 

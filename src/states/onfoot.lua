@@ -21,6 +21,7 @@ local input = require("src.input")
 local i18n = require("src.i18n")
 local Walker = require("src.sim.walker")
 local context = require("src.sim.context")
+local weather = require("src.sim.weather")
 
 local OnFoot = class("OnFootState")
 
@@ -93,6 +94,16 @@ function OnFoot:update(dt, background)
     local ax = input.axis("walkLeft", "walkRight")
     local az = input.axis("walkBack", "walkForward")
     self.walker:walk(dt, ax, az, config.down("run"))
+
+    -- Wind. A walker is all sail and no mass compared with a ship, so a gale
+    -- that a hull barely notices shoves a person about -- which is the whole
+    -- reason weather is worth simulating on foot.
+    local cond = self.flight and self.flight.weather
+    if cond then
+        local wx, wz = weather.push(cond, 2.2)
+        self.vel.x = self.vel.x + wx * dt
+        self.vel.z = self.vel.z + wz * dt
+    end
 
     local gravity = (surface.body.gravity or 9) * W.gravityScale
     self.vel.y = self.vel.y - gravity * dt
@@ -172,6 +183,15 @@ function OnFoot:updatePrompt()
     else
         self.action = { kind = action.kind }
     end
+end
+
+--- The line under the location name: gravity, plus the sky if it is doing
+--- anything worth mentioning.
+function OnFoot:conditionLine()
+    local g = L("gravity {g} m/s2", { g = string.format("%.1f", self.surface.body.gravity or 0) })
+    local cond = self.flight and self.flight.weather
+    if not cond or cond.strength < 0.15 or cond.kind == "clear" then return g end
+    return g .. "  -  " .. L(weather.NAME[cond.kind] or "Clear")
 end
 
 function OnFoot:updateCamera(dt)
@@ -290,7 +310,7 @@ function OnFoot:draw(background)
                 pop = util.money(self.site.place.population),
                 economy = L(commoditiesMod.economy(self.site.place.economyId).name),
             })
-            or L("gravity {g} m/s2", { g = string.format("%.1f", self.surface.body.gravity or 0) }),
+            or self:conditionLine(),
         prompt = self.prompt,
     }, w, h)
 

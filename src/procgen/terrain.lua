@@ -78,6 +78,18 @@ function Field:init(body)
     self.duneHeight = rng:range(14, 42)
     self.mesaStep = self.amplitude * rng:range(0.06, 0.14)
 
+    -- The cast this whole world is painted in. Two worlds of the same class
+    -- draw from the same handful of biome palettes, so without this they come
+    -- out identically drab; a rotation of the channels gives one a rust cast,
+    -- the next an ochre one and the third a cold blue-grey.
+    local hue = rng:range(-1, 1)
+    local warmth = rng:range(0.86, 1.16)
+    self.worldTint = {
+        util.clamp(warmth + hue * 0.22, 0.6, 1.5),
+        util.clamp(warmth - math.abs(hue) * 0.05, 0.6, 1.5),
+        util.clamp(warmth - hue * 0.24, 0.6, 1.5),
+    }
+
     self.climate = biomeMod.climate(self, body)
 
     -- cached chunks, keyed by "cx,cz,step"
@@ -307,11 +319,33 @@ function Field:biomeColor(b, h, x, z)
         col = palette.mix(b.mid, b.high, (t - 0.5) * 2)
     end
 
+    -- Every world gets its own cast.
+    --
+    -- The biome palettes are shared, and a planet class only unlocks a handful
+    -- of them -- a barren world can only be regolith, hardpan, badlands, ash
+    -- and ice, which between them are five greys and a brown. So every barren
+    -- world came out the same drab colour as every other one, and "the planets
+    -- have no colours" was a fair description. A hue rotation per body, drawn
+    -- from its seed, makes one of them rusty, the next ochre and the third
+    -- cold and bluish, without touching what the biomes mean.
+    local w = self.worldTint
+    col = {
+        util.clamp(col[1] * w[1], 0, 1),
+        util.clamp(col[2] * w[2], 0, 1),
+        util.clamp(col[3] * w[3], 0, 1),
+        col[4] or 1,
+    }
+
     if x then
-        -- facet to facet variation: small, but it is the difference between
-        -- ground and a painted plane
-        local k = 0.90 + facetHash(self.seed, x, z) * 0.20
-        col = { col[1] * k, col[2] * k, col[3] * k, col[4] or 1 }
+        -- Facet to facet variation. Brightness alone still reads as one
+        -- colour under a light, so the channels are pushed apart a little as
+        -- well: that is what turns a slab of paint into ground.
+        local n = facetHash(self.seed, x, z)
+        local k = 0.88 + n * 0.24
+        local hue = (n - 0.5) * 0.13
+        col[1] = util.clamp(col[1] * (k + hue), 0, 1)
+        col[2] = util.clamp(col[2] * k, 0, 1)
+        col[3] = util.clamp(col[3] * (k - hue), 0, 1)
     end
     return col
 end
