@@ -1056,6 +1056,52 @@ step(349, "loose cargo is drawn without crashing", function(game)
     f.canisters = {}
 end)
 
+-- The colour a generator asks for is the colour the GPU gets.
+--
+-- Everything in this game is untextured, so a mesh's vertex colours are the
+-- entire palette: if they do not survive the trip to the shader, no amount of
+-- work on biomes, lighting or tone mapping can put colour back. They did not
+-- survive. `{"VertexColor","byte",4}` is a normalised byte -- LOVE 11 wants
+-- 0..1 and multiplies by 255 itself -- and the builder was sending 0..255, so
+-- every channel clamped to 1.0 and every surface in the game was pure white.
+-- Months of "it is all grey" was that: the screen was showing the lighting
+-- with no albedo under it.
+--
+-- One triangle, a pass-through shader, one pixel read back. This is the check
+-- that would have caught it on the first frame it existed.
+step(346, "a mesh's vertex colour reaches the shader", function()
+    local Builder = require("src.render.mesh")
+    local want = { 0.24, 0.61, 0.93 }
+
+    local b = Builder.new()
+    b:tri(0, 0, 0, 400, 0, 0, 0, 400, 0, want)
+    local model = b:build()
+    assert(model and model.mesh, "the builder produced no GPU mesh")
+
+    local canvas = love.graphics.newCanvas(32, 32)
+    local shader = love.graphics.newShader(
+        "vec4 effect(vec4 c, Image t, vec2 tc, vec2 sc) { return vec4(c.rgb, 1.0); }")
+    love.graphics.setCanvas(canvas)
+    love.graphics.clear(0, 0, 0, 1)
+    love.graphics.setShader(shader)
+    love.graphics.setColor(1, 1, 1, 1)
+    love.graphics.draw(model.mesh)
+    love.graphics.setShader()
+    love.graphics.setCanvas()
+
+    local data = canvas:newImageData()
+    local r, g, bl = data:getPixel(8, 8)
+    if data.release then data:release() end
+    io.write(string.format("    VCOL   asked %.2f %.2f %.2f  got %.3f %.3f %.3f\n",
+        want[1], want[2], want[3], r, g, bl))
+    io.flush()
+    -- 1/255 of slack for the byte quantisation, no more
+    for i, got in ipairs({ r, g, bl }) do
+        assert(math.abs(got - want[i]) < 0.01, string.format(
+            "channel %d went in as %.3f and came out as %.3f", i, want[i], got))
+    end
+end)
+
 step(350, "title screen renders", function(game)
     local Menu = require("src.states.menu")
     game.manager:switch(Menu.new())
@@ -1239,6 +1285,34 @@ step(TOUR_START + (TOUR_SLOTS + 1) * TOUR_STRIDE, "the tour actually showed vari
             assert(d > 0.02, string.format(
                 "%s and %s render the same colour (difference %.4f)",
                 shown[i].biome.id, shown[j].biome.id, d))
+        end
+    end
+
+    -- And now the same question asked of the screen rather than the palette.
+    --
+    -- The two used to disagree completely: vertices at saturation 0.8 arrived
+    -- as 0.20, identical for every biome, because the vertex colours were
+    -- being clamped to white on their way to the GPU. A palette that differs
+    -- proves nothing on its own -- this is the assertion that the difference
+    -- survives all the way to the pixels.
+    local measured = {}
+    for _, e in ipairs(shown) do
+        if e.screen and e.sat then measured[#measured + 1] = e end
+    end
+    assert(#measured >= 3, "only " .. #measured .. " frames were read back")
+    for _, e in ipairs(measured) do
+        assert(e.sat >= 0.45, string.format(
+            "%s reached the screen at saturation %.2f (%.3f %.3f %.3f): the "
+            .. "ground is grey again", e.biome.id, e.sat,
+            e.screen[1], e.screen[2], e.screen[3]))
+    end
+    for i = 1, #measured do
+        for j = i + 1, #measured do
+            local a, b = measured[i].screen, measured[j].screen
+            local d = math.abs(a[1] - b[1]) + math.abs(a[2] - b[2]) + math.abs(a[3] - b[3])
+            assert(d >= 0.05, string.format(
+                "%s and %s reach the screen as the same colour (difference %.4f)",
+                measured[i].biome.id, measured[j].biome.id, d))
         end
     end
 end)

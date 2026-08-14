@@ -88,12 +88,28 @@ end
 -- Primitive emission
 -- ---------------------------------------------------------------------------
 
+-- Vertex colours go to the GPU in 0..1, not 0..255.
+--
+-- `{"VertexColor", "byte", 4}` is a *normalised* unsigned byte: LOVE 11 takes
+-- the component as 0..1 and does the multiply by 255 itself. This used to
+-- return 0..255, so every channel of every colour clamped to 1.0 and every
+-- surface in the game -- terrain, hulls, buildings, foliage -- was drawn pure
+-- white. What reached the screen was therefore not the palette at all but the
+-- lighting alone, which is why every biome rendered the same flat blue-grey,
+-- why ship hulls came out white, and why night looked lit.
+--
+-- Measured, not guessed: a triangle written as 0.24/0.90/0.99 read back
+-- 0.239/0.898/0.988 through a pass-through shader, and the same colour written
+-- as 61/229/252 read back 1.000/1.000/1.000.
+--
+-- The rounding is kept so the value in `verts` is exactly what the GPU will
+-- store, which keeps head-less geometry comparable with a rendered frame.
 local function encodeColor(col)
     local a = col[4] or 1
-    return floor(min(max(col[1], 0), 1) * 255 + 0.5),
-           floor(min(max(col[2], 0), 1) * 255 + 0.5),
-           floor(min(max(col[3], 0), 1) * 255 + 0.5),
-           floor(min(max(a, 0), 1) * 255 + 0.5)
+    return floor(min(max(col[1], 0), 1) * 255 + 0.5) / 255,
+           floor(min(max(col[2], 0), 1) * 255 + 0.5) / 255,
+           floor(min(max(col[3], 0), 1) * 255 + 0.5) / 255,
+           floor(min(max(a, 0), 1) * 255 + 0.5) / 255
 end
 
 function Builder:_track(x, y, z)
