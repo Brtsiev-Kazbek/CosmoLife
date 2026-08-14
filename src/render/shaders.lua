@@ -53,6 +53,48 @@ uniform float u_saturation;
 uniform float u_exposure;
 uniform float u_shell;       // 0 = ordinary geometry, 1 = air, 2 = cloud deck
 
+// Shadows. u_shadowMap holds light-space depth in its red channel, written by
+// shaders.shadowDepth from the sun's point of view; u_lightVP maps a
+// camera-relative position into that map's clip space. u_shadowStrength is 0
+// when the pass did not run, which switches the whole thing off.
+uniform Image u_shadowMap;
+uniform mat4  u_lightVP;
+uniform float u_shadowStrength;
+uniform float u_shadowTexel;   // 1 / map size, for the filter taps
+uniform float u_shadowBias;    // in the map's own depth units
+
+//- How much sun reaches this point: 1 lit, 0 fully shadowed.
+float sunReach(float ndl)
+{
+    if (u_shadowStrength <= 0.0 || ndl <= 0.0) return 1.0;
+
+    vec4 lp = u_lightVP * vec4(v_viewPos, 1.0);
+    vec3 ndc = lp.xyz / lp.w;
+    vec2 uv = ndc.xy * 0.5 + 0.5;
+    // outside the map there is nothing to say, so say "lit" rather than
+    // painting a hard rectangle of shadow across the landscape
+    if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) return 1.0;
+
+    float d = ndc.z * 0.5 + 0.5;
+    // A surface nearly edge-on to the sun straddles a whole texel of depth, so
+    // the bias has to grow with the angle or it shadows itself in stripes.
+    float bias = u_shadowBias * (1.0 + 3.0 * (1.0 - ndl));
+
+    float t = u_shadowTexel;
+    float lit = 0.0;
+    lit += (Texel(u_shadowMap, uv + vec2(-t, -t)).r + bias >= d) ? 1.0 : 0.0;
+    lit += (Texel(u_shadowMap, uv + vec2( t, -t)).r + bias >= d) ? 1.0 : 0.0;
+    lit += (Texel(u_shadowMap, uv + vec2(-t,  t)).r + bias >= d) ? 1.0 : 0.0;
+    lit += (Texel(u_shadowMap, uv + vec2( t,  t)).r + bias >= d) ? 1.0 : 0.0;
+    lit *= 0.25;
+
+    // Fade out towards the edge of the map, so the boundary of the shadowed
+    // region is not a visible line drawn on the ground.
+    vec2 edge = abs(ndc.xy);
+    float fade = 1.0 - smoothstep(0.75, 1.0, max(edge.x, edge.y));
+    return mix(1.0, lit, u_shadowStrength * fade);
+}
+
 vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc)
 {
     vec3 base = color.rgb * u_tint.rgb;
@@ -155,8 +197,12 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc)
     float upness = dot(n, u_up) * 0.5 + 0.5;
     vec3 ambient = mix(u_bounce, u_skyLight, upness);
 
+    // Only the key light is shadowed. Ambient and fill are what a shadow is
+    // still lit by, and shadowing them would make every crevice black.
+    float sun = sunReach(ndl);
+
     vec3 lit = base * (ambient
-                       + u_lightColor * ndl * u_keyIntensity
+                       + u_lightColor * ndl * u_keyIntensity * sun
                        + u_fillColor * ndf
                        + u_rimColor * rim);
 
@@ -200,6 +246,38 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc)
     lit = mix(lit, u_fogColor, f);
 
     return vec4(lit, color.a * u_tint.a);
+}
+#endif
+]]
+
+-- ---------------------------------------------------------------------------
+-- Shadow pass: the same geometry seen from the sun, writing distance from the
+-- sun into a colour channel.
+--
+-- Distance in a colour target rather than a sampled depth buffer, because a
+-- readable depth texture means sampler2DShadow and a driver-dependent corner
+-- of LOVE's GLSL compatibility layer; an r32f canvas is ordinary rendering
+-- that works the same everywhere. The depth buffer is still attached -- it is
+-- what makes the nearest surface win -- it is simply never read.
+-- ---------------------------------------------------------------------------
+shaders.shadowDepth = [[
+varying float v_depth;
+
+#ifdef VERTEX
+uniform mat4 u_mvp;
+
+vec4 position(mat4 transform_projection, vec4 vertex_position)
+{
+    vec4 p = u_mvp * vec4(vertex_position.xyz, 1.0);
+    v_depth = p.z * 0.5 + 0.5;
+    return p;
+}
+#endif
+
+#ifdef PIXEL
+vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc)
+{
+    return vec4(v_depth, 0.0, 0.0, 1.0);
 }
 #endif
 ]]

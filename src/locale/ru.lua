@@ -132,6 +132,9 @@ local strings = {
     ["Quit to title"] = "В главное меню",
     ["Quit to desktop"] = "Выйти из игры",
     ["CRT filter"] = "ЭЛТ-фильтр",
+    ["Sun shadows"] = "Тени от солнца",
+    ["A second pass over nearby geometry from the sun's side. Off below the Medium preset whatever this says."] =
+        "Второй проход по ближней геометрии со стороны солнца. Ниже пресета «Средне» выключены в любом случае.",
     ["Light bands"] = "Ступени света",
     ["Wireframe"] = "Каркас",
     ["Launch"] = "Взлёт",

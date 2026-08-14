@@ -73,6 +73,7 @@ function Game:applySettings()
     local r = self.renderer
     i18n.setLocale(settings.get("language"))
     r.settings.post = settings.get("post") and settings.q().post
+    r.settings.shadows = settings.get("shadows") ~= false and settings.q().shadows ~= false
     r.settings.scanline = settings.get("scanline")
     r.settings.vignette = settings.get("vignette")
     r.settings.aberration = settings.get("aberration")

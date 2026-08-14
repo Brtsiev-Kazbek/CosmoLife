@@ -1362,6 +1362,32 @@ step(TOUR_START + (TOUR_SLOTS + 1) * TOUR_STRIDE, "the tour actually showed vari
                 measured[i].biome.id, measured[j].biome.id, d))
         end
     end
+
+    -- Shadows, where the tour gave them anything to do.
+    --
+    -- Two separate claims, because they fail separately. First: wherever the
+    -- pass ran it must have drawn geometry -- an empty map shadows nothing and
+    -- looks exactly like a correct scene with nothing to cast. Second: a low
+    -- sun over relief must actually darken the ground, which is the only
+    -- statement that covers the lookup as well as the pass. A sun overhead
+    -- legitimately casts almost nothing on open ground, so that half is only
+    -- claimed when the tour visited somewhere with the sun low.
+    local lowSun, maxDarken = false, 0
+    for _, e in ipairs(measured) do
+        local sh = e.shadow
+        if sh and sh.strength > 0 then
+            assert(sh.covered > 0.05, string.format(
+                "%s: the shadow pass ran and left the map empty (%.0f%% covered)",
+                e.biome.id, sh.covered * 100))
+            if (e.sunUp or 1) < 0.5 then lowSun = true end
+            maxDarken = math.max(maxDarken, e.darken or 0)
+        end
+    end
+    if lowSun then
+        assert(maxDarken > 0.01, string.format(
+            "the sun was low over relief and turning shadows off changed the "
+            .. "ground by %.1f%%: nothing is being shadowed", maxDarken * 100))
+    end
 end)
 
 local SHOTS = {
@@ -1413,6 +1439,35 @@ end
 
 selftest.sampleFrame = sampleFrame
 
+--- Fraction of the shadow map that has any geometry in it, and the nearest
+--- depth written.
+--
+-- A shadow map is invisible. If the pass never runs, or runs and writes
+-- nothing, the picture is identical to a picture with no shadows -- which is
+-- also what a correct picture looks like at midnight, so the screen cannot
+-- tell you which one you have. This reads the map itself: any texel below 1.0
+-- is something the sun can see.
+local function sampleShadowMap(game)
+    local r = game and game.renderer
+    local canvas = r and r.shadowColor
+    if not canvas or not canvas.newImageData then return nil end
+    local ok, data = pcall(function() return canvas:newImageData() end)
+    if not ok or not data then return nil end
+    local w, h = data:getWidth(), data:getHeight()
+    local hit, n, lo = 0, 0, 1
+    for px = 0, w - 1, 8 do
+        for py = 0, h - 1, 8 do
+            local d = data:getPixel(px, py)
+            if d < 0.999 then hit = hit + 1 end
+            if d < lo then lo = d end
+            n = n + 1
+        end
+    end
+    if data.release then data:release() end
+    if n == 0 then return nil end
+    return { covered = hit / n, nearest = lo, strength = r.shadowStrength or 0 }
+end
+
 function selftest.captureIfWanted(frame)
     local want = selftest.sampleWanted
     if want then
@@ -1421,11 +1476,45 @@ function selftest.captureIfWanted(frame)
         if entry then
             entry.screen = sampleFrame(selftest.game, 0.56, 0.66)
             entry.sky = sampleFrame(selftest.game, 0.02, 0.14)
+            entry.shadow = sampleShadowMap(selftest.game)
+
+            -- The same frame again with the shadow pass switched off.
+            --
+            -- A shadow map that is full of geometry still proves nothing about
+            -- the picture -- the lookup can be wrong in a way that says "lit"
+            -- everywhere, and the result is indistinguishable from a scene that
+            -- has nothing to cast. Rendering the stop twice and differencing
+            -- the ground is the only statement that means anything: if turning
+            -- shadows off does not change the frame, there are no shadows.
+            local r = selftest.game.renderer
+            if r.settings.shadows and not r.shadowUnsupported then
+                r.settings.shadows = false
+                selftest.game:draw()
+                entry.unshadowed = sampleFrame(selftest.game, 0.56, 0.66)
+                r.settings.shadows = true
+                -- leave the canvas holding the shadowed frame, which is what
+                -- the screenshot is meant to show
+                selftest.game:draw()
+            end
             if entry.screen then
                 local c = entry.screen
                 local mx = math.max(c[1], c[2], c[3])
                 local mn = math.min(c[1], c[2], c[3])
                 entry.sat = (mx > 0) and (mx - mn) / mx or 0
+                local sh = entry.shadow
+                local u = entry.unshadowed
+                local darken = 0
+                if u then
+                    local a = (c[1] + c[2] + c[3]) / 3
+                    local b = (u[1] + u[2] + u[3]) / 3
+                    darken = (b > 0) and (1 - a / b) or 0
+                    entry.darken = darken
+                end
+                io.write(string.format(
+                    "    SHADOW %-10s map %.0f%% covered, nearest %.4f, strength %.2f, "
+                    .. "ground darkened %.1f%%\n",
+                    entry.biome.id, sh and sh.covered * 100 or -1,
+                    sh and sh.nearest or -1, sh and sh.strength or -1, darken * 100))
                 io.write(string.format(
                     "    TOUR   %-10s ground %.3f %.3f %.3f sat %.2f | sky %.3f %.3f %.3f\n",
                     entry.biome.id, c[1], c[2], c[3], entry.sat,

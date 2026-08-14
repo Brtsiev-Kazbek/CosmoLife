@@ -74,6 +74,9 @@ settings.schema = {
               min = 0, max = 12, step = 1, format = "%.0f",
               help = "0 is smooth shading; low values give hard retro banding." },
             { id = "post", name = "CRT filter", type = "bool", default = true },
+            { id = "shadows", name = "Sun shadows", type = "bool", default = true,
+              help = "A second pass over nearby geometry from the sun's side. "
+                  .. "Off below the Medium preset whatever this says." },
             { id = "scanline", name = "Scanlines", type = "number", default = 0.35,
               min = 0, max = 1, step = 0.05, format = "%.2f" },
             { id = "vignette", name = "Vignette", type = "number", default = 0.55,
@@ -101,28 +104,28 @@ settings.schema = {
 settings.quality = {
     potato = {
         terrainRings = 3, terrainRes = 10, buildBudget = 1, poiCells = 1,
-        starCount = 260, bodyDetail = 20, post = false,
+        starCount = 260, bodyDetail = 20, post = false, shadows = false,
         scatter = false, nebula = 0.35, settlementRange = 6000, maxNpcs = 4,
         engineGlows = false,
         blurb = "Everything optional is off. Runs on anything.",
     },
     low = {
         terrainRings = 4, terrainRes = 14, buildBudget = 2, poiCells = 1,
-        starCount = 550, bodyDetail = 28, post = false,
+        starCount = 550, bodyDetail = 28, post = false, shadows = false,
         scatter = false, nebula = 0.7, settlementRange = 10000, maxNpcs = 7,
         engineGlows = true,
         blurb = "No post pass, short draw distance.",
     },
     medium = {
         terrainRings = 6, terrainRes = 20, buildBudget = 3, poiCells = 2,
-        starCount = 1100, bodyDetail = 40, post = true,
+        starCount = 1100, bodyDetail = 40, post = true, shadows = true,
         scatter = true, nebula = 1.0, settlementRange = 16000, maxNpcs = 11,
         engineGlows = true,
         blurb = "The intended look.",
     },
     high = {
         terrainRings = 8, terrainRes = 24, buildBudget = 4, poiCells = 2,
-        starCount = 1400, bodyDetail = 64, post = true,
+        starCount = 1400, bodyDetail = 64, post = true, shadows = true,
         scatter = true, nebula = 1.0, settlementRange = 24000, maxNpcs = 14,
         engineGlows = true,
         blurb = "Long draw distance, dense starfield, finest spheres.",

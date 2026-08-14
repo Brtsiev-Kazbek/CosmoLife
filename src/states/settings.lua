@@ -97,6 +97,7 @@ function Settings:apply()
     if not game then return end
     local r = game.renderer
     r.settings.post = settings.get("post")
+    r.settings.shadows = settings.get("shadows") ~= false and settings.q().shadows ~= false
     r.settings.scanline = settings.get("scanline")
     r.settings.vignette = settings.get("vignette")
     r.settings.aberration = settings.get("aberration")

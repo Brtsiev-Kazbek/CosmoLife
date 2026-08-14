@@ -88,6 +88,8 @@ function Renderer:init()
     }
 
     self.settings = {
+        shadows = true,
+        shadowStrength = 0.8,
         post = true,
         scanline = 0.35,
         vignette = 0.55,
@@ -112,13 +114,6 @@ function Renderer:init()
     if self.available then self:_createResources() end
 end
 
-function Renderer:_createResources()
-    self.shader = love.graphics.newShader(shaders.flat3d)
-    self.skyShader = love.graphics.newShader(shaders.sky)
-    self.postShader = love.graphics.newShader(shaders.post)
-    self:resize(love.graphics.getWidth(), love.graphics.getHeight())
-end
-
 -- Fraction of the window the sky pass is rendered at (see Renderer:resize).
 local SKY_SCALE = 0.5
 
@@ -129,6 +124,132 @@ local function newDepthCanvas(w, h)
         if ok and canvas then return canvas end
     end
     return nil
+end
+
+function Renderer:_createResources()
+    self.shader = love.graphics.newShader(shaders.flat3d)
+    self.skyShader = love.graphics.newShader(shaders.sky)
+    self.postShader = love.graphics.newShader(shaders.post)
+    self.shadowShader = love.graphics.newShader(shaders.shadowDepth)
+    self:_createShadowMap()
+    self:resize(love.graphics.getWidth(), love.graphics.getHeight())
+end
+
+-- ---------------------------------------------------------------------------
+-- Shadows
+-- ---------------------------------------------------------------------------
+
+-- Side of the shadow map, in texels, and the half-width of the world it covers.
+--
+-- 1024 texels over 1600 m is about three metres each, which is fine detail
+-- next to a terrain quad -- the ground is built at roughly a hundred metres per
+-- facet -- and still resolves a landing pad or a hull. The box follows the
+-- camera, so what it buys is shadows in the space you are actually in; past
+-- SHADOW_EXTENT the shader fades them out rather than drawing a boundary.
+local SHADOW_SIZE = 1024
+local SHADOW_EXTENT = 1600
+-- Depth of the box along the sun direction. Deep enough that a mountain
+-- casting onto a valley is inside it, shallow enough to keep precision.
+local SHADOW_DEPTH = 9000
+-- Bias in metres, converted to the map's depth units below. Terrain facets are
+-- large and nearly flat, which is the easy case; the awkward one is a facet
+-- almost edge-on to the sun, and the shader widens this with the angle.
+local SHADOW_BIAS_M = 6.0
+
+function Renderer:_createShadowMap()
+    -- r32f keeps a metre of depth well inside a texel's precision. If the
+    -- driver has no float canvas, shadows simply stay off: rgba8 would give
+    -- 256 steps over nine kilometres, which is 35 m per step and acne
+    -- everywhere.
+    local ok, canvas = pcall(love.graphics.newCanvas, SHADOW_SIZE, SHADOW_SIZE, { format = "r32f" })
+    if not ok or not canvas then
+        self.shadowUnsupported = true
+        return
+    end
+    canvas:setFilter("nearest", "nearest")
+    self.shadowColor = canvas
+    self.shadowDepth = newDepthCanvas(SHADOW_SIZE, SHADOW_SIZE)
+    if not self.shadowDepth then
+        self.shadowColor:release()
+        self.shadowColor = nil
+        self.shadowUnsupported = true
+        return
+    end
+    self._lightView = mat4.identity()
+    self._lightProj = mat4.identity()
+    self._lightVP = mat4.identity()
+    self._lightBasis = { right = vec3(), up = vec3(), fwd = vec3() }
+end
+
+--- Renders the near layer from the sun's point of view.
+--
+-- Everything is camera relative, exactly as in the main pass: the box is
+-- centred on the camera and the same `it.dx/dy/dz` offsets are used, so the
+-- matrix the fragment shader applies to `v_viewPos` is the matrix that was
+-- used to fill the map.
+function Renderer:_shadowPass(env)
+    self.shadowStrength = 0
+    if self.shadowUnsupported or not self.shadowColor then return end
+    if not self.settings.shadows then return end
+    if self.counts[LAYER_NEAR] == 0 then return end
+
+    -- A sun on or below the horizon casts shadows the length of the world;
+    -- there is nothing useful to draw and the map would be all acne.
+    local up = env.worldUp
+    local sunUp = -(env.sunDir.x * up.x + env.sunDir.y * up.y + env.sunDir.z * up.z)
+    if sunUp < 0.08 then return end
+
+    -- light basis: fwd is the way the light travels
+    local b = self._lightBasis
+    b.fwd:set(env.sunDir.x, env.sunDir.y, env.sunDir.z)
+    b.fwd:normalize()
+    -- any vector not parallel to the light does for "up"
+    local ax, ay, az = up.x, up.y, up.z
+    if math.abs(b.fwd.x * ax + b.fwd.y * ay + b.fwd.z * az) > 0.98 then
+        ax, ay, az = 1, 0, 0
+    end
+    b.up:set(ax, ay, az)
+    mat4.orthonormalize(b.right, b.up, b.fwd)
+
+    -- eye: back along the light from the camera, far enough to see over
+    -- anything between
+    local half = SHADOW_DEPTH * 0.5
+    local eye = self._lightEye or { x = 0, y = 0, z = 0 }
+    self._lightEye = eye
+    eye.x, eye.y, eye.z = -b.fwd.x * half, -b.fwd.y * half, -b.fwd.z * half
+
+    mat4.view(eye, b.right, b.up, b.fwd, self._lightView)
+    mat4.ortho(-SHADOW_EXTENT, SHADOW_EXTENT, -SHADOW_EXTENT, SHADOW_EXTENT,
+        1, SHADOW_DEPTH, self._lightProj)
+    mat4.mul(self._lightProj, self._lightView, self._lightVP)
+
+    love.graphics.setCanvas({ self.shadowColor, depthstencil = self.shadowDepth })
+    -- 1.0 is "nothing here", i.e. the far plane: unwritten texels must never
+    -- shadow anything
+    love.graphics.clear(1, 1, 1, 1, true, true)
+    love.graphics.setDepthMode("lequal", true)
+    love.graphics.setBlendMode("replace")
+    love.graphics.setShader(self.shadowShader)
+    love.graphics.setColor(1, 1, 1, 1)
+
+    local s = self.shadowShader
+    local queue = self.queues[LAYER_NEAR]
+    local rel = self._relPos
+    for i = 1, self.counts[LAYER_NEAR] do
+        local it = queue[i]
+        local bb = it.basis
+        rel.x, rel.y, rel.z = it.dx, it.dy, it.dz
+        local model = mat4.model(rel, bb.right, bb.up, bb.fwd, it.scale, self._model)
+        local mvp = mat4.mul(self._lightVP, model, self._mvp)
+        self:_send(s, "u_mvp", "column", mvp)
+        love.graphics.draw(it.model.mesh)
+    end
+
+    love.graphics.setShader()
+    love.graphics.setBlendMode("alpha")
+    love.graphics.setDepthMode()
+    love.graphics.setCanvas()
+    self.shadowStrength = self.settings.shadowStrength or 0.8
 end
 
 function Renderer:resize(w, h)
@@ -289,6 +410,15 @@ function Renderer:_setupShader(env)
     self:_send(s, "u_keyIntensity", env.keyIntensity or 1)
     self:_send(s, "u_saturation", env.saturation or 1)
     self:_send(s, "u_exposure", env.exposure or 1.15)
+
+    local strength = self.shadowStrength or 0
+    self:_send(s, "u_shadowStrength", strength)
+    if strength > 0 then
+        self:_send(s, "u_shadowMap", self.shadowColor)
+        self:_send(s, "u_lightVP", "column", self._lightVP)
+        self:_send(s, "u_shadowTexel", 1 / SHADOW_SIZE)
+        self:_send(s, "u_shadowBias", SHADOW_BIAS_M / SHADOW_DEPTH)
+    end
 end
 
 local function byDistance(a, b) return a.dist < b.dist end
@@ -392,6 +522,10 @@ function Renderer:endFrame(overlay2d)
     local env = self.env
 
     love.graphics.push("all")
+    -- the sun's view of the near layer, before anything is drawn from the
+    -- camera's: the main pass reads the map it fills
+    self:_shadowPass(env)
+
     love.graphics.setCanvas({ self.color, depthstencil = self.depth })
     love.graphics.clear(0, 0, 0, 1, true, true)
     love.graphics.setDepthMode("always", false)
