@@ -78,17 +78,42 @@ function Field:init(body)
     self.duneHeight = rng:range(14, 42)
     self.mesaStep = self.amplitude * rng:range(0.06, 0.14)
 
-    -- The cast this whole world is painted in. Two worlds of the same class
-    -- draw from the same handful of biome palettes, so without this they come
-    -- out identically drab; a rotation of the channels gives one a rust cast,
-    -- the next an ochre one and the third a cold blue-grey.
-    local hue = rng:range(-1, 1)
-    local warmth = rng:range(0.86, 1.16)
-    self.worldTint = {
-        util.clamp(warmth + hue * 0.22, 0.6, 1.5),
-        util.clamp(warmth - math.abs(hue) * 0.05, 0.6, 1.5),
-        util.clamp(warmth - hue * 0.24, 0.6, 1.5),
+    -- The cast this whole world is painted in.
+    --
+    -- Scaling the channels was not enough, and could not have been: a grey has
+    -- no hue to rotate, and the drab classes -- barren, ice, volcanic -- are
+    -- built almost entirely out of greys, so multiplying them left them grey.
+    -- Chroma has to be *added*.
+    --
+    -- Each body gets a saturated accent hue, normalised so its mean is one,
+    -- and ground colour is mixed towards that hue at its own lightness. A grey
+    -- slope becomes a teal or a violet or a rust one of exactly the same
+    -- brightness; a colour that already has a hue is pulled part of the way
+    -- towards the world's. Worlds are told apart at a glance, and no biome
+    -- loses its position relative to the others on the same planet.
+    local hue = rng:range(0, math.pi * 2)
+    local function accentAt(a)
+        -- three phases 120 degrees apart: the cheapest full-hue sweep there is
+        local r = 0.5 + 0.5 * math.cos(a)
+        local g = 0.5 + 0.5 * math.cos(a - 2.0944)
+        local b = 0.5 + 0.5 * math.cos(a + 2.0944)
+        local mean = (r + g + b) / 3
+        return { r / mean, g / mean, b / mean }
+    end
+    self.accent = accentAt(hue)
+    -- How far the world is pushed towards its accent. Airless rock and ice
+    -- take the most, because they have the least colour of their own and are
+    -- the worlds that were reading as grey; living worlds take the least,
+    -- because green ground already means something.
+    local BY_CLASS = {
+        barren = 0.72, ice = 0.62, volcanic = 0.60, desert = 0.50,
+        toxic = 0.46, ocean = 0.34, terran = 0.30,
     }
+    self.accentStrength = (BY_CLASS[kind] or 0.5) * rng:range(0.8, 1.15)
+    -- and a saturation lift on top, so what colour there is is not timid
+    self.saturate = rng:range(1.25, 1.75)
+    -- kept for anything still reading the old field name
+    self.worldTint = self.accent
 
     self.climate = biomeMod.climate(self, body)
 
@@ -319,20 +344,21 @@ function Field:biomeColor(b, h, x, z)
         col = palette.mix(b.mid, b.high, (t - 0.5) * 2)
     end
 
-    -- Every world gets its own cast.
-    --
-    -- The biome palettes are shared, and a planet class only unlocks a handful
-    -- of them -- a barren world can only be regolith, hardpan, badlands, ash
-    -- and ice, which between them are five greys and a brown. So every barren
-    -- world came out the same drab colour as every other one, and "the planets
-    -- have no colours" was a fair description. A hue rotation per body, drawn
-    -- from its seed, makes one of them rusty, the next ochre and the third
-    -- cold and bluish, without touching what the biomes mean.
-    local w = self.worldTint
+    -- Push it towards the world's accent hue, at its own lightness, and lift
+    -- the saturation. This is what turns a planet of five greys and a brown
+    -- into a planet that has a colour.
+    local a = self.accent
+    local k = self.accentStrength
+    local lum = col[1] * 0.30 + col[2] * 0.59 + col[3] * 0.11
+    local r = col[1] + (lum * a[1] - col[1]) * k
+    local g = col[2] + (lum * a[2] - col[2]) * k
+    local bch = col[3] + (lum * a[3] - col[3]) * k
+    local grey = r * 0.30 + g * 0.59 + bch * 0.11
+    local sat = self.saturate
     col = {
-        util.clamp(col[1] * w[1], 0, 1),
-        util.clamp(col[2] * w[2], 0, 1),
-        util.clamp(col[3] * w[3], 0, 1),
+        util.clamp(grey + (r - grey) * sat, 0, 1),
+        util.clamp(grey + (g - grey) * sat, 0, 1),
+        util.clamp(grey + (bch - grey) * sat, 0, 1),
         col[4] or 1,
     }
 

@@ -1131,15 +1131,33 @@ for slot = 1, TOUR_SLOTS do
         assert(n > 0, "no ground built at " .. entry.biome.id)
 
         local ground = surf:groundHeight(0, 0)
-        f.local_.pos:set(0, ground + 14, 0)
+        -- well clear of the ground: the chase camera sits behind and below
+        -- the hull, and at fourteen metres it ended up *under* the terrain,
+        -- photographing the underside of it
+        f.local_.pos:set(0, ground + 60, 0)
         f.local_.vel:set(0, 0, 0)
         f.local_.up:set(0, 1, 0)
         f.local_.fwd:set(0, 0.06, 1)
         require("src.lib.mat4").orthonormalize(f.local_.right, f.local_.up, f.local_.fwd)
         f:syncFromLocal()
         f.landedOn = entry.body
-        game.camera.mode = "chase"
+        game.camera.mode = "cockpit"
         game:update(1 / 60)
+        -- `groundHeight` is measured in the tangent frame and `altitude` from
+        -- the body's surface; they differ by the terrain under the frame
+        -- origin, so the height is corrected against the number that actually
+        -- decides whether the camera is underground.
+        for _ = 1, 4 do
+            local alt = f.altitude or 0
+            if alt > 30 then break end
+            f.local_.pos.y = f.local_.pos.y + (30 - alt) + 20
+            f.local_.vel:set(0, 0, 0)
+            f:syncFromLocal()
+            game:update(1 / 60)
+        end
+        assert((f.altitude or 0) > 0, string.format(
+            "the camera ended up below the ground at %s (altitude %.0f m)",
+            entry.biome.id, f.altitude or 0))
 
         -- What is on screen has to differ between stops: a rainforest and a
         -- dune sea rendering the same average colour would mean the biome

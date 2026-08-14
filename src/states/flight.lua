@@ -1714,19 +1714,19 @@ function Flight:submitAir(renderer, body, basis, dist)
         })
     end
 
-    local atmo = bodies.atmosphere(body)
-    -- the shell is only meaningful from outside; inside it the sky shader is
-    -- doing the work
-    if atmo and dist > body.radius + S.atmosphereHeight then
-        -- The real top of the air is 90 km, which on a planet this size is
-        -- under three percent of the radius: physically right, and on screen a
-        -- hairline the scattering has nowhere to live. The shell gets a floor
-        -- so the halo is something you can actually see.
-        renderer:draw(atmo, body.pos, basis, {
-            scale = math.max(body.radius + S.atmosphereHeight, body.radius * 1.045),
-            additive = true, layer = renderer.LAYER_FAR, shell = 1,
-        })
-    end
+    -- No atmosphere shell.
+    --
+    -- A sphere drawn around the planet cannot look like air from here. The
+    -- scattering it needs is a function of how far the view ray travels
+    -- through the atmosphere, and a single additive shell only has the angle
+    -- between the surface normal and the eye to work with -- so it renders as
+    -- a flat pale disc laid over the planet, larger than the planet, with a
+    -- hard edge. Several rounds of tuning the falloff moved that edge around
+    -- without ever making it read as air. It is off until it can be done as a
+    -- ray-marched depth through the shell, where the maths actually holds.
+    --
+    -- `bodies.atmosphere` and the `u_shell = 1` branch in flat3d are kept for
+    -- that: they are what a proper version would build on.
 end
 
 --- Lit settlements on a world's night side, seen from orbit.
