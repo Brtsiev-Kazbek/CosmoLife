@@ -27,7 +27,7 @@ lighting.presets = {
         blurb = "One hard sun, flat ambient. The 1984 look.",
         keyIntensity = 0.95, fillIntensity = 0.0, rimIntensity = 0.0,
         fillColor = { 0.30, 0.38, 0.55 }, rimColor = { 1.0, 1.0, 1.0 },
-        ambientScale = 1.0, shadeFloor = 0.06, bands = 4, saturation = 1.0,
+        ambientScale = 1.0, shadeFloor = 0.06, bands = 4, saturation = 1.55,
         exposure = 1.30,
     },
     cinematic = {
@@ -35,7 +35,7 @@ lighting.presets = {
         blurb = "Warm key, cool fill, bright rim. Reads well against space.",
         keyIntensity = 0.85, fillIntensity = 0.26, rimIntensity = 0.30,
         fillColor = { 0.24, 0.40, 0.78 }, rimColor = { 0.66, 0.84, 1.0 },
-        ambientScale = 0.70, shadeFloor = 0.04, bands = 5, saturation = 1.18,
+        ambientScale = 0.70, shadeFloor = 0.04, bands = 5, saturation = 1.95,
         exposure = 1.15,
     },
     noir = {
@@ -43,7 +43,7 @@ lighting.presets = {
         blurb = "Hard key, almost no fill, cold rim. Long shadows.",
         keyIntensity = 0.95, fillIntensity = 0.08, rimIntensity = 0.42,
         fillColor = { 0.16, 0.22, 0.38 }, rimColor = { 0.55, 0.72, 1.0 },
-        ambientScale = 0.40, shadeFloor = 0.02, bands = 3, saturation = 0.85,
+        ambientScale = 0.40, shadeFloor = 0.02, bands = 3, saturation = 1.35,
         exposure = 1.35,
     },
     sunset = {
@@ -51,7 +51,7 @@ lighting.presets = {
         blurb = "Amber key against a violet fill.",
         keyIntensity = 0.88, fillIntensity = 0.34, rimIntensity = 0.28,
         fillColor = { 0.46, 0.22, 0.68 }, rimColor = { 1.0, 0.66, 0.42 },
-        ambientScale = 0.72, shadeFloor = 0.05, bands = 6, saturation = 1.30,
+        ambientScale = 0.72, shadeFloor = 0.05, bands = 6, saturation = 2.05,
         exposure = 1.10,
     },
     clinical = {
@@ -59,7 +59,7 @@ lighting.presets = {
         blurb = "Even, bright, unromantic. Best for reading a scene.",
         keyIntensity = 0.80, fillIntensity = 0.38, rimIntensity = 0.14,
         fillColor = { 0.58, 0.64, 0.72 }, rimColor = { 0.9, 0.94, 1.0 },
-        ambientScale = 0.95, shadeFloor = 0.10, bands = 0, saturation = 1.0,
+        ambientScale = 0.95, shadeFloor = 0.10, bands = 0, saturation = 1.60,
         exposure = 1.05,
     },
 }

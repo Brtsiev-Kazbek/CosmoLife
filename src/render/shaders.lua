@@ -123,16 +123,27 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc)
     ndf = max(ndf * 0.5 + 0.5, 0.0);
     ndf *= ndf;
 
-    // rim light: a band along the silhouette, gated to the lit hemisphere so
-    // an object's dark side does not glow for no reason
+    // Rim light: a band along the silhouette, gated to the lit hemisphere so
+    // an object's dark side does not glow for no reason.
+    //
+    // It multiplies the surface colour rather than being added on top of it.
+    // Added, it was the single thing draining the colour out of every planet:
+    // the fresnel term peaks where the surface turns away from the eye, and a
+    // ground plane seen from a metre and a half above it is at a grazing angle
+    // *everywhere*, so the whole landscape was being flooded with a flat
+    // blue-grey regardless of what colour it was. Measured on the biome tour,
+    // ground whose vertices were 0.24/0.90/0.99 reached the screen as
+    // 0.33/0.35/0.40 -- and so did every other biome, which is what "it is all
+    // grey" meant. A rim light is still a light: it should light what is there,
+    // not paint over it.
     float fresnel = pow(1.0 - max(dot(n, toEye), 0.0), 3.0);
     float rimGate = clamp(dot(n, -u_lightDir) * 0.5 + 0.75, 0.0, 1.0);
     float rim = fresnel * rimGate;
 
     vec3 lit = base * (u_ambient + u_shadeFloor
                        + u_lightColor * ndl * u_keyIntensity
-                       + u_fillColor * ndf)
-             + u_rimColor * rim;
+                       + u_fillColor * ndf
+                       + u_rimColor * rim * 1.7);
 
     // Tone mapping.
     //
@@ -140,7 +151,20 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc)
     // and a hard clamp turns a light grey hull into a white silhouette with no
     // shape left in it. This exponential roll-off keeps mid tones where they
     // are and compresses the highlights instead of cutting them off.
-    lit = vec3(1.0) - exp(-lit * u_exposure);
+    //
+    // It is applied to *brightness*, not to each channel on its own. Rolling
+    // off the channels independently is what was draining the colour out of
+    // the whole game: the brightest channel saturates first, so a cyan ground
+    // lit to 1.4 came out white, and every complaint that "everything is grey"
+    // traced back here rather than to the palette. Scaling all three by the
+    // same factor moves the brightness and leaves the hue where the generator
+    // put it.
+    float lum = max(dot(lit, vec3(0.2126, 0.7152, 0.0722)), 1e-4);
+    lit *= (1.0 - exp(-lum * u_exposure)) / lum;
+    // a colour can still leave the cube on one channel; pull it back along the
+    // line to white rather than clipping, which would desaturate it again
+    float peak = max(lit.r, max(lit.g, lit.b));
+    if (peak > 1.0) lit /= peak;
 
     // a touch of saturation control lets a preset be graded without
     // re-authoring every palette entry
