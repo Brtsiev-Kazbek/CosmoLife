@@ -112,7 +112,13 @@ function OnFoot:update(dt, background)
 
     local ground = surface:groundHeight(self.pos.x, self.pos.z)
     if site and mesh then
-        ground = site.h + settlementGen.floorHeight(mesh, self.pos.x - site.x, self.pos.z - site.z)
+        -- The plate is flat at the settlement's height and the terrain around
+        -- it is not, so the two are blended across the rim rather than swapped
+        -- at a line -- that swap was a step the player fell off.
+        local lx, lz = self.pos.x - site.x, self.pos.z - site.z
+        local plate = site.h + settlementGen.floorHeight(mesh, lx, lz)
+        local k = settlementGen.plateBlend(mesh, lx, lz)
+        ground = ground + (plate - ground) * k
     end
     if self.pos.y <= ground then
         self.pos.y = ground

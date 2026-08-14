@@ -46,6 +46,7 @@ local context = require("src.sim.context")
 local Flight = class("FlightState")
 
 local sqrt, min, max, abs, floor = math.sqrt, math.min, math.max, math.abs, math.floor
+local atan2 = math.atan2 or math.atan
 local FL = config.flight
 local S = config.scale
 local C = palette.colors
@@ -776,16 +777,19 @@ function Flight:readRotation(dt, basis, agility)
     -- Landing mode: with the gear down close to the ground the ship holds
     -- itself level with the local horizon.  This is the single biggest reason
     -- landing used to feel like being upside down -- there was no up.
+    --
+    -- The roll term is the angle to level, not just `right.y`. `right.y` is
+    -- zero when the ship is upright *and* when it is exactly upside down, so
+    -- the old term had a stable equilibrium at inverted: a ship that arrived
+    -- on its back stayed on its back, with the camera cheerfully showing a
+    -- level horizon over mirrored controls.
+    local rollAngle = atan2(basis.right.y, basis.up.y)
     if self.hoverMode then
-        local ux, uy, uz = 0, 1, 0        -- local frame: up is +Y by definition
         -- roll and pitch back towards level, leaving yaw to the player
-        local tiltRight = basis.right.y
-        local tiltFwd = basis.fwd.y
-        roll = roll - util.clamp(tiltRight * 3.2, -1, 1)
-        pitch = pitch - util.clamp(tiltFwd * 3.2, -1, 1)
+        roll = roll - util.clamp(rollAngle * 2.0, -1, 1)
+        pitch = pitch - util.clamp(basis.fwd.y * 3.2, -1, 1)
     elseif (self.autoLevel ~= false and settings.get("autoLevel")) and self.surface then
-        local tiltRight = basis.right.y
-        roll = roll - util.clamp(tiltRight * 2.6, -1, 1)
+        roll = roll - util.clamp(rollAngle * 1.6, -1, 1)
     end
 
     local a = self.ship.angular
@@ -1535,13 +1539,26 @@ function Flight:update(dt, background)
     camera:follow(self.ship, dt)
     -- Level the view with the local horizon as the ground comes up.  Full
     -- lock while landing, tapering off to none by the top of the atmosphere.
+    --
+    -- The blend has to be an absolute fraction, not a per-frame step. `follow`
+    -- rebuilds the camera basis from the hull every frame, so a step of
+    -- `1 - exp(-9 dt)` was not accumulating towards level -- it was applying
+    -- fourteen percent of the correction to a fresh copy of the hull's roll,
+    -- for ever. The horizon lock has therefore never done more than a seventh
+    -- of its job, which is why a hull that ended up inverted on approach stayed
+    -- visibly inverted. What eases over time is the *strength*, so the view
+    -- still settles rather than snapping as the ground comes up.
     if self.upVec and self.altitude then
-        local strength = util.clamp(1 - (self.altitude / 30000), 0, 1)
+        local want = util.clamp(1 - (self.altitude / 30000), 0, 1)
             * settings.get("horizonLock")
-        if self.hoverMode then strength = 1 end
-        if strength > 0 then
-            camera:levelToHorizon(self.upVec, strength * (1 - math.exp(-9 * dt)))
+        if self.hoverMode then want = 1 end
+        self.levelBlend = (self.levelBlend or 0)
+            + (want - (self.levelBlend or 0)) * (1 - math.exp(-4 * dt))
+        if self.levelBlend > 0.002 then
+            camera:levelToHorizon(self.upVec, self.levelBlend)
         end
+    else
+        self.levelBlend = 0
     end
 end
 

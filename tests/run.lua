@@ -1568,6 +1568,55 @@ test("hints react to context", function(assert_)
 end)
 
 -- ---------------------------------------------------------------------------
+-- Walking around a settlement.
+
+test("a walker is pushed out of every building, not just the first", function(assert_)
+    local settlementMod = require("src.procgen.settlement")
+    -- two buildings with a gap too narrow to stand in
+    local detail = {
+        buildings = {
+            { x = -6, z = 0, radius = 6 },
+            { x = 6, z = 0, radius = 6 },
+        },
+        pads = {}, radius = 60, plateRadius = 56,
+    }
+    -- Standing in the gap, which is narrower than the player: whatever else
+    -- happens, they must not be left inside a wall.
+    local x, z = settlementMod.collide(detail, 0, 0, 0.6)
+    local deepest = 0
+    for _, b in ipairs(detail.buildings) do
+        local d = math.sqrt((x - b.x) ^ 2 + (z - b.z) ^ 2)
+        deepest = math.max(deepest, (b.radius * 0.92 + 0.6) - d)
+    end
+    assert_(deepest < 1e-6, string.format("left standing %.2f m inside a wall", deepest))
+
+    -- and the ordinary case: pushed clear of a single building
+    local sx, sz = settlementMod.collide(detail, -6, 1, 0.6)
+    local sd = math.sqrt((sx + 6) ^ 2 + (sz - 0) ^ 2)
+    assert_(sd >= 6 * 0.92 + 0.6 - 1e-6, string.format(
+        "not pushed clear of a single building: %.2f", sd))
+    -- and somebody in the clear is not moved at all
+    local cx, cz = settlementMod.collide(detail, 40, 40, 0.6)
+    assert_(cx == 40 and cz == 40, "a walker in open ground was shoved")
+end)
+
+test("the settlement plate blends into the terrain at its rim", function(assert_)
+    local settlementMod = require("src.procgen.settlement")
+    local detail = { buildings = {}, pads = {}, radius = 60, plateRadius = 56 }
+    assert_(settlementMod.plateBlend(detail, 0, 0) == 1, "the middle of the plate is not solid")
+    assert_(settlementMod.plateBlend(detail, 100, 0) == 0, "the plate extends past the settlement")
+    local edge = settlementMod.plateBlend(detail, 57, 0)
+    assert_(edge > 0 and edge < 1, "the rim is a step rather than a blend")
+    -- monotone, so walking outwards never climbs back onto the plate
+    local prev = 2
+    for d = 0, 70, 2 do
+        local k = settlementMod.plateBlend(detail, d, 0)
+        assert_(k <= prev + 1e-9, "the plate blend is not monotone at " .. d)
+        prev = k
+    end
+end)
+
+-- ---------------------------------------------------------------------------
 -- The control scheme.
 --
 -- The whole point of the rework is that the scheme cannot grow back. These

@@ -361,6 +361,105 @@ step(71, "profile: atmospheric entry", function(game)
     io.flush()
 end)
 
+-- A landing approach with the hull rolled.
+--
+-- Near the ground the camera levels itself to the horizon while the hull does
+-- not, and the controls used to turn the nose about the *hull's* axes -- so at
+-- ninety degrees of roll the view and the controls disagreed by ninety
+-- degrees, and past upside down the mouse worked backwards. Worse, the
+-- auto-level term was `right.y`, which is zero when upright *and* when exactly
+-- inverted, so a ship that arrived on its back stayed there.
+--
+-- The horizon lock only engages below 30 km, so this has to be run down there:
+-- at cruising altitude the camera stays glued to the hull and there is no
+-- disagreement to find.
+step(100, "a rolled landing approach still turns the way the mouse moves", function(game)
+    local f = game.manager:current()
+    local camera = game.camera
+    local mat4 = require("src.lib.mat4")
+    local settings = require("src.settings")
+    local w, h = game.renderer.width, game.renderer.height
+    if not f.surface then return end
+
+    -- drop to a few hundred metres so the horizon lock is at full strength
+    local ground = f.surface:groundHeight(f.local_.pos.x, f.local_.pos.z)
+    f.local_.pos.y = ground + 300
+    f.local_.vel:set(0, 0, 0)
+    f.gearDown = false
+    f:setMouseFlight(true)
+    -- Cockpit view, because in the chase view the camera orbits the hull: a
+    -- nose rotation moves the camera as well as aiming it, and the landmark's
+    -- screen position then says more about where the camera swung to than
+    -- about which way the nose turned.
+    local wasMode = camera.mode
+    camera.mode = "cockpit"
+
+    -- Roll the hull most of the way over. The local frame has +Y as up by
+    -- definition, so the attitude is built directly rather than by rotating
+    -- whatever the ship happened to be doing -- otherwise "rolled 150 degrees"
+    -- is 150 degrees from the hull's old attitude, not from the horizon.
+    local b = f.local_
+    local ang = 2.8                        -- radians from level: nearly inverted
+    b.fwd:set(0, 0, 1)
+    b.up:set(math.sin(ang), math.cos(ang), 0)
+    mat4.orthonormalize(b.right, b.up, b.fwd)
+    assert(math.abs((math.atan2 or math.atan)(b.right.y, b.up.y)) > 2.5,
+        "the test did not manage to roll the hull past ninety degrees")
+
+    -- Hold the roll while the camera levels, so the measurement is about the
+    -- input frame and not about the ship righting itself: a rolling hull sweeps
+    -- a fixed landmark across the screen far faster than yaw moves it.
+    settings.set("autoLevel", false)
+    f.autoLevel = false
+    for _ = 1, 90 do game:update(1 / 60) end
+
+    -- The regime that inverts the controls is the camera being more than a
+    -- right angle away from the hull: below that, yawing about the hull's axis
+    -- still has a positive component along screen-right and merely feels
+    -- skewed rather than backwards.
+    local su, cu = f.ship.up, camera.up
+    local cosPhi = su.x * cu.x + su.y * cu.y + su.z * cu.z
+    assert(cosPhi < 0, string.format(
+        "the camera levelled only %.0f degrees away from the hull, which is not far "
+        .. "enough to invert anything", math.deg(math.acos(cosPhi))))
+
+    -- a landmark that the screen shows on the right
+    local s = f.ship
+    local mx = s.pos.x + camera.right.x * 700 + s.fwd.x * 2400
+    local my = s.pos.y + camera.right.y * 700 + s.fwd.y * 2400
+    local mz = s.pos.z + camera.right.z * 700 + s.fwd.z * 2400
+    local before = camera:project(mx, my, mz, w, h)
+    assert(before and before > w / 2, "the probe landmark is not on the right of the screen")
+
+    f.mouseDx, f.mouseDy = 0, 0
+    f:mousemoved(0, 0, 60, 0)
+    for _ = 1, 20 do game:update(1 / 60) end
+    local after = camera:project(mx, my, mz, w, h)
+    assert(after, "the landmark left the screen entirely")
+    assert(after < before, string.format(
+        "rolled approach: mouse right turned away from the right-hand landmark (%.0f -> %.0f px)",
+        before, after))
+
+    -- and with levelling back on the hull must right itself rather than
+    -- settling upside down, which is where `right.y` alone left it
+    settings.set("autoLevel", true)
+    f.autoLevel = true
+    f.mouseDx, f.mouseDy = 0, 0
+    local rolled = math.abs((math.atan2 or math.atan)(f.local_.right.y, f.local_.up.y))
+    -- hold it in the air: a ship that has landed stops levelling, and this is
+    -- about the approach
+    for _ = 1, 600 do
+        f.local_.pos.y = ground + 300
+        f.local_.vel:set(0, 0, 0)
+        game:update(1 / 60)
+    end
+    local levelled = math.abs((math.atan2 or math.atan)(f.local_.right.y, f.local_.up.y))
+    assert(levelled < 0.35, string.format(
+        "the hull did not level itself: %.2f rad of roll became %.2f", rolled, levelled))
+    f.mouseDx, f.mouseDy = 0, 0
+    camera.mode = wasMode
+end)
+
 step(90, "terrain streamed in", function(game)
     local f = game.manager:current()
     assert(f.surface, "no surface patch after descending to 40 km")

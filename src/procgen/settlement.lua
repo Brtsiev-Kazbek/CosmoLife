@@ -24,6 +24,7 @@ local names = require("src.procgen.names")
 local settlement = {}
 
 local cos, sin, pi, sqrt, max, min, floor = math.cos, math.sin, math.pi, math.sqrt, math.max, math.min, math.floor
+local atan2 = math.atan2 or math.atan
 local TAU = pi * 2
 local C = palette.colors
 
@@ -316,6 +317,7 @@ function settlement.generate(opts)
         model = model,
         glowModel = glowModel,
         radius = radius * 1.12,
+        plateRadius = radius * 1.05,
         buildings = placed,
         pads = pads,
         interiors = interiors,
@@ -353,18 +355,92 @@ function settlement.floorHeight(detail, x, z)
     return 0.1
 end
 
+--- How much of the ground plate applies at a local point, 1 inside it and 0
+--- past its edge.
+--
+-- The plate is flat at the settlement's own height while the terrain around it
+-- is only partly flattened, so the two disagree by a metre or two at the rim.
+-- Switching between them at a hard boundary -- which is what walking out of
+-- `Surface:settlementAt`'s radius used to do -- dropped the player through a
+-- step or bumped them up one. Blending across the rim makes the join walkable.
+function settlement.plateBlend(detail, x, z)
+    local inner = (detail.plateRadius or detail.radius) * 0.94
+    local outer = detail.radius or inner
+    if outer <= inner then return 1 end
+    local d = sqrt(x * x + z * z)
+    if d <= inner then return 1 end
+    if d >= outer then return 0 end
+    local t = (d - inner) / (outer - inner)
+    return 1 - (t * t * (3 - 2 * t))
+end
+
 --- Solid cylinder test for the walking player.
+--
+-- Two things were wrong. The radius was 0.72 of the building's own, so the
+-- player walked bodily into every corner before anything stopped them. And it
+-- returned after the first overlap it found: wedged between two buildings, it
+-- pushed the player out of one and straight into the other, every frame, so
+-- the walker juddered in place or squeezed through the gap. Now it resolves
+-- against all of them and repeats until nothing overlaps.
 function settlement.collide(detail, x, z, radius)
+    for _ = 1, 4 do
+        local moved = false
+        for _, b in ipairs(detail.buildings) do
+            local dx, dz = x - b.x, z - b.z
+            local d = sqrt(dx * dx + dz * dz)
+            local r = b.radius * 0.92 + radius
+            if d < r then
+                if d < 1e-6 then dx, dz, d = 1, 0, 1 end
+                local push = r - d
+                x, z = x + dx / d * push, z + dz / d * push
+                moved = true
+            end
+        end
+        if not moved then return x, z end
+    end
+
+    -- Wedged.
+    --
+    -- Two collision cylinders can overlap even when the buildings do not --
+    -- the player has a radius of their own -- and an alley narrower than that
+    -- has no free point along the line between them, so the passes above just
+    -- trade the player back and forth. That is the juddering in a narrow gap.
+    -- The way out is sideways: slide around the deepest cylinder until a
+    -- direction clears everything, taking the smallest turn that works.
+    local worst, worstDepth = nil, 0
     for _, b in ipairs(detail.buildings) do
         local dx, dz = x - b.x, z - b.z
         local d = sqrt(dx * dx + dz * dz)
-        local r = b.radius * 0.72 + radius
-        if d < r and d > 1e-6 then
-            local push = r - d
-            return x + dx / d * push, z + dz / d * push
+        local depth = (b.radius * 0.92 + radius) - d
+        if depth > worstDepth then worst, worstDepth = b, depth end
+    end
+    if not worst then return x, z end
+
+    local dx, dz = x - worst.x, z - worst.z
+    local d = sqrt(dx * dx + dz * dz)
+    if d < 1e-6 then dx, dz, d = 1, 0, 1 end
+    local r = worst.radius * 0.92 + radius
+    local base = atan2(dz, dx)
+
+    local function clear(px, pz)
+        for _, b in ipairs(detail.buildings) do
+            local ex, ez = px - b.x, pz - b.z
+            if sqrt(ex * ex + ez * ez) < b.radius * 0.92 + radius - 1e-6 then return false end
+        end
+        return true
+    end
+
+    for step = 0, 12 do
+        for _, sign in ipairs({ 1, -1 }) do
+            local a = base + sign * step * (pi / 12)
+            local px, pz = worst.x + cos(a) * r, worst.z + sin(a) * r
+            if clear(px, pz) then return px, pz end
+            if step == 0 then break end          -- 0 and -0 are the same point
         end
     end
-    return x, z
+    -- nowhere is clear (buildings on top of each other): at least leave the
+    -- player outside the worst of them
+    return worst.x + dx / d * r, worst.z + dz / d * r
 end
 
 return settlement
