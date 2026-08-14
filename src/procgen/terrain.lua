@@ -308,6 +308,32 @@ local function facetHash(seed, x, z)
     return n / 65521
 end
 
+--- Pushes a colour towards this world's accent hue, at its own lightness, and
+--- lifts the saturation.
+--
+-- Everything that ends up on the ground has to go through here. The exposed
+-- rock on a slope did not, and that was the whole of "it is all grey": the
+-- slope tint is applied after the biome colour, and on any terrain with relief
+-- most facets are steep enough to take some of it, so a teal world was painted
+-- back to bare grey almost everywhere by a step that ran after the colour was
+-- decided.
+function Field:worldCast(col)
+    local a = self.accent
+    local k = self.accentStrength
+    local lum = col[1] * 0.30 + col[2] * 0.59 + col[3] * 0.11
+    local r = col[1] + (lum * a[1] - col[1]) * k
+    local g = col[2] + (lum * a[2] - col[2]) * k
+    local b = col[3] + (lum * a[3] - col[3]) * k
+    local grey = r * 0.30 + g * 0.59 + b * 0.11
+    local sat = self.saturate
+    return {
+        util.clamp(grey + (r - grey) * sat, 0, 1),
+        util.clamp(grey + (g - grey) * sat, 0, 1),
+        util.clamp(grey + (b - grey) * sat, 0, 1),
+        col[4] or 1,
+    }
+end
+
 --- The colour a biome gives to ground at height `h`.
 --
 -- Each biome carries three stops rather than sharing one seven-stop ramp for
@@ -344,23 +370,7 @@ function Field:biomeColor(b, h, x, z)
         col = palette.mix(b.mid, b.high, (t - 0.5) * 2)
     end
 
-    -- Push it towards the world's accent hue, at its own lightness, and lift
-    -- the saturation. This is what turns a planet of five greys and a brown
-    -- into a planet that has a colour.
-    local a = self.accent
-    local k = self.accentStrength
-    local lum = col[1] * 0.30 + col[2] * 0.59 + col[3] * 0.11
-    local r = col[1] + (lum * a[1] - col[1]) * k
-    local g = col[2] + (lum * a[2] - col[2]) * k
-    local bch = col[3] + (lum * a[3] - col[3]) * k
-    local grey = r * 0.30 + g * 0.59 + bch * 0.11
-    local sat = self.saturate
-    col = {
-        util.clamp(grey + (r - grey) * sat, 0, 1),
-        util.clamp(grey + (g - grey) * sat, 0, 1),
-        util.clamp(grey + (bch - grey) * sat, 0, 1),
-        col[4] or 1,
-    }
+    col = self:worldCast(col)
 
     if x then
         -- Facet to facet variation. Brightness alone still reads as one
@@ -426,9 +436,13 @@ function Field:colorAt(x, z, h, ny)
         local _, computed = self:normal(x, z, 30)
         ny = computed
     end
-    if ny < 0.82 then
-        col = palette.mix(col, b.rock or palette.colors.rockGrey,
-            util.clamp((0.82 - ny) / 0.35, 0, 1))
+    -- Steep ground shows the biome's rock -- but only ground that is genuinely
+    -- steep, and in the world's own colour. The threshold was 0.82, which most
+    -- facets of any real relief fall below, and the rock colour skipped the
+    -- world cast entirely, so the two together repainted whole planets grey.
+    if ny < 0.62 then
+        local rock = self:worldCast(b.rock or palette.colors.rockGrey)
+        col = palette.mix(col, rock, util.clamp((0.62 - ny) / 0.40, 0, 1))
     end
     return col
 end

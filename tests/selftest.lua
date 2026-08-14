@@ -1188,6 +1188,9 @@ for slot = 1, TOUR_SLOTS do
         -- colours below are measured; anything about what the shading does
         -- with them has to come from looking at the screenshots until a
         -- readback that actually works is in place.
+        -- ask for a frame sample: it is taken in love.draw, where the canvas
+        -- actually holds the frame
+        selftest.sampleWanted = { slot = slot }
         io.write(string.format(
             "    TOUR %-10s %-9s vertex %.2f %.2f %.2f  chunks=%d\n",
             entry.biome.id, tostring(entry.body.terrain),
@@ -1238,7 +1241,56 @@ local SHOTS = {
 
 selftest.lastFrame = 420
 
+--- Averages a strip of the rendered frame.
+--
+-- This has to run from `love.draw`, after `game:draw()`. The first attempt
+-- called it from a test step -- that is, from `love.update` -- and read the
+-- same averages to two decimal places for completely different parts of the
+-- frame, because the canvas it was reading had not been drawn into yet that
+-- frame. A readback that reports plausible nonsense is worse than none.
+local function sampleFrame(game, y0, y1)
+    local canvas = game and game.renderer and game.renderer.color
+    if not canvas or not canvas.newImageData then return nil end
+    local ok, data = pcall(function() return canvas:newImageData() end)
+    if not ok or not data then return nil end
+    local W, H = data:getWidth(), data:getHeight()
+    local r, g, b, n = 0, 0, 0, 0
+    for px = math.floor(W * 0.12), math.floor(W * 0.88), 8 do
+        for py = math.floor(H * y0), math.floor(H * y1), 4 do
+            local cr, cg, cb = data:getPixel(px, py)
+            r, g, b, n = r + cr, g + cg, b + cb, n + 1
+        end
+    end
+    if data.release then data:release() end
+    if n == 0 then return nil end
+    return { r / n, g / n, b / n }
+end
+
+selftest.sampleFrame = sampleFrame
+
 function selftest.captureIfWanted(frame)
+    local want = selftest.sampleWanted
+    if want then
+        selftest.sampleWanted = nil
+        local entry = selftest.tour and selftest.tour[want.slot]
+        if entry then
+            entry.screen = sampleFrame(selftest.game, 0.56, 0.66)
+            entry.sky = sampleFrame(selftest.game, 0.02, 0.14)
+            if entry.screen then
+                local c = entry.screen
+                local mx = math.max(c[1], c[2], c[3])
+                local mn = math.min(c[1], c[2], c[3])
+                entry.sat = (mx > 0) and (mx - mn) / mx or 0
+                io.write(string.format(
+                    "    TOUR   %-10s ground %.3f %.3f %.3f sat %.2f | sky %.3f %.3f %.3f\n",
+                    entry.biome.id, c[1], c[2], c[3], entry.sat,
+                    entry.sky and entry.sky[1] or -1,
+                    entry.sky and entry.sky[2] or -1,
+                    entry.sky and entry.sky[3] or -1))
+                io.flush()
+            end
+        end
+    end
     local name = SHOTS[frame]
     if name and selftest.shots then
         love.graphics.captureScreenshot(string.format("shot-%s.png", name))
@@ -1246,6 +1298,7 @@ function selftest.captureIfWanted(frame)
 end
 
 function selftest.run(game, frame)
+    selftest.game = game
     -- a heartbeat with real wall-clock time, so a stall is distinguishable
     -- from a merely slow software renderer
     if frame % 10 == 0 then
