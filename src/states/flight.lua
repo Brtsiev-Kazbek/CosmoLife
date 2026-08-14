@@ -45,6 +45,7 @@ local weather = require("src.sim.weather")
 local context = require("src.sim.context")
 local autopilot = require("src.flight.autopilot")
 local rocks = require("src.flight.rocks")
+local docking = require("src.flight.docking")
 
 local Flight = class("FlightState")
 
@@ -1078,140 +1079,15 @@ end
 -- Docking and landing
 -- ---------------------------------------------------------------------------
 
--- What the context key would do right now.
---
--- Docking, entering a settlement, disembarking and scooping cargo were four
--- keys and four prompts; they are one key and one prompt, and both come from
--- src/sim/context so they cannot disagree about which it is.
-function Flight:updateDockPrompt()
-    self.relativeTo = nil
-    if self.warpState == "cruise" then self.dockPrompt = nil return end
-    local ship = self.ship
+-- The sensing and the four consequences live in src/flight/docking.lua; what
+-- the key is *offering* is decided in src/sim/context.lua, so the prompt the
+-- player reads and the action the key runs cannot disagree.
 
-    local s = self._ctx or {}
-    self._ctx = s
-    s.station, s.stationBlocked, s.blockedReason = nil, nil, nil
-    s.landedPlace, s.landed, s.canister, s.canisterName = nil, nil, nil, nil
-    s.key = config.keyName("interact")
-
-    -- orbital stations
-    for _, st in ipairs(self.world.system.stations) do
-        local mesh = self:stationMesh(st)
-        local mx, my, mz = stationGen.mouthWorld(st, mesh)
-        local dx, dy, dz = ship.pos.x - mx, ship.pos.y - my, ship.pos.z - mz
-        local d = sqrt(dx * dx + dy * dy + dz * dz)
-        if d < st.size * 0.55 then
-            s.station = st
-            if st.derelict then
-                s.stationBlocked = true
-                s.blockedReason = L("{name} is derelict - no docking control", { name = st.name })
-            elseif self:relativeSpeed(st.vel) > 120 then
-                -- relative to the station, not to the stars: it is orbiting at
-                -- around 100 m/s itself, so a world-frame limit made the
-                -- window between "fast enough to catch it" and "slow enough to
-                -- be allowed in" about twenty metres per second wide
-                s.stationBlocked = true
-                s.blockedReason = L("Slow to under 120 m/s to dock")
-            end
-            -- Inside a station's approach the HUD reports closing speed rather
-            -- than speed against the stars: next to something orbiting at
-            -- 100 m/s, the world-frame number tells the player nothing about
-            -- whether they are allowed to dock.
-            self.relativeTo = st.vel
-            break
-        end
-    end
-
-    if not s.station then
-        if self.landedOn then
-            s.landed = true
-            s.landedPlace = self.landedPlace
-        else
-            local can = salvage.nearest(self.canisters, ship.pos.x, ship.pos.y, ship.pos.z)
-            if can then
-                s.canister = can
-                s.canisterName = L(commodities.get(can.id).name)
-            end
-        end
-    end
-
-    local action = context.resolve(s)
-    if not action then self.dockPrompt = nil return end
-    -- the old field names are what the HUD, the hints and the self-test read
-    self.dockPrompt = {
-        text = action.text,
-        kind = action.kind,
-        blocked = action.blocked,
-        station = action.kind == "dock" and action.target or nil,
-        place = action.kind == "enterSettlement" and action.target or nil,
-        canister = action.kind == "scoop" and action.target or nil,
-        surface = action.kind == "disembark" or nil,
-    }
-end
-
---- Runs whatever the context key is offering.
-function Flight:contextAction()
-    local p = self.dockPrompt
-    if not p then return false end
-    if p.blocked then
-        hud.message(p.text, "warn")
-        return false
-    end
-    if p.kind == "dock" or p.kind == "enterSettlement" then
-        self:dock()
-    elseif p.kind == "disembark" then
-        self:disembark()
-    elseif p.kind == "scoop" then
-        self:scoop(p.canister)
-    else
-        return false
-    end
-    return true
-end
-
---- Pulls a cargo canister into the hold.
-function Flight:scoop(canister)
-    if not canister then return end
-    local id, tonnes = salvage.scoop(self.canisters, canister, self.player)
-    if not id then
-        hud.message(L("Hold is full."), "warn")
-        return
-    end
-    hud.message(L("Scooped {n} {n:t} of {cargo:gen:lc}", {
-        n = tonnes, cargo = i18n.term(commodities.get(id).name) }), "good")
-    local rec = self.player.record
-    rec.scooped = (rec.scooped or 0) + tonnes
-end
-
-function Flight:dock()
-    local p = self.dockPrompt
-    if not p or p.blocked then return end
-    local Port = require("src.states.port")
-    local place = p.station or p.place
-    if not place then return end
-    -- Port itself files the arrival, so missions and fees are counted once
-    self.player.hull = self.ship.hull
-    self.player.shield = self.ship.shield
-    hud.message(p.station and L("Docked at {name}", { name = place.name })
-        or L("Entered {name}", { name = place.name }), "good")
-    self.manager:push(Port.new(), place, { flight = self, docked = true })
-end
-
-function Flight:disembark()
-    if not self.landedOn or not self.surface then
-        hud.message(L("Land first"), "warn")
-        return
-    end
-    local rec = self.player.record
-    rec.walked = (rec.walked or 0) + 1
-    local OnFoot = require("src.states.onfoot")
-    self.manager:push(OnFoot.new(), {
-        surface = self.surface,
-        flight = self,
-        x = self.local_.pos.x,
-        z = self.local_.pos.z + 12,
-    })
-end
+function Flight:updateDockPrompt() return docking.updatePrompt(self) end
+function Flight:contextAction() return docking.act(self) end
+function Flight:scoop(canister) return docking.scoop(self, canister) end
+function Flight:dock() return docking.dock(self) end
+function Flight:disembark() return docking.disembark(self) end
 
 -- ---------------------------------------------------------------------------
 -- Death
