@@ -1044,6 +1044,147 @@ end)
 -- Frames to capture to disk (LÖVE's save directory) when --shots is passed.
 -- Looking at the output is the only way to check that a procedural renderer
 -- actually produces the picture you intended.
+-- A tour of biomes.
+--
+-- The whole point of the climate work is that two places on the same planet
+-- should not look alike, and that is not something a number can check: it has
+-- to be rendered and looked at. This finds distinct biomes on the worlds of
+-- the start system, moves the patch to each in turn, and captures a frame of
+-- each one from ground level.
+--
+-- It also asserts what it can. The biomes it visits must genuinely differ, the
+-- ground must actually build under the ship at each stop, and the average
+-- colour of a patch must not be the same in a rainforest as in a dune sea --
+-- which is the "everything is one flat tone" complaint, expressed as a test.
+
+local TOUR_SLOTS = 6
+local TOUR_START = 366
+local TOUR_STRIDE = 6
+
+step(TOUR_START, "find contrasting biomes to photograph", function(game)
+    local Flight = require("src.states.flight")
+    game.manager:switch(Flight.new())
+    local f = game.manager:current()
+    local sysMod = require("src.procgen.system")
+    local terrainMod = require("src.procgen.terrain")
+
+    -- Sample every landable world in the system and keep one location per
+    -- biome, preferring the ones that look least like each other.
+    local found, order = {}, {}
+    for _, body in ipairs(sysMod.landables(game.world.system)) do
+        if body.landable and not body.giant then
+            local field = terrainMod.field(body)
+            for i = 0, 17 do
+                for j = 1, 10 do
+                    local lat = (j / 11 - 0.5) * math.pi * 0.9
+                    local lon = i / 18 * math.pi * 2
+                    local cl = math.cos(lat)
+                    local h = field:heightDir(cl * math.cos(lon), math.sin(lat), cl * math.sin(lon))
+                    if not field:isWater(h) then
+                        local b = field.climate:at(lat, lon, h)
+                        if not found[b.id] then
+                            found[b.id] = { body = body, lat = lat, lon = lon, biome = b }
+                            order[#order + 1] = b.id
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    assert(#order >= 3, "the start system offers only " .. #order
+        .. " biome(s) to photograph, which is not a tour")
+    selftest.tour = {}
+    for i = 1, math.min(TOUR_SLOTS, #order) do
+        selftest.tour[i] = found[order[i]]
+    end
+    io.write("    TOUR " .. table.concat(order, ", ") .. "\n")
+    io.flush()
+end)
+
+for slot = 1, TOUR_SLOTS do
+    step(TOUR_START + slot * TOUR_STRIDE, "photograph biome " .. slot, function(game)
+        local entry = selftest.tour and selftest.tour[slot]
+        if not entry then
+            -- fewer biomes than slots is a legitimate outcome for a system;
+            -- the setup step already asserted there are at least three
+            assert(slot > #(selftest.tour or {}), "tour slot " .. slot .. " went missing")
+            return
+        end
+        local f = game.manager:current()
+        -- `enterSurface` returns early when the body is already the one in
+        -- hand, so every stop after the first would have re-photographed the
+        -- first one -- which is exactly what it did until the averages came
+        -- back identical to four decimal places.
+        f:leaveSurface()
+        f:enterSurface(entry.body, entry.lat, entry.lon)
+        local surf = f.surface
+        assert(surf, "no surface after entering one")
+
+        -- Put the ship on the ground looking at the horizon, then build the
+        -- patch outright rather than waiting for the frame budget to trickle
+        -- it in over the next few seconds.
+        f.local_.pos:set(0, 0, 0)
+        for _ = 1, 90 do surf:update(0, 0, 1 / 60, 0) end
+        local n = 0
+        for _ in pairs(surf.chunkCache or {}) do n = n + 1 end
+        assert(n > 0, "no ground built at " .. entry.biome.id)
+
+        local ground = surf:groundHeight(0, 0)
+        f.local_.pos:set(0, ground + 14, 0)
+        f.local_.vel:set(0, 0, 0)
+        f.local_.up:set(0, 1, 0)
+        f.local_.fwd:set(0, 0.06, 1)
+        require("src.lib.mat4").orthonormalize(f.local_.right, f.local_.up, f.local_.fwd)
+        f:syncFromLocal()
+        f.landedOn = entry.body
+        game.camera.mode = "chase"
+        game:update(1 / 60)
+
+        -- What is on screen has to differ between stops: a rainforest and a
+        -- dune sea rendering the same average colour would mean the biome
+        -- work never reached the picture.
+        local field = surf.field
+        local r, g, bl, count = 0, 0, 0, 0
+        for i = -8, 8 do
+            for j = -8, 8 do
+                local x, z = i * 55, j * 55
+                local h = field:height(x, z)
+                if not field:isWater(h) then
+                    local c = field:colorAt(x, z, h, 0.95)
+                    r, g, bl, count = r + c[1], g + c[2], bl + c[3], count + 1
+                end
+            end
+        end
+        assert(count > 0, "nowhere dry to sample at " .. entry.biome.id)
+        entry.average = { r / count, g / count, bl / count }
+        io.write(string.format("    TOUR %-10s %-9s rgb %.3f %.3f %.3f  chunks=%d\n",
+            entry.biome.id, tostring(entry.body.terrain),
+            entry.average[1], entry.average[2], entry.average[3], n))
+        io.flush()
+    end)
+end
+
+step(TOUR_START + (TOUR_SLOTS + 1) * TOUR_STRIDE, "the tour actually showed variety", function(game)
+    local tour = selftest.tour or {}
+    local shown = {}
+    for _, e in ipairs(tour) do
+        if e.average then shown[#shown + 1] = e end
+    end
+    assert(#shown >= 3, "only " .. #shown .. " biomes were photographed")
+
+    -- no two stops may render the same average colour
+    for i = 1, #shown do
+        for j = i + 1, #shown do
+            local a, b = shown[i].average, shown[j].average
+            local d = math.abs(a[1] - b[1]) + math.abs(a[2] - b[2]) + math.abs(a[3] - b[3])
+            assert(d > 0.02, string.format(
+                "%s and %s render the same colour (difference %.4f)",
+                shown[i].biome.id, shown[j].biome.id, d))
+        end
+    end
+end)
+
 local SHOTS = {
     [30] = "01-space",
     [54] = "01c-atmosphere",
@@ -1056,9 +1197,15 @@ local SHOTS = {
     [268] = "07-chart",
     [345] = "08-chase",
     [358] = "09-title",
+    [375] = "10-biome-1",
+    [381] = "10-biome-2",
+    [387] = "10-biome-3",
+    [393] = "10-biome-4",
+    [399] = "10-biome-5",
+    [405] = "10-biome-6",
 }
 
-selftest.lastFrame = 360
+selftest.lastFrame = 420
 
 function selftest.captureIfWanted(frame)
     local name = SHOTS[frame]

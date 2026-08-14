@@ -173,16 +173,21 @@ biome.LIST = {
                    { kind = "boulder", density = 0.6 } },
        weather = { dust = 0.7 } },
 
+    -- Regolith and ash plain sat on nearly the same two greys, and the biome
+    -- tour caught them rendering within half a percent of each other: two
+    -- biomes that cannot be told apart are one biome with two names. Regolith
+    -- is pulverised rock under no air -- pale and cool; ash is what a volcano
+    -- leaves -- dark and warm.
     B{ id = "regolith", name = "Regolith", temp = 0.45, humid = 0.02,
        classes = { barren = true, ice = true, desert = true, volcanic = true },
-       low = C.rockGrey, mid = C.ash, high = C.hullDark, rock = C.hullDark,
+       low = C.rockGrey, mid = C.hullLight, high = C.hullBright, rock = C.slate,
        scatter = { { kind = "boulder", density = 0.7, scale = 0.9 } },
        weather = { dust = 0.3 } },
 
     -- ---- volcanic --------------------------------------------------------
     B{ id = "ashPlain", name = "Ash Plain", temp = 0.72, humid = 0.08,
        classes = { volcanic = true, barren = true },
-       low = C.ash, mid = C.ash, high = C.rockGrey, rock = C.hullDark,
+       low = C.black, mid = C.ash, high = C.rust, rock = C.hullDark,
        scatter = { { kind = "boulder", density = 0.4, scale = 1.1 },
                    { kind = "spire", density = 0.2 } },
        weather = { dust = 0.85 } },
