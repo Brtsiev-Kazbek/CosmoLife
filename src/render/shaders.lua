@@ -51,7 +51,7 @@ uniform vec3  u_rimColor;
 uniform float u_keyIntensity;
 uniform float u_saturation;
 uniform float u_exposure;
-uniform float u_shell;       // 0 = ordinary geometry, 1 = air, 2 = cloud deck
+uniform float u_shell;       // 0 = geometry, 1 = air, 2 = cloud deck, 3 = water
 
 // Shadows. u_shadowMap holds light-space depth in its red channel, written by
 // shaders.shadowDepth from the sun's point of view; u_lightVP maps a
@@ -105,7 +105,8 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc)
     // globally (procedural hulls are not reliably wound), and these two are
     // additive, so without this the far side of the sphere would be added on
     // top of the planet it is supposed to be behind.
-    if (u_shell > 0.5 && dot(n, v_viewPos) > 0.0) discard;
+    // (water is u_shell = 3 and is ordinary opaque geometry, not a shell)
+    if (u_shell > 0.5 && u_shell < 2.5 && dot(n, v_viewPos) > 0.0) discard;
 
     // Two sided lighting: procedural hulls are not always perfectly wound and
     // we render with culling disabled, so flip the normal towards the camera.
@@ -145,7 +146,7 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc)
     // darken, so cloud simply stops being visible there) and thinned at the
     // limb, where a flat deck would otherwise draw a hard ring around the
     // planet.
-    if (u_shell > 1.5) {
+    if (u_shell > 1.5 && u_shell < 2.5) {
         float sun = dot(n, -u_lightDir);
         float day = clamp(sun * 1.8 - 0.05, 0.0, 1.0);
         float ndv = max(dot(n, toEye), 0.0);
@@ -153,6 +154,30 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc)
         // draws a hard bright ring around the planet otherwise
         float a = u_tint.a * day * smoothstep(0.0, 0.55, ndv);
         return vec4(base * (0.35 + day * 0.85), a);
+    }
+
+    // ---- water --------------------------------------------------------
+    //
+    // Standing water is the same geometry as the ground it replaced -- the
+    // height field already returns the sea surface, swell and all -- so the one
+    // thing that has to say "this is water" is how it answers the sun. A hard
+    // specular lobe gives the glint that a lake has and a wet-looking rock does
+    // not, and the band of it that lies between you and the sun is what makes a
+    // sea read as a sea from the air.
+    if (u_shell > 2.5) {
+        float ndlw = max(dot(n, -u_lightDir), 0.0);
+        vec3 h = normalize(toEye - u_lightDir);
+        float spec = pow(max(dot(n, h), 0.0), 90.0);
+        float upness = dot(n, u_up) * 0.5 + 0.5;
+        vec3 ambient = mix(u_bounce, u_skyLight, upness);
+        vec3 lit = base * (ambient + u_lightColor * ndlw * u_keyIntensity * sunReach(ndlw))
+                 + u_lightColor * spec * 1.6;
+        float lumw = max(dot(lit, vec3(0.2126, 0.7152, 0.0722)), 1e-4);
+        lit *= (1.0 - exp(-lumw * u_exposure)) / lumw;
+        float dw = length(v_viewPos);
+        float fw = clamp((dw - u_fogNear) / max(u_fogFar - u_fogNear, 1.0), 0.0, 1.0) * u_fogAmount;
+        lit = mix(lit, u_fogColor, fw);
+        return vec4(lit, color.a * u_tint.a);
     }
 
     // key light: the star.  Quantised into bands for the retro look.

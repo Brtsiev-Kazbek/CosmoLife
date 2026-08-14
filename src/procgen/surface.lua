@@ -105,6 +105,9 @@ function Surface:init(body, opts)
     self.body = body
     self.field = terrain.field(body)
     self.radius = body.radius
+    -- nil on a world with no sea, which is the test the chunk builder makes
+    local sea = self.field:seaHeight()
+    self._seaLevelMetres = sea ~= -math.huge and sea or nil
     self.gravity = body.gravity or 9.0
     self.originLat, self.originLon = 0, 0
     self.east = vec3(1, 0, 0)
@@ -450,6 +453,7 @@ function Surface:_dropCache(cache)
     for key, c in pairs(cache) do
         if c.model and c.model.mesh and c.model.mesh.release then c.model.mesh:release() end
         if c.scatter and c.scatter.mesh and c.scatter.mesh.release then c.scatter.mesh:release() end
+        if c.water and c.water.mesh and c.water.mesh.release then c.water.mesh:release() end
         cache[key] = nil
     end
 end
@@ -510,7 +514,9 @@ function Surface:_buildChunk(cx, cz, ringDistance, target)
     elseif ringDistance > 1.8 then res = floor(res / 2) end
     res = max(res, 4)
 
-    local b = require("src.render.mesh").new()
+    local MeshBuilder = require("src.render.mesh")
+    local b = MeshBuilder.new()
+    local water                      -- built lazily; most chunks are dry
     local step = CH / res
     local hs = {}
     for j = 0, res do
@@ -577,17 +583,36 @@ function Surface:_buildChunk(cx, cz, ringDistance, target)
             if shade ~= 1 then
                 col = { col[1] * shade, col[2] * shade, col[3] * shade, col[4] }
             end
+
+            -- Standing water goes into its own mesh.
+            --
+            -- It is the same geometry either way -- Field:height already
+            -- returns the sea surface, swell and all, wherever the ground is
+            -- under it -- but a sea drawn in the terrain mesh is shaded like
+            -- ground, and the one thing that says "water" at a glance is a
+            -- glint where the sun is. Separating it is what lets the shader
+            -- treat it differently (see the u_shell = 3 branch in flat3d);
+            -- putting it in a *second* mesh over the top would z-fight with
+            -- the facets it duplicates.
+            local target2 = b
+            if self:_isSea(h00, x0, z0) and self:_isSea(h11, x1, z1)
+                and self:_isSea(h10, x1, z0) and self:_isSea(h01, x0, z1) then
+                water = water or MeshBuilder.new()
+                target2 = water
+            end
+
             if abs(h00 - h11) <= abs(h10 - h01) then
-                b:tri(x0, h00, z0, x1, h10, z0, x1, h11, z1, col)
-                b:tri(x0, h00, z0, x1, h11, z1, x0, h01, z1, col)
+                target2:tri(x0, h00, z0, x1, h10, z0, x1, h11, z1, col)
+                target2:tri(x0, h00, z0, x1, h11, z1, x0, h01, z1, col)
             else
-                b:tri(x0, h00, z0, x1, h10, z0, x0, h01, z1, col)
-                b:tri(x1, h10, z0, x1, h11, z1, x0, h01, z1, col)
+                target2:tri(x0, h00, z0, x1, h10, z0, x0, h01, z1, col)
+                target2:tri(x1, h10, z0, x1, h11, z1, x0, h01, z1, col)
             end
         end
     end
 
     local chunk = { ox = ox, oz = oz, size = CH, model = b:build(), res = res }
+    chunk.water = water and water:build() or nil
     -- scenery is only worth placing at the finest level, where it is visible
     local level = target.level or self.lodLevel
     local cache = target.cache or self.chunkCache
@@ -596,6 +621,31 @@ function Surface:_buildChunk(cx, cz, ringDistance, target)
     end
     cache[chunkKey(cx, cz)] = chunk
     return chunk
+end
+
+--- Is the quad whose corner is here standing water?
+--
+-- Field:height already returns the sea *surface* wherever the ground is under
+-- it -- a flat sheet with half a metre of swell on it -- so this is asking
+-- whether the height it gave back is that sheet. The same half-metre rule the
+-- height function uses, corrected for the curvature groundHeight subtracts, so
+-- the two agree at the edge of the patch as well as under the ship.
+--- Draw options for a water mesh: the chunk's own layer, plus the shell code
+--- that switches flat3d to its water branch.
+function Surface:_waterOpts(o, renderer)
+    local key = (o.layer == renderer.LAYER_FAR) and "_waterFar" or "_waterNear"
+    local opts = self[key]
+    if not opts then
+        opts = { layer = o.layer, shell = 3 }
+        self[key] = opts
+    end
+    return opts
+end
+
+function Surface:_isSea(h, x, z)
+    local sea = self._seaLevelMetres
+    if not sea then return false end
+    return h <= sea - (x * x + z * z) / (2 * self.radius) + 0.6
 end
 
 function Surface:_buildSettlement(s)
@@ -673,6 +723,10 @@ function Surface:draw(renderer, opts)
         if c.model then
             self:toWorld(c.ox, 0, c.oz, pos)
             renderer:draw(c.model, pos, basis, o)
+        end
+        if c.water then
+            self:toWorld(c.ox, 0, c.oz, pos)
+            renderer:draw(c.water, pos, basis, self:_waterOpts(o, renderer))
         end
         if c.scatter then
             self:toWorld(c.ox, 0, c.oz, pos)

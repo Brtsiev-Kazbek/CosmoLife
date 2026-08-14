@@ -454,6 +454,53 @@ test("settlements lay out without overlapping buildings", function(assert_)
         "the silhouette covers %.0f m against the town's %.0f", lod.radius, s.radius))
 end)
 
+test("standing water is its own mesh, and only where there is water", function(assert_)
+    local Surface = require("src.procgen.surface")
+    local vec3lib = require("src.lib.vec3")
+    local body = {
+        seed = 999, radius = 3.2e6, terrain = "ocean", atmosphere = 1.0, type = "ocean",
+        pos = vec3lib(0, 0, 0), spin = 0, axialTilt = 0, gravity = 9.2, settlements = {},
+    }
+
+    local function survey(lat, lon)
+        local surf = Surface.new(body)
+        surf:setOrigin(lat, lon)
+        for _ = 1, 150 do surf:update(0, 0, 1 / 60, 0) end
+        local land, water, chunks = 0, 0, 0
+        for _, c in pairs(surf.chunkCache) do
+            chunks = chunks + 1
+            land = land + ((c.model and c.model.triangles) or 0)
+            water = water + ((c.water and c.water.triangles) or 0)
+        end
+        return land, water, chunks
+    end
+
+    -- inland: no water mesh at all, so a dry world pays nothing for the feature
+    local dryLand, dryWater = survey(0.1, 0.3)
+    assert_(dryWater == 0, "an inland patch built " .. dryWater .. " water triangles")
+    assert_(dryLand > 1000, "the inland patch built no ground")
+
+    -- open sea: nearly all water
+    local seaLand, seaWater = survey(0.0, 0.0)
+    assert_(seaWater > seaLand * 4, string.format(
+        "open ocean came out as %d water triangles against %d of land", seaWater, seaLand))
+
+    -- and the split moves geometry rather than adding it: water quads are
+    -- *taken out* of the ground mesh, not laid over the top of it, which would
+    -- z-fight with the facets it duplicated
+    assert_(math.abs((dryLand + dryWater) - (seaLand + seaWater)) < (dryLand + dryWater) * 0.02,
+        string.format("total geometry changed with the split: %d dry against %d wet",
+            dryLand + dryWater, seaLand + seaWater))
+
+    -- a world with no sea never even asks the question
+    local barren = {
+        seed = 7, radius = 3.2e6, terrain = "barren", atmosphere = 0, type = "barren",
+        pos = vec3lib(0, 0, 0), spin = 0, axialTilt = 0, gravity = 5, settlements = {},
+    }
+    local surf = Surface.new(barren)
+    assert_(surf._seaLevelMetres == nil, "a barren world reports a sea level")
+end)
+
 test("terrain is deterministic and continuous", function(assert_)
     local body = { seed = 999, radius = 3.2e6, terrain = "terran", atmosphere = 1.0, type = "terran" }
     local field = terrain.field(body)
