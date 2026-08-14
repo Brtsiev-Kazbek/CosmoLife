@@ -34,7 +34,9 @@ vec4 position(mat4 transform_projection, vec4 vertex_position)
 #ifdef PIXEL
 uniform vec3  u_lightDir;    // unit vector pointing *from* the sun
 uniform vec3  u_lightColor;
-uniform vec3  u_ambient;
+uniform vec3  u_skyLight;    // ambient arriving from above (see lighting.hemisphere)
+uniform vec3  u_bounce;      // ambient arriving from below
+uniform vec3  u_up;          // world up at the camera, for the split above
 uniform vec3  u_fogColor;
 uniform float u_fogNear;
 uniform float u_fogFar;
@@ -140,7 +142,20 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc)
     float rimGate = clamp(dot(n, -u_lightDir) * 0.5 + 0.75, 0.0, 1.0);
     float rim = fresnel * rimGate;
 
-    vec3 lit = base * (u_ambient + u_shadeFloor
+    // Ambient with a direction.
+    //
+    // A flat ambient plus a shade floor gives every face the same value
+    // whichever way it points, so anything not in the sun is a sheet of one
+    // tone -- the reason dusk and the night side read as paint rather than as
+    // landscape. Splitting it into light from the sky and light off the ground
+    // costs one dot product and gives an unlit slope its shape back, and each
+    // half carries the colour of what it is, so a sunset reaches the terrain
+    // instead of stopping at the horizon. The two average to the flat term
+    // they replace, so nothing gets globally brighter (see lighting.lua).
+    float upness = dot(n, u_up) * 0.5 + 0.5;
+    vec3 ambient = mix(u_bounce, u_skyLight, upness);
+
+    vec3 lit = base * (ambient
                        + u_lightColor * ndl * u_keyIntensity
                        + u_fillColor * ndf
                        + u_rimColor * rim);

@@ -22,6 +22,7 @@ local class = require("src.lib.class")
 local mat4 = require("src.lib.mat4")
 local vec3 = require("src.lib.vec3")
 local shaders = require("src.render.shaders")
+local lighting = require("src.render.lighting")
 
 local Renderer = class("Renderer")
 
@@ -59,6 +60,8 @@ function Renderer:init()
     self.width, self.height = 1, 1
     self.queues = { {}, {}, {}, {} }
     self.counts = { 0, 0, 0, 0 }
+    -- reused every frame; lighting.hemisphere fills them in place
+    self._skyLight, self._bounce = { 0, 0, 0 }, { 0, 0, 0 }
 
     self.env = {
         sunDir = vec3(0, -1, 0),          -- direction light travels
@@ -266,7 +269,12 @@ function Renderer:_setupShader(env)
     local s = self.shader
     self:_send(s, "u_lightDir", { env.sunDir.x, env.sunDir.y, env.sunDir.z })
     self:_send(s, "u_lightColor", env.sunColor)
-    self:_send(s, "u_ambient", env.ambient)
+    -- ambient with an up and a down, rather than one number for every facing
+    local sky, bounce = lighting.hemisphere(env, self._skyLight, self._bounce)
+    self:_send(s, "u_skyLight", sky)
+    self:_send(s, "u_bounce", bounce)
+    local up = env.worldUp
+    self:_send(s, "u_up", { up.x, up.y, up.z })
     self:_send(s, "u_fogColor", env.fogColor)
     self:_send(s, "u_fogNear", env.fogNear)
     self:_send(s, "u_fogFar", env.fogFar)

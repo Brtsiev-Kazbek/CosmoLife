@@ -126,4 +126,52 @@ function lighting.ambient(env, r, g, b)
     return { r * k, g * k, b * k }
 end
 
+-- ---------------------------------------------------------------------------
+-- Ambient with a direction
+-- ---------------------------------------------------------------------------
+
+-- How much brighter the sky half is than the bounce half. The two average back
+-- to the flat ambient they replace, so nothing gets globally brighter or
+-- darker -- the light just acquires an up and a down.
+local SPREAD = 0.55
+-- How far each half is pushed towards its own colour. Full strength would make
+-- a face pointing at a sunset sky orange no matter what it is made of.
+local TINT = 0.5
+
+local function hueOf(col, out)
+    local m = (col[1] + col[2] + col[3]) / 3
+    if m < 1e-4 then out[1], out[2], out[3] = 1, 1, 1 return out end
+    out[1], out[2], out[3] = col[1] / m, col[2] / m, col[3] / m
+    return out
+end
+
+--- Splits the flat ambient term into light from the sky and light off the
+--- ground, which is what makes a surface with no sun on it still have shape.
+--
+-- A single scalar ambient plus `shadeFloor` gives every unlit face the same
+-- value whichever way it points, so a landscape at dusk is a flat sheet: the
+-- one thing that says "this is a slope" is that its top faces see more sky
+-- than its underside does. Here the two halves also carry the colour of what
+-- they are: the sky over the point, and the ground under it -- so a sunset
+-- reaches the terrain instead of stopping at the horizon.
+--
+-- The tint only applies where there is air to have a colour. In space, and in
+-- interiors, the split is achromatic and only the brightness gradient remains.
+function lighting.hemisphere(env, sky, bounce)
+    local a = env.ambient or { 0, 0, 0 }
+    local floor = env.shadeFloor or 0
+    local t = util.clamp((env.atmos or 0) * TINT, 0, TINT)
+
+    local upHue = hueOf(env.zenith or a, lighting._upHue or {})
+    local dnHue = hueOf(env.ground or a, lighting._dnHue or {})
+    lighting._upHue, lighting._dnHue = upHue, dnHue
+
+    for i = 1, 3 do
+        local base = (a[i] or 0) + floor
+        sky[i] = base * (1 + SPREAD) * util.lerp(1, upHue[i], t)
+        bounce[i] = base * (1 - SPREAD) * util.lerp(1, dnHue[i], t)
+    end
+    return sky, bounce
+end
+
 return lighting
