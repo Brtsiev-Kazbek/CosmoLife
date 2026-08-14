@@ -26,7 +26,6 @@ local systemGen = require("src.procgen.system")
 local Surface = require("src.procgen.surface")
 local combat = require("src.sim.combat")
 local npcMod = require("src.sim.npc")
-local factions = require("src.sim.factions")
 local hud = require("src.render.hud")
 local ui = require("src.ui.widgets")
 local settings = require("src.settings")
@@ -43,6 +42,7 @@ local rocks = require("src.flight.rocks")
 local docking = require("src.flight.docking")
 local scene = require("src.flight.scene")
 local environment = require("src.flight.environment")
+local combatState = require("src.flight.combat_state")
 
 local Flight = class("FlightState")
 
@@ -682,226 +682,28 @@ end
 -- Weapons and targeting
 -- ---------------------------------------------------------------------------
 
-function Flight:updateWeapons(dt)
-    self.fireTimer = max(0, self.fireTimer - dt)
-    if config.down("fire") and self.fireTimer <= 0 and not self.landedOn then
-        local w = self.player:weapon()
-        local def = w.weapon
-        self.fireTimer = 1 / def.rate
-        local ship = self.ship
-        combat.fire(self.arena, ship, w, ship.fwd.x, ship.fwd.y, ship.fwd.z, self.muzzle)
-        self.muzzle = self.muzzle + 1
-        self.heat = self.heat + def.energy * 0.8
-        self.game.camera:addShake(0.035)
-    end
-end
+-- Firing, missiles, shield cells, the contact list, target selection, the
+-- scanner and what a kill does to reputation and cargo all live in
+-- src/flight/combat_state.lua.
 
---- Rebuilds the contact list used by the HUD, scanner and targeting.
-function Flight:updateContacts()
-    local sys = self.world.system
-    local ship = self.ship
-    local list = self.contacts
-    for i = #list, 1, -1 do list[i] = nil end
+function Flight:updateWeapons(dt) return combatState.updateWeapons(self, dt) end
+function Flight:updateContacts() return combatState.updateContacts(self) end
+function Flight:cycleTarget(hostileOnly) return combatState.cycleTarget(self, hostileOnly) end
+function Flight:targetNearestPort() return combatState.targetNearestPort(self) end
+function Flight:updateAutomation(dt) return combatState.updateAutomation(self, dt) end
+function Flight:scanProgress() return combatState.scanProgress(self) end
+function Flight:scanTarget() return combatState.scanTarget(self) end
+function Flight:useShieldCell() return combatState.useShieldCell(self) end
+function Flight:fireMissile() return combatState.fireMissile(self) end
+function Flight:onKill(victim, killer) return combatState.onKill(self, victim, killer) end
 
-    local function add(entry) list[#list + 1] = entry end
 
-    for _, e in ipairs(self.npcs) do
-        if not e.dead then
-            local faction = factions.get(e.faction)
-            add({
-                pos = e.pos, entity = e, kind = "ship",
-                label = L(e.shipDef.roleName) .. " [" .. faction.short .. "]",
-                color = e.hostileToPlayer and C.uiDanger or
-                        (e.faction == "pirates" and C.orange or { faction.color[1], faction.color[2], faction.color[3], 1 }),
-                hostile = e.hostileToPlayer,
-                marker = true,
-            })
-        end
-    end
-    for _, st in ipairs(sys.stations) do
-        add({ pos = st.pos, station = st, kind = "station", label = st.name, color = C.cyan, marker = true })
-    end
-    for _, b in ipairs(sys.bodies) do
-        if b.kind == "planet" then
-            add({ pos = b.pos, body = b, kind = "body", label = b.name, color = C.uiDim, marker = true })
-            for _, m in ipairs(b.moons) do
-                add({ pos = m.pos, body = m, kind = "body", label = m.name, color = C.uiDim, marker = false })
-            end
-        end
-    end
-    for _, p in ipairs(self.pois) do
-        add({ pos = { x = p.x, y = p.y, z = p.z }, poi = p, kind = "poi",
-              label = i18n.translate(p.name), color = C.uiDim, marker = true })
-    end
-    for _, s in ipairs(sys.settlements) do
-        add({ pos = s.pos, place = s, kind = "settlement", label = s.name,
-              color = s.player and C.uiPrimary or C.amber, marker = true })
-    end
 
-    for _, c in ipairs(list) do
-        c.distance = vec3.distance(c.pos, ship.pos)
-    end
 
-    -- keep the current target valid
-    if self.target then
-        local found = false
-        for _, c in ipairs(list) do
-            if (c.entity and c.entity == self.target.entity)
-                or (c.station and c.station == self.target.station)
-                or (c.body and c.body == self.target.body)
-                or (c.place and c.place == self.target.place)
-                or (c.poi and c.poi == self.target.poi) then
-                self.target = c
-                found = true
-                break
-            end
-        end
-        if not found then self.target = nil end
-    end
 
-    if self.target then
-        local t = self.target
-        if t.entity then
-            t.hull = (t.entity.hull or 0) / max(t.entity.stats.maxHull, 1)
-            t.shield = (t.entity.shield or 0) / max(t.entity.stats.maxShield, 1)
-            t.detail = t.entity.pilot
-            if not t.entity.scanned then
-                t.detail2 = L("unscanned")
-            elseif t.entity.bounty > 0 then
-                t.detail2 = L("cargo ~{cash} cr  -  bounty {bounty}", {
-                    cash = util.money(t.entity.cargoValue),
-                    bounty = util.money(t.entity.bounty) })
-            else
-                t.detail2 = L("cargo ~{cash} cr", { cash = util.money(t.entity.cargoValue) })
-            end
-        elseif t.station then
-            t.hull, t.shield = nil, nil
-            t.detail = L("{kind} station", { kind = L(t.station.stationKindName) })
-            t.detail2 = L(factions.get(t.station.factionId).name)
-        elseif t.body then
-            t.hull, t.shield = nil, nil
-            t.detail = L(t.body.typeName or "moon")
-            t.detail2 = t.body.landable and L("landable") or L("no surface")
-        elseif t.place then
-            t.hull, t.shield = nil, nil
-            t.detail = L("settlement on {body}", { body = t.place.bodyName or "?" })
-            t.detail2 = L("pop {pop}", { pop = util.money(t.place.population) })
-        end
-    end
-end
 
-function Flight:cycleTarget(hostileOnly)
-    local best, bestIndex = nil, 0
-    local startIndex = 0
-    for i, c in ipairs(self.contacts) do
-        if c == self.target then startIndex = i break end
-    end
-    -- Range.
-    --
-    -- Combat contacts stay bounded by the scanner: you cannot lock a ship you
-    -- cannot see. Navigation contacts -- stations, planets, settlements,
-    -- points of interest -- must not be, because the player arrives 30,000 to
-    -- 150,000 km from anything and the nearest station is thousands of times
-    -- further away than the old 36 km clamp allowed. With the clamp in place
-    -- `T` selected nothing at all from the spawn point, so the autopilot could
-    -- never engage and the market, contracts, outfitting and the colony goal
-    -- behind them were all unreachable without blind guesswork.
-    local n = #self.contacts
-    local scanRange = config.combat.scanRange * 4
-    for k = 1, n do
-        local i = ((startIndex + k - 1) % n) + 1
-        local c = self.contacts[i]
-        local ok = c.marker
-        if c.kind == "ship" then ok = ok and c.distance < scanRange end
-        if hostileOnly then ok = ok and c.hostile end
-        if ok then
-            best, bestIndex = c, i
-            break
-        end
-    end
-    self.target = best
-    if best then hud.message(L("Target: {name}", { name = best.label or "?" }), "info") end
-end
 
---- Picks the nearest station, or failing that any dockable place, as a target.
---- Used on arrival so a new pilot has somewhere to point at.
-function Flight:targetNearestPort()
-    local best, bestD = nil, math.huge
-    for _, c in ipairs(self.contacts) do
-        if c.station or c.place then
-            if c.distance < bestD then best, bestD = c, c.distance end
-        end
-    end
-    if best then self.target = best end
-    return best
-end
 
--- Things that used to be keys.
---
--- Scanning and firing a shield cell were bindings the player had to remember
--- to press, and both have exactly one right moment to press them: scan when a
--- target has been held in the reticle long enough for the scanner to lock, and
--- fire a cell when the shield is about to fail. A key that is only ever
--- correct at one moment is a chore, not a decision, so the ship does it.
--- Both are settings, for anyone who wants the chore back.
-function Flight:updateAutomation(dt)
-    -- scanner lock
-    if settings.get("autoScan") ~= false then
-        local t = self.target
-        local range = self.player.stats.scanRange or config.combat.scanRange
-        local unscanned = t and ((t.entity and not t.entity.scanned) or (t.body and not t.bodyScanned))
-        if t and unscanned and (t.distance or 1e12) < range
-            and self.game.camera:angleTo(t.pos.x, t.pos.y, t.pos.z) < 0.12 then
-            self.scanHold = (self.scanHold or 0) + dt
-            if self.scanHold >= 2.0 then
-                self.scanHold = 0
-                if t.body then t.bodyScanned = true end
-                self:scanTarget()
-            end
-        else
-            self.scanHold = 0
-        end
-    end
-
-    -- shield cells, at the last moment they are still worth anything
-    if settings.get("autoShieldCell") ~= false and (self.player.shieldCells or 0) > 0 then
-        local maxShield = self.player.stats.maxShield or 0
-        if maxShield > 0 and self.player.shield < maxShield * 0.15 then
-            self:useShieldCell()
-        end
-    end
-end
-
---- How long the scanner has been holding the current target, 0..1.
-function Flight:scanProgress()
-    if not self.scanHold or self.scanHold <= 0 then return 0 end
-    return util.clamp(self.scanHold / 2.0, 0, 1)
-end
-
-function Flight:scanTarget()
-    local t = self.target
-    if not t then hud.message(L("No target"), "warn") return end
-    if t.distance > (self.player.stats.scanRange or config.combat.scanRange) then
-        hud.message(L("Out of scanner range"), "warn")
-        return
-    end
-    if t.entity then
-        t.entity.scanned = true
-        self.player.record.scanned = self.player.record.scanned + 1
-        hud.message(L("{pilot} scanned - {faction}, {cash} cr cargo", {
-            pilot = t.entity.pilot,
-            faction = L(factions.get(t.entity.faction).name),
-            cash = util.money(t.entity.cargoValue) }), "good")
-    elseif t.body then
-        self.world.player:addLog(L("Surveyed {name}", { name = t.body.name }), self.world.day, "nav")
-        hud.message(L("{name}: {kind}, gravity {g} m/s2, atmosphere {atm} atm", {
-            name = t.body.name, kind = L(t.body.typeName or "moon"),
-            g = string.format("%.1f", t.body.gravity or 0),
-            atm = string.format("%.2f", t.body.atmosphere or 0) }), "good")
-    else
-        hud.message(L("Nothing to scan"), "warn")
-    end
-end
 
 -- ---------------------------------------------------------------------------
 -- Docking and landing
@@ -1039,37 +841,6 @@ function Flight:update(dt, background)
     end
 end
 
-function Flight:onKill(victim, killer)
-    if killer == self.ship then
-        self.player.record.kills = self.player.record.kills + 1
-        local faction = victim.faction
-        if faction == "pirates" then
-            local bounty = victim.bounty or config.combat.bountyPerKill
-            self.player:earn(bounty)
-            hud.message(L("Bounty claimed: {cash} cr", { cash = util.money(bounty) }), "good")
-            self.player:addReputation(self.world.system.factionId, 0.02)
-        else
-            -- killing a lawful ship is a crime where its owners have authority
-            local fine = math.floor(1200 + (victim.stats.maxHull or 100) * 6)
-            self.player:addBounty(faction, fine)
-            hud.message(L("Bounty issued against you: {cash} cr", { cash = util.money(fine) }), "alert")
-            npcMod.alert(self.npcs, faction, self.ship.pos, 14000)
-        end
-        local missionsMod = require("src.sim.missions")
-        local touched = missionsMod.recordKill(self.player, faction, victim.pilot)
-        for _, m in ipairs(touched) do
-            hud.message(string.format("%s  (%d/%d)", missionsMod.title(m), m.progress or 0, m.quantity), "good")
-        end
-    end
-    -- A hold does not evaporate with the ship around it. The scanner has
-    -- always told the player what a target was carrying; now that number can
-    -- actually be collected.
-    local spilled = salvage.fromWreck(self.canisters, victim)
-    if spilled > 0 and killer == self.ship then
-        hud.message(L("Cargo scattered - scoop it before it drifts"), "info")
-    end
-    victim.dead = true
-end
 
 -- ---------------------------------------------------------------------------
 -- Draw
@@ -1386,44 +1157,7 @@ function Flight:keypressed(key)
     if config.is("shieldCell", key) then self:useShieldCell() end
 end
 
---- Burns one shield cell to restore the shield.
---
--- The Shield Cell Bank granted `stats.shieldCells`, the player tracked and
--- saved the count, and nothing anywhere consumed one -- 34,000 credits for a
--- number that only ever went up.
-function Flight:useShieldCell()
-    if (self.player.shieldCells or 0) <= 0 then
-        hud.message(L("No shield cells"), "warn")
-        return
-    end
-    local maxShield = self.player.stats.maxShield or 0
-    if self.player.shield >= maxShield - 0.5 then
-        hud.message(L("Shield already full"), "warn")
-        return
-    end
-    self.player.shieldCells = self.player.shieldCells - 1
-    self.player.shield = min(maxShield, self.player.shield + maxShield * 0.6)
-    self.ship.shield = self.player.shield
-    -- the recharge dumps heat, so it is not free in a long fight
-    self.heat = min(1, (self.heat or 0) + 0.18)
-    hud.message(L("Shield cell fired ({n} left)", { n = self.player.shieldCells }), "good")
-end
 
-function Flight:fireMissile()
-    if self.player.missiles <= 0 then
-        hud.message(L("No missiles"), "warn")
-        return
-    end
-    if not (self.target and self.target.entity) then
-        hud.message(L("Missiles need a ship target"), "warn")
-        return
-    end
-    self.player.missiles = self.player.missiles - 1
-    local w = { weapon = { damage = 140, rate = 1, energy = 0, speed = config.combat.missileSpeed,
-                           color = { 1, 0.8, 0.4 } } }
-    combat.fire(self.arena, self.ship, w, self.ship.fwd.x, self.ship.fwd.y, self.ship.fwd.z, 0)
-    hud.message(L("Missile away ({n} left)", { n = self.player.missiles }), "info")
-end
 
 function Flight:setMouseFlight(on)
     self.mouseSteer = on
