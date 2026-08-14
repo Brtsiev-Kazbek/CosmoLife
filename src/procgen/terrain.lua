@@ -403,42 +403,85 @@ function Field:buildChunk(ox, oz, size, res)
     return chunk
 end
 
---- Scatters boulders and, on living worlds, vegetation over a patch.
--- Returned as one baked mesh so scenery costs a single draw call per chunk.
--- Scenery for one chunk.
+--- Scenery for one chunk: whatever the biomes under it grow.
+--
+-- Returned as one baked mesh, so a chunk's entire ground cover -- which may be
+-- two hundred objects -- costs a single draw call.
+--
+-- What is placed comes from the biome at each point rather than from the
+-- planet's class, so a valley of pines can end at a ridge and become bare
+-- scree, and the density is modulated by a low frequency field so cover
+-- clumps into groves and clearings instead of being sprinkled evenly. A
+-- uniform sprinkle is the thing that most reliably reads as procedural.
 --
 -- This deliberately does *not* cache. It used to keep every mesh it had ever
 -- built in `self.scatter`, while the caller (`Surface:update`) released those
 -- same meshes when their chunk left the working set -- so walking away from a
 -- chunk and back handed the renderer a destroyed Mesh. The scatter belongs to
 -- the chunk, and it lives and dies with it.
-function Field:buildScatter(ox, oz, size, density)
-    local geometry = require("src.render.geometry")
+-- `hs` is the caller's height grid: `hs[j][i]` at (i*step, j*step) from the
+-- chunk origin, `res` samples to a side. Passing it in removes every noise
+-- evaluation from this function -- placing two hundred objects used to cost
+-- one height sample and a four-sample normal each, about as much as building
+-- the chunk itself. It is also more correct: objects then sit on the surface
+-- that is actually drawn rather than on the exact field, so nothing floats or
+-- sinks at the seams.
+function Field:buildScatter(ox, oz, size, density, hs, res)
+    local flora = require("src.procgen.flora")
     local rng = Rng.new(self.seed, "scatter", floor(ox), floor(oz))
     local b = MeshBuilder.new()
-    local count = floor((density or 1) * 26)
-    local vegetated = (self.kind == "terran" or self.kind == "toxic" or self.kind == "ocean")
+    local step = res and (size / res) or nil
 
-    for _ = 1, count do
+    -- height and upward normal from the grid, bilinear
+    local function ground(x, z)
+        if not hs then
+            local h = self:height(ox + x, oz + z)
+            local _, ny = self:normal(ox + x, oz + z, 20)
+            return h, ny
+        end
+        local gx = util.clamp(x / step, 0, res - 1e-4)
+        local gz = util.clamp(z / step, 0, res - 1e-4)
+        local i0, j0 = floor(gx), floor(gz)
+        local fx, fz = gx - i0, gz - j0
+        local h00, h10 = hs[j0][i0], hs[j0][i0 + 1]
+        local h01, h11 = hs[j0 + 1][i0], hs[j0 + 1][i0 + 1]
+        local h = (h00 * (1 - fx) + h10 * fx) * (1 - fz)
+                + (h01 * (1 - fx) + h11 * fx) * fz
+        local dhx = ((h10 + h11) - (h00 + h01)) / (2 * step)
+        local dhz = ((h01 + h11) - (h00 + h10)) / (2 * step)
+        return h, 1 / sqrt(dhx * dhx + 1 + dhz * dhz)
+    end
+
+    -- Attempts, not objects: each one lands somewhere, asks the biome there
+    -- what grows, and usually gets nothing. Scaling with area keeps the cover
+    -- per hectare constant whatever the chunk size is.
+    local attempts = floor((density or 1) * 220 * (size / 900) ^ 2)
+    local sea = self:seaHeight()
+    local groveScale = 260 + (self.seed % 7) * 90
+
+    for _ = 1, attempts do
         local x = rng:range(0, size)
         local z = rng:range(0, size)
-        local h = self:height(ox + x, oz + z)
-        if h > self:seaHeight() + 4 then
-            local _, ny = self:normal(ox + x, oz + z, 20)
+        local wx, wz = ox + x, oz + z
+        local h, ny = ground(x, z)
+        if h > sea + 4 then
             if ny > 0.72 then
-                b:push():translate(x, h, z)
-                b:rotateY(rng:range(0, math.pi * 2))
-                if vegetated and rng:bool(0.55) then
-                    local th = rng:range(4, 13)
-                    geometry.cylinder(b, th * 0.06, th * 0.55, 5, palette.colors.rockDry, nil, 0.7, true)
-                    b:push():translate(0, th * 0.5, 0)
-                    geometry.cone(b, th * 0.24, th * 0.6, 6, palette.colors.forest, palette.colors.darkGreen)
-                    b:pop()
-                else
-                    local r = rng:range(1.2, 5.5)
-                    geometry.rock(b, r, 7, 5, rng, 0.34, palette.colors.rockGrey)
+                local biome = self:biomeAt(wx, wz, h)
+                local list = biome.scatter
+                if list and #list > 0 then
+                    -- groves and clearings
+                    local grove = noise.perlin2(self.seed + 8803, wx / groveScale, wz / groveScale)
+                    local clump = util.clamp(grove * 0.5 + 0.62, 0, 1)
+                    -- pick a kind in proportion to its density, then roll
+                    -- against that density so a sparse biome stays sparse
+                    local pick = list[rng:int(1, #list)]
+                    if rng:float() < util.clamp(pick.density, 0, 1) * clump then
+                        b:push():translate(x, h, z)
+                        b:rotateY(rng:range(0, math.pi * 2))
+                        flora.build(pick.kind, b, rng, pick.scale or 1)
+                        b:pop()
+                    end
                 end
-                b:pop()
             end
         end
     end

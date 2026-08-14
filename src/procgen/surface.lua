@@ -524,7 +524,7 @@ function Surface:_buildChunk(cx, cz, ringDistance, target)
     local level = target.level or self.lodLevel
     local cache = target.cache or self.chunkCache
     if ringDistance <= 1.5 and level == 0 and settings.q().scatter then
-        chunk.scatter = self.field:buildScatter(ox, oz, CH, 1)
+        chunk.scatter = self.field:buildScatter(ox, oz, CH, settings.q().scatter and 1 or 0, hs, res)
     end
     cache[chunkKey(cx, cz)] = chunk
     return chunk

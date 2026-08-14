@@ -1568,6 +1568,125 @@ test("hints react to context", function(assert_)
 end)
 
 -- ---------------------------------------------------------------------------
+-- Biomes and ground cover.
+
+test("a planet is not one biome from pole to pole", function(assert_)
+    local biomeMod = require("src.procgen.biome")
+    local terrainMod = require("src.procgen.terrain")
+    local galaxy = require("src.procgen.galaxy").new(20250811)
+    local sysMod = require("src.procgen.system")
+    local sys = sysMod.build(galaxy:findStartSystem(),
+        require("src.sim.factions").Diplomacy.new(20250811), 5)
+
+    local checked = 0
+    for _, body in ipairs(sysMod.landables(sys)) do
+        if body.landable and not body.giant then
+            checked = checked + 1
+            local field = terrainMod.field(body)
+            local seen = {}
+            local n = 0
+            -- sweep the whole sphere, not one patch
+            for i = 0, 23 do
+                for j = 0, 11 do
+                    local lat = (j / 11 - 0.5) * math.pi * 0.98
+                    local lon = i / 24 * math.pi * 2
+                    local cl = math.cos(lat)
+                    local h = field:heightDir(cl * math.cos(lon), math.sin(lat), cl * math.sin(lon))
+                    local b = field.climate:at(lat, lon, h)
+                    if not seen[b.id] then seen[b.id] = true n = n + 1 end
+                end
+            end
+            assert_(n >= 3, body.name .. " (" .. tostring(body.terrain)
+                .. ") has only " .. n .. " biome(s) over its whole surface")
+            -- and nothing may appear on a class that forbids it
+            for id in pairs(seen) do
+                local def = biomeMod.byId[id]
+                assert_(def, "unknown biome id " .. id)
+                assert_(not def.classes or def.classes[field.kind],
+                    id .. " appeared on a " .. field.kind .. " world, which forbids it")
+            end
+        end
+    end
+    assert_(checked > 0, "no landable worlds to check")
+end)
+
+test("the climate is deterministic and its lattice does not show", function(assert_)
+    local terrainMod = require("src.procgen.terrain")
+    local galaxy = require("src.procgen.galaxy").new(20250811)
+    local sysMod = require("src.procgen.system")
+    local sys = sysMod.build(galaxy:findStartSystem(),
+        require("src.sim.factions").Diplomacy.new(20250811), 5)
+    local body
+    for _, b in ipairs(sysMod.landables(sys)) do
+        if b.landable and not b.giant then body = b break end
+    end
+    assert_(body, "no landable world")
+    local field = terrainMod.field(body)
+
+    -- same question, same answer, cold cache or warm
+    local a = { field.climate:base(0.3, 0.7) }
+    field.climate.cache, field.climate.cacheCount = {}, 0
+    local b = { field.climate:base(0.3, 0.7) }
+    for i = 1, 3 do
+        assert_(math.abs(a[i] - b[i]) < 1e-12, "the climate changed when its cache was dropped")
+    end
+
+    -- The lattice is interpolated, so walking a line must not produce steps:
+    -- a jump between adjacent samples would show as a visible cell edge.
+    local prev
+    local worst = 0
+    for i = 0, 400 do
+        local lon = 0.7 + i * 0.0004      -- ~2.5 km steps at planetary scale
+        local t = field.climate:base(0.3, lon)
+        if prev then worst = math.max(worst, math.abs(t - prev)) end
+        prev = t
+    end
+    assert_(worst < 0.02, "the climate steps by " .. worst .. " between samples")
+end)
+
+test("ground cover follows the biome and sits on the drawn ground", function(assert_)
+    local terrainMod = require("src.procgen.terrain")
+    local flora = require("src.procgen.flora")
+    local galaxy = require("src.procgen.galaxy").new(20250811)
+    local sysMod = require("src.procgen.system")
+    local sys = sysMod.build(galaxy:findStartSystem(),
+        require("src.sim.factions").Diplomacy.new(20250811), 5)
+    local body
+    for _, b in ipairs(sysMod.landables(sys)) do
+        if b.landable and not b.giant then body = b break end
+    end
+    local field = terrainMod.field(body)
+    field:setOrigin(0.12, 0.4)
+
+    -- every kind a biome asks for must be something flora can build
+    local biomeMod = require("src.procgen.biome")
+    for _, def in ipairs(biomeMod.LIST) do
+        for _, entry in ipairs(def.scatter) do
+            assert_(flora.KINDS[entry.kind] ~= nil,
+                def.id .. " grows '" .. entry.kind .. "', which flora cannot build")
+        end
+    end
+
+    local res, size = 24, 900
+    local step = size / res
+    local hs = {}
+    for j = 0, res do
+        hs[j] = {}
+        for i = 0, res do hs[j][i] = field:height(i * step, j * step) end
+    end
+    local model = field:buildScatter(0, 0, size, 1, hs, res)
+    assert_(model and model.triangles > 0, "an ordinary chunk grew nothing at all")
+
+    -- deterministic
+    local again = field:buildScatter(0, 0, size, 1, hs, res)
+    assert_(again.triangles == model.triangles, "ground cover is not deterministic")
+
+    -- density zero means nothing, for the lowest quality preset
+    local none = field:buildScatter(0, 0, size, 0, hs, res)
+    assert_(not none or none.triangles == 0, "density 0 still grew something")
+end)
+
+-- ---------------------------------------------------------------------------
 -- Walking around a settlement.
 
 test("a walker is pushed out of every building, not just the first", function(assert_)
