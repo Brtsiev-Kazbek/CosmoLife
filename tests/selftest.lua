@@ -1177,44 +1177,21 @@ for slot = 1, TOUR_SLOTS do
         assert(count > 0, "nowhere dry to sample at " .. entry.biome.id)
         entry.average = { r / count, g / count, bl / count }
 
-        -- What actually reaches the screen. The vertex colours above say what
-        -- the generator produced; only the frame buffer says what the shading
-        -- did with it, and the two have disagreed badly enough to be worth
-        -- reading back rather than reasoning about.
-        game:draw()
-        local screen = { 0, 0, 0 }
-        local shots = 0
-        local ok, data = pcall(function() return game.renderer.color:newImageData() end)
-        if ok and data then
-            local W, H = data:getWidth(), data:getHeight()
-            for px = math.floor(W * 0.15), math.floor(W * 0.85), 20 do
-                for py = math.floor(H * 0.62), math.floor(H * 0.95), 12 do
-                    local cr, cg, cb = data:getPixel(px, py)
-                    screen[1] = screen[1] + cr
-                    screen[2] = screen[2] + cg
-                    screen[3] = screen[3] + cb
-                    shots = shots + 1
-                end
-            end
-            if data.release then data:release() end
-        end
-        if shots > 0 then
-            screen[1], screen[2], screen[3] = screen[1] / shots, screen[2] / shots, screen[3] / shots
-            entry.screen = screen
-        end
-        local sat = 0
-        if entry.screen then
-            local mx = math.max(screen[1], screen[2], screen[3])
-            local mn = math.min(screen[1], screen[2], screen[3])
-            sat = (mx > 0) and (mx - mn) / mx or 0
-        end
+        -- No frame-buffer readback here.
+        --
+        -- There was one, and it lied: `renderer.color:newImageData()` returned
+        -- the same averages to two decimal places for sample windows covering
+        -- completely different parts of the frame, which no real image does.
+        -- It is not reading the frame that was just drawn, and two commit
+        -- messages quoted its "screen saturation 0.21 against 0.76 at the
+        -- vertices" as if it were a measurement. It was not. The vertex
+        -- colours below are measured; anything about what the shading does
+        -- with them has to come from looking at the screenshots until a
+        -- readback that actually works is in place.
         io.write(string.format(
-            "    TOUR %-10s %-9s vertex %.2f %.2f %.2f | screen %.2f %.2f %.2f sat %.2f chunks=%d\n",
+            "    TOUR %-10s %-9s vertex %.2f %.2f %.2f  chunks=%d\n",
             entry.biome.id, tostring(entry.body.terrain),
-            entry.average[1], entry.average[2], entry.average[3],
-            entry.screen and entry.screen[1] or -1,
-            entry.screen and entry.screen[2] or -1,
-            entry.screen and entry.screen[3] or -1, sat, n))
+            entry.average[1], entry.average[2], entry.average[3], n))
         io.flush()
     end)
 end
