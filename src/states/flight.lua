@@ -938,6 +938,20 @@ function Flight:updateShip(dt)
     if config.down("strafeRight") then strafe = strafe + 1 end
     if config.down("thrustUp") then lift = lift + 1 end
     if config.down("thrustDown") then lift = lift - 1 end
+    -- Landing mode borrows the movement keys.
+    --
+    -- Hovering holds the ship level, so roll has nothing to do and throttle
+    -- has almost nothing; meanwhile the two things that matter -- sliding
+    -- sideways and letting yourself down -- were on four keys nobody had been
+    -- told about. WASD means "move" everywhere else in the game, so in landing
+    -- mode it means it here too.
+    if self.hoverMode then
+        if config.down("rollLeft") then strafe = strafe - 1 end
+        if config.down("rollRight") then strafe = strafe + 1 end
+        -- cruise and boost have nothing to do this close to the ground
+        if config.down("warp") then lift = lift + 1 end
+        if config.down("boost") then lift = lift - 1 end
+    end
     local transAccel = accel * FL.lateralFactor
     if strafe ~= 0 then vel:addScaled(basis.right, strafe * transAccel * dt) end
     if lift ~= 0 then vel:addScaled(basis.up, lift * transAccel * dt) end
@@ -1049,14 +1063,14 @@ function Flight:collideGround(dt)
             local pad = s:padNear(l.pos.x, l.pos.z, FL.landingPadRadius * 3)
             if pad then
                 self.landedPlace = pad.settlement.place
-                hud.message(L("Landed at {name}  -  {enter} to enter, {out} to disembark", {
+                -- one key does both; the prompt says which
+                hud.message(L("Landed at {name}  -  {key} to enter", {
                     name = pad.settlement.place.name,
-                    enter = config.keyName("dock"),
-                    out = config.keyName("disembark"),
+                    key = config.keyName("interact"),
                 }), "good")
             else
                 self.landedPlace = nil
-                hud.message(L("Touchdown  -  {key} to disembark", { key = config.keyName("disembark") }), "good")
+                hud.message(L("Touchdown  -  {key} to disembark", { key = config.keyName("interact") }), "good")
             end
         end
     else

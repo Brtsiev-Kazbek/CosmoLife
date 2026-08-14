@@ -691,6 +691,7 @@ local strings = {
     ["Release to choose"] = "Отпустите, чтобы выбрать",
     ["{key} switches  -  ESC closes"] = "{key} — переключить  -  ESC — закрыть",
     ["Commander panel"] = "Панель командира",
+    ["Landed at {name}  -  {key} to enter"] = "Посадка: {name}  -  {key} — войти",
     ["On foot. {key} does whatever the prompt says."] =
         "Вы на ногах. {key} делает то, что написано в подсказке.",
     ["Everything on the left is the whole game. F1 to close."] =

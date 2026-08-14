@@ -1954,7 +1954,21 @@ test("movement is bound by scancode so a non-latin layout still works", function
         end
         assert_(hasScancode, action .. " has no scancode source")
     end
-    -- and it has to show up in the help panel, which used to hard code "W A S D"
+    -- Landing mode must not reach outside the core scheme either: it used to
+    -- advertise LEFT/RIGHT and PAGEUP/PAGEDOWN, four keys nobody had been told
+    -- about, in the one situation where precision matters most.
+    local hints = require("src.render.hints")
+    local core = {}
+    for _, a in ipairs(input.CORE) do core[input.keyName(a)] = true end
+    for _, row in ipairs(hints.flight({ hoverMode = true })) do
+        for key in row.keys:gmatch("[^/]+") do
+            if key ~= "MOUSE" and key ~= "F1" then
+                assert_(core[key], "landing hints advertise a non-core key: " .. key)
+            end
+        end
+    end
+
+    -- and movement has to show up in the help panel, which hard coded "W A S D"
     local rows = input.controlRows(input.footHelp)
     local labels = {}
     for _, r in ipairs(rows) do labels[#labels + 1] = r[1] end

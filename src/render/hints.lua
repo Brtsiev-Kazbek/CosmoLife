@@ -32,9 +32,11 @@ function hints.flight(ctx)
     add(input.keyName("rollLeft") .. "/" .. input.keyName("rollRight"), "Roll")
 
     if ctx.hoverMode then
-        -- landing: translation is what matters, not attitude
-        add(input.keyName("strafeLeft") .. "/" .. input.keyName("strafeRight"), "Strafe", true)
-        add(input.keyName("thrustUp") .. "/" .. input.keyName("thrustDown"), "Thrust", true)
+        -- Landing: translation is what matters, not attitude -- and it is on
+        -- the core keys, because roll, cruise and boost have nothing to do
+        -- this close to the ground.
+        add(input.keyName("rollLeft") .. "/" .. input.keyName("rollRight"), "Strafe", true)
+        add(input.keyName("warp") .. "/" .. input.keyName("boost"), "Thrust", true)
     else
         add(input.keyName("fire"), "Fire")
         add(input.keyName("target"), "Target")
