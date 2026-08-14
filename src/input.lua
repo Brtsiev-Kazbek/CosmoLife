@@ -63,6 +63,16 @@ input.defaults = {
     settings     = { "key:f10" },
 
     -- on foot
+    --
+    -- Walking is bound by *scancode*, not by key.  `love.keyboard.isDown("w")`
+    -- goes through the active keyboard layout, so with a Cyrillic layout
+    -- selected the W key does not report as "w" and the player simply cannot
+    -- move.  Scancodes are physical positions and do not care about the
+    -- layout, which is what every shooter uses for movement.
+    walkForward  = { "sc:w", "sc:up", "axis:lefty-" },
+    walkBack     = { "sc:s", "sc:down", "axis:lefty+" },
+    walkLeft     = { "sc:a", "sc:left", "axis:leftx-" },
+    walkRight    = { "sc:d", "sc:right", "axis:leftx+" },
     interact     = { "key:e", "key:return", "button:a" },
     jump         = { "key:space", "button:a" },
     run          = { "key:lshift", "button:leftstick" },
@@ -84,7 +94,8 @@ input.actionOrder = {
     { "Combat", { "fire", "missile", "target", "nextTarget", "scan", "shieldCell" } },
     { "Ship",   { "landingGear", "view", "dock", "disembark" } },
     { "Screens", { "map", "missions", "colony", "ship", "settings", "pause", "help" } },
-    { "On foot", { "interact", "jump", "run" } },
+    { "On foot", { "walkForward", "walkBack", "walkLeft", "walkRight",
+                   "interact", "jump", "run" } },
 }
 
 input.labels = {
@@ -106,6 +117,9 @@ input.labels = {
     map = "Galaxy map", missions = "Logbook", colony = "Colonies",
     ship = "Ship info", settings = "Settings", pause = "Pause",
     help = "Controls", interact = "Interact", jump = "Jump", run = "Run",
+    walkForward = "Walk forward", walkBack = "Walk back",
+    walkLeft = "Step left", walkRight = "Step right",
+    walk = "Move", look = "Look",
 }
 
 -- ---------------------------------------------------------------------------
@@ -266,7 +280,9 @@ input.flightHelp = {
 
 --- The rows shown by F1 on foot.
 input.footHelp = {
-    "interact", "jump", "run", "disembark", "colony", "help",
+    { "walkForward", "walkBack", label = "Move" },
+    { "walkLeft", "walkRight", label = "Step" },
+    "run", "jump", "interact", "disembark", "colony", "help",
 }
 
 --- Rebinds an action to a single key, keeping its gamepad sources.

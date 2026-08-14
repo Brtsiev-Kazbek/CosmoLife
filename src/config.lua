@@ -92,13 +92,24 @@ config.flight = {
     hoverGravityRelief = 0.18,    -- fraction of weight the pilot still feels
 }
 
+-- On foot.
+--
+-- The speeds are deliberately above a real human's.  A tier-3 settlement is
+-- 300-500 metres across (see the flatten radius in `Surface:setOrigin`), and
+-- crossing one at an honest 5 m/s took over a minute of holding W, which read
+-- as the game being broken rather than as the walker being realistic.
 config.walk = {
-    speed        = 5.2,
-    runSpeed     = 9.4,
-    jumpSpeed    = 4.4,
+    speed        = 7.4,           -- brisk jog
+    runSpeed     = 16.0,          -- sprint; crosses a town in ~25 s
+    jumpSpeed    = 5.0,
     eyeHeight    = 1.72,
     gravityScale = 1.0,
-    mouseSens    = 0.0026,
+    -- radians per pixel, before the player's own sensitivity multiplier.  The
+    -- old value was half of what a shooter uses, and it ignored the setting.
+    mouseSens    = 0.0052,
+    accelGround  = 22,            -- how fast the walker reaches wish speed
+    accelAir     = 3.5,           -- keep your momentum through a jump
+    sprintFov    = 7,             -- degrees of extra FOV at full sprint
     interactRange = 4.5,
 }
 

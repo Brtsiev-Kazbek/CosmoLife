@@ -173,6 +173,45 @@ if sys.belts and #sys.belts > 0 then
     end)
 end
 
+-- The descent: what happens to the terrain streamer when altitude falls
+-- through the LOD octaves.
+--
+-- The total is largely fixed -- crossing an octave means every resident chunk
+-- is the wrong size and has to be rebuilt -- so the number that matters is the
+-- *worst single frame*, which is what the player feels as a stutter. A level
+-- change used to drop the whole resident set at once and then prime the new
+-- one at three times the normal budget, so one frame could carry nine chunk
+-- builds and leave a hole in the ground while it did.
+if body then
+    local Surface = require("src.procgen.surface")
+    local peakMs, framesOverBudget, emptyFrames = 0, 0, 0
+    bench("descent 40km -> 200m", "chunk builds", function()
+        local surf = Surface.new(body, {})
+        surf:setOrigin(0.12, 0.4, {})
+        local builds = 0
+        local realBuild = getmetatable(surf).__index._buildChunk
+        surf._buildChunk = function(self, ...) builds = builds + 1 return realBuild(self, ...) end
+        peakMs, framesOverBudget, emptyFrames = 0, 0, 0
+        for i = 0, 200 do
+            local alt = 40000 * (1 - i / 205) + 200
+            local t0 = os.clock()
+            surf:update(0, 0, 1 / 60, alt)
+            local ms = (os.clock() - t0) * 1000
+            if ms > peakMs then peakMs = ms end
+            if ms > 16.7 then framesOverBudget = framesOverBudget + 1 end
+            -- is there ground under the ship this frame?
+            local resident = 0
+            for _ in pairs(surf.chunkCache) do resident = resident + 1 end
+            if resident == 0 then emptyFrames = emptyFrames + 1 end
+        end
+        surf._buildChunk = nil
+        return builds
+    end)
+    results[#results].note = string.format(
+        "peak frame %.1f ms, %d frames over 16.7 ms, %d frames with no ground",
+        peakMs, framesOverBudget, emptyFrames)
+end
+
 -- ---------------------------------------------------------------------------
 
 print(string.format("CosmoLife benchmark  (%d iteration%s)",
@@ -184,5 +223,6 @@ for _, r in ipairs(results) do
         rate = string.format("%10.0f %s/s", r.n / (r.ms / 1000), r.detail)
     end
     print(string.format("%-34s %8.2f ms %s", r.name, r.ms, rate))
+    if r.note then print(string.format("%-34s          %s", "", r.note)) end
 end
 print(string.rep("-", 62))

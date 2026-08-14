@@ -36,6 +36,22 @@ local RINGS = config.render.terrainRings
 local REORIGIN_DISTANCE = CHUNK * 6
 local BUILD_BUDGET = 3            -- chunks per frame, to avoid hitches
 
+-- Milliseconds of chunk building allowed in one frame.
+--
+-- A count is the wrong unit: a near chunk at full resolution and a far chunk
+-- at a quarter of it differ by an order of magnitude, so "three chunks" was
+-- 6 ms in one place and 98 ms in another -- and 98 ms is exactly the stutter
+-- the descent benchmark was reporting. Time is what the player feels, so time
+-- is what gets budgeted. At least one chunk is always built, otherwise a slow
+-- machine would never finish a patch.
+local BUILD_MS = 6
+
+local clock = os.clock
+local function nowMs()
+    if love and love.timer then return love.timer.getTime() * 1000 end
+    return clock() * 1000
+end
+
 --- Chunk edge length for an altitude.
 --
 -- A sphere mesh fine enough to look like ground from 60 km up would need
@@ -89,7 +105,13 @@ end
 function Surface:setOrigin(lat, lon, allSettlements)
     self.originLat, self.originLon = lat, lon
     self.field:setOrigin(lat, lon)
+    self:_dropCache(self.chunkCache)
+    if self.pendingLod then
+        self:_dropCache(self.pendingLod.cache)
+        self.pendingLod = nil
+    end
     self.chunkCache = {}
+    self._wanted = nil
     self.pending = {}
     self.active = {}
     self:refreshFrame()
@@ -252,22 +274,75 @@ end
 
 local function chunkKey(cx, cz) return cx .. ":" .. cz end
 
+--- The disc of chunk coordinates that should be resident around (cx0, cz0).
+local function ringSet(cx0, cz0, rings)
+    local wanted = {}
+    for dz = -rings, rings do
+        for dx = -rings, rings do
+            local d = sqrt(dx * dx + dz * dz)
+            if d <= rings + 0.4 then
+                local cx, cz = cx0 + dx, cz0 + dz
+                wanted[chunkKey(cx, cz)] = { cx = cx, cz = cz, d = d }
+            end
+        end
+    end
+    return wanted
+end
+
+local function byDistance(a, b) return a.d < b.d end
+
 --- Brings the working set up to date around a local point.
 function Surface:update(x, z, dt, altitude)
     self:refreshFrame()
     self.chunkCache = self.chunkCache or {}
 
-    -- switch detail level with altitude, dropping the old working set
+    -- Switch detail level with altitude.
+    --
+    -- This used to drop the entire resident set the instant the level changed
+    -- and rebuild it from nothing, which is ~120 chunks -- and a descent
+    -- crosses several octaves, so the benchmark measured 300 rebuilds for one
+    -- landing, each one a hole in the ground under the ship while it caught
+    -- up. The new level is now built *alongside* the old one and swapped in
+    -- when its near ring is ready: the same chunks get built, but the player
+    -- always has ground to look at, and no frame has to build a whole ring.
+    --
+    -- The two sets are never drawn together, so nothing z-fights.
     local size, level = lodSizeFor(altitude, self.lodLevel)
-    if level ~= self.lodLevel then
-        for _, c in pairs(self.chunkCache) do
-            if c.model and c.model.mesh and c.model.mesh.release then c.model.mesh:release() end
+    if level ~= self.lodLevel and next(self.chunkCache) == nil then
+        -- nothing resident to preserve (a fresh patch): just take the level
+        self.chunkSize, self.lodLevel = size, level
+        self._wanted = nil
+        if self.pendingLod then
+            self:_dropCache(self.pendingLod.cache)
+            self.pendingLod = nil
         end
-        self.chunkCache = {}
-        self.chunkSize = size
-        self.lodLevel = level
-        self.primed = false
+    elseif level ~= self.lodLevel then
+        if self.pendingLod and self.pendingLod.level ~= level then
+            self:_dropCache(self.pendingLod.cache)
+            self.pendingLod = nil
+        end
+        if not self.pendingLod then
+            self.pendingLod = { level = level, size = size, cache = {} }
+        end
+    elseif self.pendingLod then
+        -- altitude came back before the swap happened: the level we are
+        -- already at is the right one after all
+        self:_dropCache(self.pendingLod.cache)
+        self.pendingLod = nil
     end
+    if self.pendingLod then
+        self:_advanceLod(x, z)
+        -- While a level is on its way in, the resident set is about to be
+        -- thrown away: filling in its outer rings is work that gets discarded
+        -- seconds later, and it was the reason the descent benchmark got
+        -- *slower* when the swap was first added. Leave it exactly as it is
+        -- and spend the frame's budget on the level that will survive.
+        if self.pendingLod then
+            self:_updateSettlements(x, z)
+            return
+        end
+    end
+
     local CH = self.chunkSize
 
     local cx0 = floor(x / CH)
@@ -282,17 +357,7 @@ function Surface:update(x, z, dt, altitude)
     local rings = settings.q().terrainRings
     if self._wantedCx ~= cx0 or self._wantedCz ~= cz0
         or self._wantedRings ~= rings or not self._wanted then
-        local wanted = {}
-        for dz = -rings, rings do
-            for dx = -rings, rings do
-                local d = sqrt(dx * dx + dz * dz)
-                if d <= rings + 0.4 then
-                    local cx, cz = cx0 + dx, cz0 + dz
-                    wanted[chunkKey(cx, cz)] = { cx = cx, cz = cz, d = d }
-                end
-            end
-        end
-        self._wanted = wanted
+        self._wanted = ringSet(cx0, cz0, rings)
         self._wantedCx, self._wantedCz, self._wantedRings = cx0, cz0, rings
     end
     local wanted = self._wanted
@@ -311,41 +376,108 @@ function Surface:update(x, z, dt, altitude)
     for key, c in pairs(wanted) do
         if not self.chunkCache[key] then todo[#todo + 1] = { key = key, cx = c.cx, cz = c.cz, d = c.d } end
     end
-    table.sort(todo, function(a, b) return a.d < b.d end)
+    table.sort(todo, byDistance)
 
-    -- On a new patch, the ground must not be missing under the ship, so the
-    -- nearest ring is prioritised -- but building all of it in one frame was
-    -- ~9 chunks at once, which at the measured cost of a chunk is a visible
-    -- hitch every time a patch is entered or re-origined. The priming budget
-    -- is a few times the steady-state one, not unbounded, so the same chunks
-    -- arrive over three or four frames instead of one.
+    -- On a new patch the ground must not be missing under the ship, so the
+    -- nearest ring is prioritised and gets a larger slice of the frame; once
+    -- it is down, streaming settles to the steady-state slice.
     local budget = settings.q().buildBudget or BUILD_BUDGET
+    local ms = BUILD_MS
     if not self.primed then
         local near = 0
         for i = 1, #todo do
             if todo[i].d <= 1.5 then near = near + 1 end
         end
-        budget = math.max(math.min(near, budget * 3), 1)
-        if near <= budget then self.primed = true end
+        budget, ms = budget * 3, BUILD_MS * 2
+        if near == 0 then self.primed = true end
     end
-    for i = 1, min(budget, #todo) do
-        local t = todo[i]
-        self:_buildChunk(t.cx, t.cz, t.d)
-    end
+    self:_buildSome(todo, budget, ms)
 
-    -- settlement meshes for anything close enough to see in detail
+    self:_updateSettlements(x, z)
+end
+
+--- Detail meshes for any settlement close enough to see, one per frame.
+function Surface:_updateSettlements(x, z)
     for _, s in ipairs(self.settlements) do
         local d = sqrt((x - s.x) ^ 2 + (z - s.z) ^ 2)
         if d < math.min(self.viewRange, settings.q().settlementRange)
             and not self.settlementMeshes[s.place.seed] then
             self:_buildSettlement(s)
-            break     -- one town per frame is plenty
+            return     -- one town per frame is plenty
         end
     end
 end
 
-function Surface:_buildChunk(cx, cz, ringDistance)
-    local CH = self.chunkSize
+--- Builds from a nearest-first list until the frame's slice is used up.
+-- Always builds at least one, so progress is guaranteed however slow the
+-- machine is.
+function Surface:_buildSome(todo, maxChunks, maxMs, target)
+    local deadline = nowMs() + (maxMs or BUILD_MS)
+    for i = 1, min(maxChunks, #todo) do
+        local t = todo[i]
+        self:_buildChunk(t.cx, t.cz, t.d, target)
+        if nowMs() >= deadline then return i end
+    end
+    return min(maxChunks, #todo)
+end
+
+--- Releases every mesh in a chunk table and empties it.
+function Surface:_dropCache(cache)
+    if not cache then return end
+    for key, c in pairs(cache) do
+        if c.model and c.model.mesh and c.model.mesh.release then c.model.mesh:release() end
+        if c.scatter and c.scatter.mesh and c.scatter.mesh.release then c.scatter.mesh:release() end
+        cache[key] = nil
+    end
+end
+
+--- Builds the incoming detail level in the background and swaps it in whole.
+--
+-- Only the near ring has to be ready to swap: the outer rings then fill in
+-- under the ordinary per-frame budget, exactly as they do after a re-origin.
+function Surface:_advanceLod(x, z)
+    local p = self.pendingLod
+    local CH = p.size
+    local cx0, cz0 = floor(x / CH), floor(z / CH)
+    local rings = settings.q().terrainRings
+    if p.cx ~= cx0 or p.cz ~= cz0 or p.rings ~= rings or not p.wanted then
+        p.wanted = ringSet(cx0, cz0, rings)
+        p.cx, p.cz, p.rings = cx0, cz0, rings
+    end
+
+    local todo = self._lodTodo or {}
+    self._lodTodo = todo
+    for i = #todo, 1, -1 do todo[i] = nil end
+    local missingNear = 0
+    for key, c in pairs(p.wanted) do
+        if not p.cache[key] then
+            todo[#todo + 1] = { cx = c.cx, cz = c.cz, d = c.d }
+            if c.d <= 1.5 then missingNear = missingNear + 1 end
+        end
+    end
+
+    if missingNear > 0 then
+        table.sort(todo, byDistance)
+        local budget = settings.q().buildBudget or BUILD_BUDGET
+        self:_buildSome(todo, budget * 3, BUILD_MS, p)
+        return
+    end
+
+    -- near ring complete: the new level takes over in one step, so there is
+    -- never a frame with two sets of ground in it
+    self:_dropCache(self.chunkCache)
+    self.chunkCache = p.cache
+    self.chunkSize = p.size
+    self.lodLevel = p.level
+    self.pendingLod = nil
+    self.primed = true
+    self._wanted = nil                -- recompute the resident set at the new size
+end
+
+--- Builds one chunk into `target` (a pending LOD set), or into the live one.
+function Surface:_buildChunk(cx, cz, ringDistance, target)
+    target = target or self
+    local CH = target.size or self.chunkSize
     local ox, oz = cx * CH, cz * CH
     -- resolution falls off with distance: near ground is detailed, the far
     -- ring is coarse, and because heights are a pure function of position the
@@ -389,10 +521,12 @@ function Surface:_buildChunk(cx, cz, ringDistance)
 
     local chunk = { ox = ox, oz = oz, size = CH, model = b:build(), res = res }
     -- scenery is only worth placing at the finest level, where it is visible
-    if ringDistance <= 1.5 and self.lodLevel == 0 and settings.q().scatter then
+    local level = target.level or self.lodLevel
+    local cache = target.cache or self.chunkCache
+    if ringDistance <= 1.5 and level == 0 and settings.q().scatter then
         chunk.scatter = self.field:buildScatter(ox, oz, CH, 1)
     end
-    self.chunkCache[chunkKey(cx, cz)] = chunk
+    cache[chunkKey(cx, cz)] = chunk
     return chunk
 end
 
@@ -486,10 +620,10 @@ function Surface:draw(renderer, opts)
 end
 
 function Surface:release()
-    if self.chunkCache then
-        for _, c in pairs(self.chunkCache) do
-            if c.model and c.model.mesh and c.model.mesh.release then c.model.mesh:release() end
-        end
+    self:_dropCache(self.chunkCache)
+    if self.pendingLod then
+        self:_dropCache(self.pendingLod.cache)
+        self.pendingLod = nil
     end
     self.chunkCache = {}
     for _, m in pairs(self.settlementMeshes) do

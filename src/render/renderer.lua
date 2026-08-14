@@ -110,6 +110,9 @@ function Renderer:_createResources()
     self:resize(love.graphics.getWidth(), love.graphics.getHeight())
 end
 
+-- Fraction of the window the sky pass is rendered at (see Renderer:resize).
+local SKY_SCALE = 0.5
+
 --- Picks the best depth format the driver actually supports.
 local function newDepthCanvas(w, h)
     for _, format in ipairs({ "depth24stencil8", "depth24", "depth32f", "depth16" }) do
@@ -130,6 +133,23 @@ function Renderer:resize(w, h)
 
     self.color = love.graphics.newCanvas(w, h, { format = "rgba8" })
     self.color:setFilter("nearest", "nearest")
+
+    -- The sky is rendered at a fraction of the resolution and upscaled.
+    --
+    -- It is a full-screen procedural pass -- gradient, galactic plane, two
+    -- warped nebula layers and a filament layer -- and measured on a descent
+    -- it was 65 of the frame's 166 ms, paid for every pixel including the
+    -- ones the ground then covers. All of it is low frequency, so at half
+    -- resolution it is visually the same picture for a quarter of the work.
+    -- Stars and the sun are drawn separately at full resolution, so nothing
+    -- that needs to be sharp is softened.
+    if self.skyCanvas then self.skyCanvas:release() end
+    local sw = math.max(1, math.floor(w * SKY_SCALE))
+    local sh = math.max(1, math.floor(h * SKY_SCALE))
+    self.skyCanvas = love.graphics.newCanvas(sw, sh, { format = "rgba8" })
+    self.skyCanvas:setFilter("linear", "linear")
+    self.skyWidth, self.skyHeight = sw, sh
+
     self.depth = newDepthCanvas(w, h)
     if not self.depth then
         -- Without a depth buffer we would have to sort per triangle; refuse
@@ -252,9 +272,34 @@ function Renderer:_setupShader(env)
     self:_send(s, "u_exposure", env.exposure or 1.15)
 end
 
+local function byDistance(a, b) return a.dist < b.dist end
+
 function Renderer:_drawQueue(layer, near, far)
     local queue, count = self.queues[layer], self.counts[layer]
     if count == 0 then return end
+
+    -- Opaque geometry goes front to back.
+    --
+    -- Submission order was whatever `pairs` gave, so on a descent the terrain
+    -- arrived in random depth order and the depth test rejected almost nothing:
+    -- a hundred and thirty chunks, several of them filling the screen, were
+    -- each shaded in full. Sorting first lets early-Z discard the ones behind,
+    -- which is the whole point of having a depth buffer.
+    --
+    -- The FX layer is additive and therefore order independent, so it is left
+    -- alone rather than paying for a sort it cannot use.
+    if layer ~= LAYER_FX then
+        -- `queue` is a reused array with stale entries past `count`; sort only
+        -- the live prefix
+        if count > 1 then
+            local live = self._sortBuf or {}
+            self._sortBuf = live
+            for i = 1, count do live[i] = queue[i] end
+            for i = #live, count + 1, -1 do live[i] = nil end
+            table.sort(live, byDistance)
+            queue = live
+        end
+    end
 
     local cam = self.camera
     local proj = cam:projection(near, far, self._proj)
@@ -283,8 +328,17 @@ end
 function Renderer:_drawSky(env)
     local cam = self.camera
     local s = self.skyShader
+
+    local target = self.skyCanvas
+    local rw, rh = self.skyWidth or self.width, self.skyHeight or self.height
+    if target then
+        love.graphics.setCanvas(target)
+        love.graphics.clear(0, 0, 0, 1)
+        love.graphics.setDepthMode("always", false)
+    end
+
     love.graphics.setShader(s)
-    self:_send(s, "u_res", { self.width, self.height })
+    self:_send(s, "u_res", { rw, rh })
     self:_send(s, "u_camFwd", { cam.fwd.x, cam.fwd.y, cam.fwd.z })
     self:_send(s, "u_camUp", { cam.up.x, cam.up.y, cam.up.z })
     self:_send(s, "u_camRight", { cam.right.x, cam.right.y, cam.right.z })
@@ -298,8 +352,16 @@ function Renderer:_drawSky(env)
     self:_send(s, "u_sunDir", { env.sunDir.x, env.sunDir.y, env.sunDir.z })
     self:_send(s, "u_sunColor", env.sunColor)
     love.graphics.setColor(1, 1, 1, 1)
-    love.graphics.rectangle("fill", 0, 0, self.width, self.height)
+    love.graphics.rectangle("fill", 0, 0, rw, rh)
     love.graphics.setShader()
+
+    if target then
+        -- back to the frame's own target, and blow the sky up into it
+        love.graphics.setCanvas({ self.color, depthstencil = self.depth })
+        love.graphics.setDepthMode("always", false)
+        love.graphics.setColor(1, 1, 1, 1)
+        love.graphics.draw(target, 0, 0, 0, self.width / rw, self.height / rh)
+    end
 end
 
 --- Renders everything queued this frame into the internal colour canvas.

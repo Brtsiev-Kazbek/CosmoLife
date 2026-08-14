@@ -73,7 +73,6 @@ function Field:init(body)
     self.chunks = {}
     self.chunkOrder = {}
     self.chunkLimit = 220
-    self.scatter = {}
     self.originLat, self.originLon = 0, 0
 end
 
@@ -84,7 +83,6 @@ function Field:setOrigin(lat, lon)
     self.originLat = lat or 0
     self.originLon = lon or 0
     self.chunks, self.chunkOrder = {}, {}
-    self.scatter = {}
 end
 
 --- Terrain height in metres above the reference sphere, for a *direction* on
@@ -354,11 +352,14 @@ end
 
 --- Scatters boulders and, on living worlds, vegetation over a patch.
 -- Returned as one baked mesh so scenery costs a single draw call per chunk.
+-- Scenery for one chunk.
+--
+-- This deliberately does *not* cache. It used to keep every mesh it had ever
+-- built in `self.scatter`, while the caller (`Surface:update`) released those
+-- same meshes when their chunk left the working set -- so walking away from a
+-- chunk and back handed the renderer a destroyed Mesh. The scatter belongs to
+-- the chunk, and it lives and dies with it.
 function Field:buildScatter(ox, oz, size, density)
-    local key = string.format("s%d,%d", floor(ox), floor(oz))
-    self.scatter = self.scatter or {}
-    if self.scatter[key] then return self.scatter[key] end
-
     local geometry = require("src.render.geometry")
     local rng = Rng.new(self.seed, "scatter", floor(ox), floor(oz))
     local b = MeshBuilder.new()
@@ -389,9 +390,7 @@ function Field:buildScatter(ox, oz, size, density)
         end
     end
 
-    local model = b:build()
-    self.scatter[key] = model or false
-    return model
+    return b:build()
 end
 
 --- Drops all cached GPU meshes (called when leaving a body).
@@ -400,12 +399,6 @@ function Field:release()
         if c.model and c.model.mesh and c.model.mesh.release then c.model.mesh:release() end
     end
     self.chunks, self.chunkOrder = {}, {}
-    if self.scatter then
-        for _, m in pairs(self.scatter) do
-            if m and m.mesh and m.mesh.release then m.mesh:release() end
-        end
-        self.scatter = {}
-    end
 end
 
 -- ---------------------------------------------------------------------------

@@ -1561,6 +1561,139 @@ test("hints react to context", function(assert_)
 end)
 
 -- ---------------------------------------------------------------------------
+-- The first person controller.
+--
+-- Three defects shipped here, and all three are sign errors that no amount of
+-- reading catches but one line of arithmetic does: on the planet surface the
+-- mouse turned the view the wrong way, and inside a building A and D were
+-- swapped. The surface tangent frame is left handed (east = north x up) and an
+-- interior is right handed, so every one of these has to be asserted twice.
+
+local Walker = require("src.sim.walker")
+
+local function walkerFrames() return { "surface", "world" } end
+
+test("mouse right turns the view right, in both frames", function(assert_)
+    for _, frame in ipairs(walkerFrames()) do
+        for _, yaw in ipairs({ 0, 0.9, 2.7, -1.3, 4.4 }) do
+            local w = Walker.new({ frame = frame, yaw = yaw })
+            local f0x, _, f0z = w:forward()
+            local rx, _, rz = w:right()
+            w:look(12, 0)
+            local f1x, _, f1z = w:forward()
+            local dot = (f1x - f0x) * rx + (f1z - f0z) * rz
+            assert_(dot > 0, frame .. " yaw " .. yaw .. ": mouse right turned left (" .. dot .. ")")
+        end
+    end
+end)
+
+test("mouse down looks down, and invert pitch flips it", function(assert_)
+    local settings = require("src.settings")
+    local was = settings.get("invertY")
+    for _, frame in ipairs(walkerFrames()) do
+        settings.set("invertY", false)
+        local w = Walker.new({ frame = frame })
+        w:look(0, 12)
+        local _, fy = w:forward()
+        assert_(fy < 0, frame .. ": mouse down did not look down")
+
+        settings.set("invertY", true)
+        local inv = Walker.new({ frame = frame })
+        inv:look(0, 12)
+        local _, iy = inv:forward()
+        assert_(iy > 0, frame .. ": invert pitch had no effect")
+    end
+    settings.set("invertY", was)
+end)
+
+test("the strafe key steps towards screen right, in both frames", function(assert_)
+    for _, frame in ipairs(walkerFrames()) do
+        for _, yaw in ipairs({ 0, 0.9, 2.7, -1.3 }) do
+            local w = Walker.new({ frame = frame, yaw = yaw })
+            local rx, _, rz = w:right()
+            local sx, sz = w:wishDir(1, 0)
+            assert_(sx * rx + sz * rz > 0.99, frame .. " yaw " .. yaw .. ": D stepped the wrong way")
+            local fx, _, fz = w:heading()
+            local wx, wz = w:wishDir(0, 1)
+            assert_(wx * fx + wz * fz > 0.99, frame .. " yaw " .. yaw .. ": W walked the wrong way")
+        end
+    end
+end)
+
+test("the walker's right matches the camera's right on a real tangent frame", function(assert_)
+    -- This is the actual defect: `right` has to be what mat4.orthonormalize
+    -- produces from (up, fwd), because that is what the renderer projects with.
+    local function norm(x, y, z)
+        local l = math.sqrt(x * x + y * y + z * z)
+        return x / l, y / l, z / l
+    end
+    local ux, uy, uz = norm(0.3, 0.9, -0.2)
+    local nx, ny, nz = 0.4, 0.1, 0.9
+    local d = nx * ux + ny * uy + nz * uz
+    nx, ny, nz = norm(nx - ux * d, ny - uy * d, nz - uz * d)
+    -- east = north x up, exactly as terrain.tangentFrame builds it
+    local ex, ey, ez = norm(ny * uz - nz * uy, nz * ux - nx * uz, nx * uy - ny * ux)
+    local function toWorld(x, y, z)
+        return ex * x + ux * y + nx * z, ey * x + uy * y + ny * z, ez * x + uz * y + nz * z
+    end
+    for _, yaw in ipairs({ 0, 0.7, 2.3, -1.1 }) do
+        local w = Walker.new({ frame = "surface", yaw = yaw, pitch = 0.3 })
+        local fwd = vec3(toWorld(w:forward()))
+        local up = vec3(ux, uy, uz)
+        local right = vec3(0, 0, 0)
+        mat4.orthonormalize(right, up, fwd)
+        local mine = vec3(toWorld(w:right()))
+        assert_(vec3.dot(right, mine) > 0.9999,
+            "yaw " .. yaw .. ": walker right disagrees with camera right")
+    end
+end)
+
+test("walking accelerates towards the wish speed and stops", function(assert_)
+    local config = require("src.config")
+    local w = Walker.new({ frame = "surface" })
+    for _ = 1, 120 do w:walk(1 / 60, 0, 1, false) end
+    local cruise = w:groundSpeed()
+    assert_(math.abs(cruise - config.walk.speed) < 0.05,
+        "walk speed settled at " .. cruise .. ", wanted " .. config.walk.speed)
+    for _ = 1, 120 do w:walk(1 / 60, 0, 1, true) end
+    assert_(w:groundSpeed() > cruise * 1.5, "sprinting is barely faster than walking")
+    assert_(w:fovBoost() > 0, "no field of view boost while sprinting")
+    for _ = 1, 180 do w:walk(1 / 60, 0, 0, false) end
+    assert_(w:groundSpeed() < 0.05, "the walker never comes to a stop")
+    assert_(w:fovBoost() == 0, "field of view still boosted while standing still")
+end)
+
+test("a settlement is crossable in a reasonable time", function(assert_)
+    -- 5.2 m/s across a tier-3 town was over a minute of holding W, which is
+    -- what "движение слишком медленное" was about.
+    local config = require("src.config")
+    local townRadius = 60 + 3 * 26 + 2 * 8      -- Surface:setOrigin's formula
+    local seconds = (townRadius * 2) / config.walk.runSpeed
+    assert_(seconds < 30, "sprinting across a town takes " .. seconds .. " s")
+end)
+
+test("movement is bound by scancode so a non-latin layout still works", function(assert_)
+    local input = require("src.input")
+    for _, action in ipairs({ "walkForward", "walkBack", "walkLeft", "walkRight" }) do
+        local sources = input.defaults[action]
+        assert_(sources ~= nil, action .. " is not bound at all")
+        local hasScancode = false
+        for _, src in ipairs(sources or {}) do
+            if src:match("^sc:") then hasScancode = true end
+            assert_(not src:match("^key:"),
+                action .. " uses a layout dependent key source: " .. src)
+        end
+        assert_(hasScancode, action .. " has no scancode source")
+    end
+    -- and it has to show up in the help panel, which used to hard code "W A S D"
+    local rows = input.controlRows(input.footHelp)
+    local labels = {}
+    for _, r in ipairs(rows) do labels[#labels + 1] = r[1] end
+    local joined = table.concat(labels, "|")
+    assert_(joined:find("Move", 1, true), "the on-foot help lists no movement row")
+end)
+
+-- ---------------------------------------------------------------------------
 
 io.write("\n", string.rep("-", 52), "\n")
 io.write(string.format("%d passed, %d failed\n", passed, failed))

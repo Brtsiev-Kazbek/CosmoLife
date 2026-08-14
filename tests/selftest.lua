@@ -215,6 +215,104 @@ step(70, "approach a landable world", function(game)
     f.warpState = "off"
 end)
 
+step(71, "profile: atmospheric entry", function(game)
+    -- Frame times through the descent, which is where the player reports the
+    -- game stalling. Printed rather than asserted: the point is to see the
+    -- shape of the cost, not to gate on a number that varies by machine.
+    local f = game.manager:current()
+    local surface = require("src.procgen.surface")
+
+    -- time the surface streaming separately from everything else
+    local Surface = getmetatable(f.surface).__index
+    local realUpdate, realBuild = Surface.update, Surface._buildChunk
+    local updMs, buildMs, builds = 0, 0, 0
+    Surface.update = function(self, ...)
+        local t = os.clock(); local r = realUpdate(self, ...); updMs = updMs + (os.clock() - t) * 1000
+        return r
+    end
+    Surface._buildChunk = function(self, ...)
+        local t = os.clock(); local r = realBuild(self, ...)
+        buildMs = buildMs + (os.clock() - t) * 1000; builds = builds + 1
+        return r
+    end
+
+    -- Actually descend. The complaint is about entering the atmosphere, and
+    -- what makes that different from hovering is that the terrain LOD level
+    -- changes: each change used to drop the entire resident set and rebuild it
+    -- three chunks per frame.
+    local systemGen = require("src.procgen.system")
+    local body = selftest.body
+    local lodChanges, lastLod = 0, f.surface and f.surface.lodLevel
+    local total, n, updateMs, drawMs = 0, 0, 0, 0
+    local worst, worstAlt = 0, 0
+    for i = 1, 150 do
+        -- walk down from 40 km to about 2 km
+        local alt = 40000 * (1 - i / 165)
+        local x, y, z = systemGen.surfacePoint(body, 0.12, 0.4, alt)
+        f.ship.pos:set(x, y, z)
+        local t0 = os.clock()
+        game:update(1 / 60)
+        local t1 = os.clock()
+        game:draw()
+        local t2 = os.clock()
+        updateMs = updateMs + (t1 - t0) * 1000
+        drawMs = drawMs + (t2 - t1) * 1000
+        local ms = (t2 - t0) * 1000
+        if ms > worst then worst, worstAlt = ms, alt end
+        total, n = total + ms, n + 1
+        if f.surface and f.surface.lodLevel ~= lastLod then
+            lodChanges = lodChanges + 1
+            lastLod = f.surface.lodLevel
+        end
+    end
+    io.write(string.format("    DIAG-DESCENT mean=%.0f ms  worst=%.0f ms at %.0f m  lodChanges=%d\n",
+        total / n, worst, worstAlt, lodChanges))
+    Surface.update, Surface._buildChunk = realUpdate, realBuild
+
+    local resident = 0
+    for _ in pairs(f.surface.chunkCache or {}) do resident = resident + 1 end
+    io.write(string.format(
+        "    DIAG-ENTRY %.0f ms/frame = update %.0f + draw %.0f   surface:update %.0f  chunkBuild %.0f (%d builds, %.1f ms each)\n",
+        total / n, updateMs / n, drawMs / n, updMs / n, buildMs / n, builds / n, builds > 0 and buildMs / builds or 0))
+    local st = game.renderer.stats
+    io.write(string.format("    DIAG-ENTRY resident chunks=%d  lod=%d  chunkSize=%.0f  alt=%.0f\n",
+        resident, f.surface.lodLevel, f.surface.chunkSize, f.altitude or -1))
+    io.write(string.format("    DIAG-ENTRY draws=%d  tris=%d  culled=%s\n",
+        st.draws or -1, st.triangles or -1, tostring(st.culled)))
+    -- how expensive is the post pass on its own?
+    local r = game.renderer
+    local was = r.settings.post
+    r.settings.post = false
+    local t0 = os.clock(); for _ = 1, 20 do game:draw() end
+    local noPost = (os.clock() - t0) * 1000 / 20
+    r.settings.post = true
+    t0 = os.clock(); for _ = 1, 20 do game:draw() end
+    local withPost = (os.clock() - t0) * 1000 / 20
+    r.settings.post = was
+    io.write(string.format("    DIAG-ENTRY draw with post=%.0f ms  without=%.0f ms\n",
+        withPost, noPost))
+
+    -- how much of the draw is the full-screen sky shader?
+    local sky = game.sky
+    local realSky = sky.draw
+    local skyMs = 0
+    sky.draw = function(...) local t = os.clock(); local r = realSky(...)
+        skyMs = skyMs + (os.clock() - t) * 1000; return r end
+    local realNebula = r.env.nebula
+    t0 = os.clock(); for _ = 1, 20 do game:draw() end
+    local base = (os.clock() - t0) * 1000 / 20
+    sky.draw = realSky
+    -- and with the nebula branch switched off entirely
+    r.env.nebula = 0
+    t0 = os.clock(); for _ = 1, 20 do game:draw() end
+    local noNebula = (os.clock() - t0) * 1000 / 20
+    r.env.nebula = realNebula
+    io.write(string.format("    DIAG-ENTRY starfield=%.0f ms  draw with nebula=%.0f  without=%.0f\n",
+        skyMs / 20, base, noNebula))
+    io.flush()
+    io.flush()
+end)
+
 step(90, "terrain streamed in", function(game)
     local f = game.manager:current()
     assert(f.surface, "no surface patch after descending to 40 km")
@@ -269,9 +367,65 @@ end)
 
 step(150, "walk around", function(game)
     local s = game.manager:current()
-    s.yaw = 1.2
+    s.walker.yaw = 1.2
     s.vel:set(2, 0, 2)
     assert(s.onGround ~= nil, "ground contact not evaluated")
+end)
+
+-- The camera bug, asserted against the live pipeline rather than against the
+-- controller's own arithmetic: move the mouse right, and whatever was on the
+-- right of the screen must come towards the middle.
+step(152, "mouse right turns right on the real camera", function(game)
+    local s = game.manager:current()
+    local camera = game.camera
+
+    s:updateCamera(0.016)
+    -- a landmark 100 m off to the right of where we are looking
+    local mark = { camera.pos.x + camera.right.x * 100,
+                   camera.pos.y + camera.right.y * 100,
+                   camera.pos.z + camera.right.z * 100 }
+    local before = camera:angleTo(mark[1], mark[2], mark[3])
+
+    s:mousemoved(0, 0, 40, 0)              -- mouse to the right
+    s:updateCamera(0.016)
+    local after = camera:angleTo(mark[1], mark[2], mark[3])
+    assert(after < before, string.format(
+        "mouse right turned away from the right-hand landmark (%.3f -> %.3f rad)", before, after))
+
+    -- and the strafe key has to agree with it
+    local rx, _, rz = s.walker:right()
+    local sx, sz = s.walker:wishDir(1, 0)
+    assert(sx * rx + sz * rz > 0.99, "the strafe key disagrees with screen right")
+
+    -- mouse down looks down: the view direction loses height against the
+    -- surface normal we are standing on
+    local up = s.surface.up
+    local h0 = camera.fwd.x * up.x + camera.fwd.y * up.y + camera.fwd.z * up.z
+    s:mousemoved(0, 0, 0, 40)
+    s:updateCamera(0.016)
+    local h1 = camera.fwd.x * up.x + camera.fwd.y * up.y + camera.fwd.z * up.z
+    assert(h1 < h0, "mouse down did not look down")
+
+    s:mousemoved(0, 0, -40, -40)           -- put it back
+    s:updateCamera(0.016)
+end)
+
+step(154, "walking covers ground at a playable pace", function(game)
+    local s = game.manager:current()
+    local config = require("src.config")
+    local x0, z0 = s.pos.x, s.pos.z
+    -- drive the walker directly: the selftest has no keyboard
+    for _ = 1, 90 do
+        s.walker:walk(1 / 60, 0, 1, true)
+        s.pos.x = s.pos.x + s.vel.x / 60
+        s.pos.z = s.pos.z + s.vel.z / 60
+    end
+    local travelled = math.sqrt((s.pos.x - x0) ^ 2 + (s.pos.z - z0) ^ 2)
+    -- 1.5 s of sprinting, minus the ramp up
+    assert(travelled > config.walk.runSpeed * 1.0, string.format(
+        "sprinted only %.1f m in 1.5 s", travelled))
+    s.pos.x, s.pos.z = x0, z0
+    s.vel:set(0, 0, 0)
 end)
 
 step(157, "diagnostics: surface state", function(game)

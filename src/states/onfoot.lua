@@ -19,6 +19,7 @@ local settings = require("src.settings")
 local hints = require("src.render.hints")
 local input = require("src.input")
 local i18n = require("src.i18n")
+local Walker = require("src.sim.walker")
 
 local OnFoot = class("OnFootState")
 
@@ -33,12 +34,18 @@ function OnFoot:enter(opts)
     self.world = self.game.world
     self.player = self.world.player
 
-    self.pos = vec3(opts.x or 0, 0, opts.z or 0)
-    self.pos.y = self.surface:groundHeight(self.pos.x, self.pos.z)
-    self.vel = vec3(0, 0, 0)
-    self.yaw = 0
-    self.pitch = 0
-    self.onGround = true
+    -- The surface tangent frame is left handed (east = north x up), which is
+    -- why the walker has to be told which frame it is in: the same yaw turns
+    -- opposite ways in the two frames.
+    self.walker = Walker.new({
+        frame = "surface",
+        x = opts.x or 0, z = opts.z or 0,
+        y = self.surface:groundHeight(opts.x or 0, opts.z or 0),
+    })
+    -- aliases: the rest of the state, the HUD and the self-test all address
+    -- these directly, and they are the walker's own vectors, not copies
+    self.pos = self.walker.pos
+    self.vel = self.walker.vel
     self.prompt = nil
     self.shipLocal = vec3(opts.x or 0, 0, opts.z or 0)
     if self.flight then
@@ -53,6 +60,8 @@ end
 
 function OnFoot:exit()
     love.mouse.setRelativeMode(false)
+    -- the sprint boost is ours; hand the cockpit back the player's own FOV
+    self.game.camera.fov = math.rad(settings.get("fov") or 74)
 end
 
 function OnFoot:resume()
@@ -66,13 +75,11 @@ end
 -- ---------------------------------------------------------------------------
 
 function OnFoot:mousemoved(x, y, dx, dy)
-    self.yaw = self.yaw - dx * W.mouseSens
-    self.pitch = util.clamp(self.pitch - dy * W.mouseSens, -1.45, 1.45)
+    self.walker:look(dx, dy)
 end
 
 function OnFoot:forward()
-    local cp = cos(self.pitch)
-    return vec3(sin(self.yaw) * cp, sin(self.pitch), cos(self.yaw) * cp)
+    return vec3(self.walker:forward())
 end
 
 function OnFoot:update(dt, background)
@@ -82,21 +89,9 @@ function OnFoot:update(dt, background)
     surface:refreshFrame()
 
     -- movement in the tangent plane
-    local fx, fz = sin(self.yaw), cos(self.yaw)
-    local rx, rz = fz, -fx
-    local mx, mz = 0, 0
-    if love.keyboard.isDown("w") then mx, mz = mx + fx, mz + fz end
-    if love.keyboard.isDown("s") then mx, mz = mx - fx, mz - fz end
-    if love.keyboard.isDown("d") then mx, mz = mx + rx, mz + rz end
-    if love.keyboard.isDown("a") then mx, mz = mx - rx, mz - rz end
-    local len = sqrt(mx * mx + mz * mz)
-    local speed = config.down("run") and W.runSpeed or W.speed
-    -- low gravity worlds are floaty but you still walk at a human pace
-    if len > 1e-6 then mx, mz = mx / len * speed, mz / len * speed end
-
-    local blend = 1 - math.exp(-14 * dt)
-    self.vel.x = util.lerp(self.vel.x, mx, blend)
-    self.vel.z = util.lerp(self.vel.z, mz, blend)
+    local ax = input.axis("walkLeft", "walkRight")
+    local az = input.axis("walkBack", "walkForward")
+    self.walker:walk(dt, ax, az, config.down("run"))
 
     local gravity = (surface.body.gravity or 9) * W.gravityScale
     self.vel.y = self.vel.y - gravity * dt
@@ -121,10 +116,11 @@ function OnFoot:update(dt, background)
     if self.pos.y <= ground then
         self.pos.y = ground
         self.vel.y = 0
-        self.onGround = true
+        self.walker.onGround = true
     else
-        self.onGround = false
+        self.walker.onGround = false
     end
+    self.onGround = self.walker.onGround
 
     surface:update(self.pos.x, self.pos.z, dt, 0)
     self:updatePrompt()
@@ -167,11 +163,17 @@ function OnFoot:updateCamera(dt)
     local eye = self.pos.y + W.eyeHeight
     surface:toWorld(self.pos.x, eye, self.pos.z, camera.pos)
 
-    local f = self:forward()
-    local wx, wy, wz = surface:dirToWorld(f.x, f.y, f.z)
+    local fx, fy, fz = self.walker:forward()
+    local wx, wy, wz = surface:dirToWorld(fx, fy, fz)
     camera.fwd:set(wx, wy, wz)
     camera.up:set(surface.up.x, surface.up.y, surface.up.z)
     mat4.orthonormalize(camera.right, camera.up, camera.fwd)
+
+    -- a touch of extra field of view while sprinting, eased in and out
+    local base = math.rad(settings.get("fov") or 74)
+    local want = base + math.rad(self.walker:fovBoost())
+    camera.fov = camera.fov + (want - camera.fov) * (1 - math.exp(-6 * dt))
+
     camera:updateShake(dt)
 end
 
@@ -183,8 +185,9 @@ function OnFoot:keypressed(key)
         self.manager:push(Pause.new(), self)
         return
     end
-    if config.is("jump", key) and self.onGround then
+    if config.is("jump", key) and self.walker.onGround then
         self.vel.y = W.jumpSpeed * sqrt(math.max(self.surface.body.gravity or 9, 1) / 9.81)
+        self.walker.onGround = false
         self.onGround = false
         return
     end
@@ -274,7 +277,9 @@ function OnFoot:draw(background)
     end
 
     if self.game.showHelp then
-        local rows = { { L("Move"), "W A S D" }, { L("Look"), L("MOUSE") } }
+        -- the movement rows now come from the live bindings like everything
+        -- else, so rebinding cannot make this panel lie
+        local rows = { { L("Look"), L("MOUSE") } }
         for _, r in ipairs(input.controlRows(input.footHelp)) do
             rows[#rows + 1] = { L(r[1]), r[2] }
         end

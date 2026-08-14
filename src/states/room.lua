@@ -15,6 +15,8 @@ local interiorGen = require("src.procgen.interior")
 local hud = require("src.render.hud")
 local ui = require("src.ui.widgets")
 local i18n = require("src.i18n")
+local input = require("src.input")
+local Walker = require("src.sim.walker")
 
 local Room = class("RoomState")
 
@@ -42,10 +44,13 @@ function Room:enter(opts)
     self.room = interiorGen.generate(opts.kind, opts.seed, {})
     self.buildingName = opts.name or self.room.name
 
-    self.pos = vec3(self.room.spawn.x, 0, self.room.spawn.z)
-    self.vel = vec3(0, 0, 0)
-    self.yaw = 0
-    self.pitch = 0
+    -- an interior is drawn in the plain world axes, which are right handed --
+    -- unlike the planet surface, whose tangent frame is left handed
+    self.walker = Walker.new({
+        frame = "world", x = self.room.spawn.x, z = self.room.spawn.z,
+    })
+    self.pos = self.walker.pos
+    self.vel = self.walker.vel
     self.prompt = nil
 
     -- the room is drawn in its own little world, far from anything else
@@ -69,28 +74,18 @@ function Room:pause() love.mouse.setRelativeMode(false) end
 function Room:resume() love.mouse.setRelativeMode(true) end
 
 function Room:mousemoved(x, y, dx, dy)
-    self.yaw = self.yaw - dx * W.mouseSens
-    self.pitch = util.clamp(self.pitch - dy * W.mouseSens, -1.4, 1.4)
+    self.walker:look(dx, dy)
 end
 
 function Room:update(dt, background)
     if background then return end
     self.world:update(dt)
 
-    local fx, fz = sin(self.yaw), cos(self.yaw)
-    local rx, rz = fz, -fx
-    local mx, mz = 0, 0
-    if love.keyboard.isDown("w") then mx, mz = mx + fx, mz + fz end
-    if love.keyboard.isDown("s") then mx, mz = mx - fx, mz - fz end
-    if love.keyboard.isDown("d") then mx, mz = mx + rx, mz + rz end
-    if love.keyboard.isDown("a") then mx, mz = mx - rx, mz - rz end
-    local len = sqrt(mx * mx + mz * mz)
-    local speed = config.down("run") and W.runSpeed * 0.7 or W.speed * 0.8
-    if len > 1e-6 then mx, mz = mx / len * speed, mz / len * speed end
+    -- indoors you move at a considered pace, not a sprint down a corridor
+    local ax = input.axis("walkLeft", "walkRight")
+    local az = input.axis("walkBack", "walkForward")
+    self.walker:walk(dt, ax, az, config.down("run"), { speedScale = 0.72 })
 
-    local blend = 1 - math.exp(-16 * dt)
-    self.vel.x = util.lerp(self.vel.x, mx, blend)
-    self.vel.z = util.lerp(self.vel.z, mz, blend)
     self.pos.x = self.pos.x + self.vel.x * dt
     self.pos.z = self.pos.z + self.vel.z * dt
     self.pos.x, self.pos.z = interiorGen.collide(self.room, self.pos.x, self.pos.z, 0.45)
@@ -124,8 +119,7 @@ end
 function Room:updateCamera(dt)
     local camera = self.game.camera
     camera.pos:set(self.pos.x, W.eyeHeight, self.pos.z)
-    local cp = cos(self.pitch)
-    camera.fwd:set(sin(self.yaw) * cp, sin(self.pitch), cos(self.yaw) * cp)
+    camera.fwd:set(self.walker:forward())
     camera.up:set(0, 1, 0)
     mat4.orthonormalize(camera.right, camera.up, camera.fwd)
     camera:updateShake(dt)
