@@ -15,9 +15,14 @@ local equipment = require("src.sim.equipment")
 local missionsMod = require("src.sim.missions")
 local colonyMod = require("src.sim.colony")
 local factions = require("src.sim.factions")
-local shipsGen = require("src.procgen.ships")
-local hud = require("src.render.hud")
 local i18n = require("src.i18n")
+local layout = require("src.port.layout")
+local summary = require("src.port.summary")
+local market = require("src.port.market")
+local missions = require("src.port.missions")
+local outfitting = require("src.port.outfitting")
+local shipyard = require("src.port.shipyard")
+local colony = require("src.port.colony")
 
 local Port = class("PortState")
 
@@ -25,17 +30,6 @@ local C = palette.colors
 local L = i18n.format
 local floor, min, max = math.floor, math.min, math.max
 
--- Layout constants shared by the menu builders and the draw code, so the
--- number of visible rows is derived from the same geometry that draws them
--- rather than being a hand-tuned constant that overran the footer at 540px.
-local LIST_TOP = 152
-local LIST_LINE = 24
-local FOOTER = 76        -- rule, hint line and status line below the list
-
-local function listRows()
-    local h = love.graphics and love.graphics.getHeight() or 720
-    return ui.rowsFor(h - LIST_TOP - FOOTER, LIST_LINE)
-end
 
 local TAB_ORDER = { "summary", "market", "blackMarket", "missions", "outfitting", "shipyard", "colony" }
 -- Tab captions are looked up at draw time rather than stored, so switching
@@ -125,275 +119,28 @@ end
 -- Tabs
 -- ---------------------------------------------------------------------------
 
-function Port:buildSummaryMenu()
-    local items = {}
-    local stats = self.player.stats
-    local fuelMissing = stats.fuel - self.player.fuel
-    local fuelPrice = floor(fuelMissing * 34)
-    if fuelMissing > 0.05 then
-        items[#items + 1] = {
-            label = L("Refuel ({amount} t)", { amount = string.format("%.1f", fuelMissing) }),
-            value = util.money(fuelPrice) .. " " .. L("cr"),
-            action = function()
-                if self.player:spend(fuelPrice) then
-                    self.player.fuel = stats.fuel
-                    self:say(L("Tanks full."))
-                else
-                    self:say(L("Not enough credits."), true)
-                end
-                self:rebuild()
-            end,
-        }
-    else
-        items[#items + 1] = { label = L("Refuel"), value = L("tanks full"), disabled = true }
-    end
+-- Each tab builds its own menu and owns its own actions, in src/port/*.lua.
+-- What is left here is the frame around them: which tabs a place offers, which
+-- one is open, and the drawing that is the same on all of them.
 
-    local hullMissing = stats.maxHull - self.player.hull
-    local repairPrice = floor(hullMissing * 22)
-    if hullMissing > 0.5 and (self.place.services or {}).repair ~= false then
-        items[#items + 1] = {
-            label = L("Repair hull ({amount})", { amount = floor(hullMissing) }),
-            value = util.money(repairPrice) .. " " .. L("cr"),
-            action = function()
-                if self.player:spend(repairPrice) then
-                    self.player.hull = stats.maxHull
-                    self.player.shield = stats.maxShield
-                    self:say(L("Hull restored."))
-                else
-                    self:say(L("Not enough credits."), true)
-                end
-                self:rebuild()
-            end,
-        }
-    else
-        items[#items + 1] = { label = L("Repair hull"), value = L("no damage"), disabled = true }
-    end
+function Port:buildSummaryMenu() return summary.buildSummaryMenu(self) end
+function Port:buildMarketMenu(black) return market.buildMarketMenu(self, black) end
+function Port:buildMissionMenu() return missions.buildMissionMenu(self) end
+function Port:buildOutfitMenu() return outfitting.buildOutfitMenu(self) end
+function Port:buildShipyardMenu() return shipyard.buildShipyardMenu(self) end
+function Port:buildColonyMenu() return colony.buildColonyMenu(self) end
 
-    if self.player.missiles < 6 then
-        items[#items + 1] = {
-            label = L("Buy missile"), value = util.money(1200) .. " " .. L("cr"),
-            action = function()
-                if self.player:spend(1200) then
-                    self.player.missiles = self.player.missiles + 1
-                    self:say(L("Missile loaded."))
-                else self:say(L("Not enough credits."), true) end
-                self:rebuild()
-            end,
-        }
-    end
+function Port:trade(sell) return market.trade(self, sell) end
+function Port:acceptMission() return missions.acceptMission(self) end
+function Port:toggleModule() return outfitting.toggleModule(self) end
+function Port:buyShip() return shipyard.buyShip(self) end
 
-    local bounty = self.player:bounty(self.place.factionId)
-    if bounty > 0 then
-        items[#items + 1] = {
-            label = L("Pay off bounty with {faction}",
-                { faction = factions.get(self.place.factionId).short }),
-            value = util.money(bounty) .. " " .. L("cr"), color = C.uiWarn,
-            action = function()
-                if self.player:spend(bounty) then
-                    self.player:clearBounty(self.place.factionId)
-                    self:say(L("Record cleared."))
-                else self:say(L("Not enough credits."), true) end
-                self:rebuild()
-            end,
-        }
-    end
 
-    -- rank first: the summary tab is where a player checks in, so it is where
-    -- the next milestone belongs
-    local progression = require("src.sim.progression")
-    local rank = progression.rank(self.player)
-    local nextRank = progression.next(self.player)
-    items[#items + 1] = {
-        label = L("Rank: {rank}", { rank = L(rank.name) }),
-        value = nextRank and string.format("%d%%", math.floor(progression.progress(self.player) * 100)) or nil,
-        disabled = true, color = C.uiPrimary,
-    }
-    if nextRank then
-        local need, amount = progression.requirement(self.player)
-        local line = need == "credits"
-            and L("Next: {rank}, {cash} cr more", { rank = L(nextRank.name), cash = util.money(amount) })
-            or L("Next: {rank}", { rank = L(nextRank.name) })
-        items[#items + 1] = { label = "   " .. line, disabled = true, color = C.uiDim }
-    end
 
-    -- rank first: the summary tab is where a player checks in, so it is where
-    -- the next milestone belongs
-    local progression = require("src.sim.progression")
-    local rank = progression.rank(self.player)
-    local nextRank = progression.next(self.player)
-    items[#items + 1] = {
-        label = L("Rank: {rank}", { rank = L(rank.name) }),
-        value = nextRank and string.format("%d%%", math.floor(progression.progress(self.player) * 100)) or nil,
-        disabled = true, color = C.uiPrimary,
-    }
-    if nextRank then
-        local need, amount = progression.requirement(self.player)
-        local line = need == "credits"
-            and L("Next: {rank}, {cash} cr more", { rank = L(nextRank.name), cash = util.money(amount) })
-            or L("Next: {rank}", { rank = L(nextRank.name) })
-        items[#items + 1] = { label = "   " .. line, disabled = true, color = C.uiDim }
-    end
 
-    items[#items + 1] = { label = L("Trade computer: best local exports"), disabled = true, color = C.uiDim }
-    for _, e in ipairs(self.market:bestExports(4)) do
-        local c = commodities.get(e.id)
-        items[#items + 1] = {
-            label = "   " .. L(c.name), value = util.money(e.price) .. " " .. L("cr"),
-            disabled = true, color = C.uiDim,
-        }
-    end
 
-    items[#items + 1] = {
-        label = self.docked and L("Launch") or L("Step away from the terminal"),
-        value = "ESC", color = C.uiPrimary,
-        action = function() self:launch() end,
-    }
 
-    self.menu = ui.menu(items, { visible = listRows(), onSelect = function() end })
-end
 
-function Port:buildMarketMenu(black)
-    local items = {}
-    local law = self.place.lawLevel or 0.5
-    for _, id in ipairs(self.market:tradedIds()) do
-        local c = commodities.get(id)
-        local legality = commodities.legalityIn(c, law)
-        local illicit = (legality ~= "legal")
-        if illicit == (black and true or false) then
-            local buy = self.market:buyPrice(id)
-            local sell = self.market:sellPrice(id)
-            local held = self.player:cargoCount(id)
-            items[#items + 1] = {
-                label = L(c.name),
-                value = string.format("%s / %s   %d   %d",
-                    util.money(buy), util.money(sell), self.market:available(id), held),
-                commodity = id,
-                color = illicit and C.magenta or nil,
-            }
-        end
-    end
-    if #items == 0 then
-        items[1] = {
-            label = black and L("No black market trade today.") or L("Nothing traded here."),
-            disabled = true,
-        }
-    end
-    self.menu = ui.menu(items, { visible = listRows() })
-end
-
-function Port:buildMissionMenu()
-    local board = self.world:board(self.place)
-    self.board = board
-    local items = {}
-    for _, m in ipairs(board) do
-        local ok = missionsMod.canAccept(m, self.player)
-        items[#items + 1] = {
-            label = missionsMod.title(m),
-            value = util.money(m.reward) .. " " .. L("cr"),
-            mission = m,
-            color = m.illegal and C.magenta or (m.warZone and C.uiWarn or nil),
-            valueColor = ok and C.amber or C.uiDim,
-        }
-    end
-    if #items == 0 then items[1] = { label = L("No contracts posted."), disabled = true } end
-    self.menu = ui.menu(items, { visible = listRows() })
-end
-
-function Port:buildOutfitMenu()
-    local tech = self.place.techLevel or 6
-    local allowIllegal = (self.place.lawLevel or 0.5) < 0.4 or self.place.blackMarket
-    local items = {}
-    items[#items + 1] = { label = "-- " .. L("FITTED") .. " --", disabled = true, color = C.uiDim }
-    for _, id in ipairs(self.player.installed) do
-        local e = equipment.get(id)
-        if e then
-            items[#items + 1] = {
-                label = "  " .. L(e.name),
-                value = L("sell") .. " " .. util.money(floor(e.price * 0.55)),
-                moduleId = id, sell = true, color = C.uiText,
-            }
-        end
-    end
-    items[#items + 1] = { label = "-- " .. L("FOR SALE") .. " --", disabled = true, color = C.uiDim }
-    for _, e in ipairs(equipment.available(tech, allowIllegal)) do
-        items[#items + 1] = {
-            label = "  " .. L(e.name),
-            value = util.money(e.price) .. " " .. L("cr"),
-            moduleId = e.id, sell = false,
-            color = e.illegal and C.magenta or nil,
-            valueColor = self.player.credits >= e.price and C.amber or C.uiDim,
-        }
-    end
-    self.menu = ui.menu(items, { visible = listRows() })
-end
-
-function Port:buildShipyardMenu()
-    if not self.catalogue then
-        self.catalogue = shipsGen.catalogue(self.place.seed, self.place.techLevel or 6, 6)
-    end
-    local items = {}
-    local tradeIn = floor(self.player.shipDef.stats.price * 0.62)
-    items[#items + 1] = {
-        label = L("Your {class} ({name})",
-            { class = L(self.player.shipDef.roleName), name = self.player.shipDef.name }),
-        value = L("trade-in") .. " " .. util.money(tradeIn), disabled = true, color = C.uiDim,
-    }
-    for _, def in ipairs(self.catalogue) do
-        items[#items + 1] = {
-            label = string.format("%s  %s", L(def.roleName), def.name),
-            value = util.money(def.stats.price) .. " " .. L("cr"),
-            shipDef = def,
-            valueColor = (self.player.credits + tradeIn) >= def.stats.price and C.amber or C.uiDim,
-        }
-    end
-    self.menu = ui.menu(items, { visible = listRows() })
-end
-
-function Port:buildColonyMenu()
-    local c = self.place.colony
-    colonyMod.update(c, self.world.day)
-    local items = {}
-    items[#items + 1] = {
-        label = L("Collect exports and taxes"),
-        value = util.money(floor(c.credits)) .. " " .. L("cr"),
-        action = function()
-            local taken, cash = colonyMod.collect(c, self.player)
-            local n = 0
-            for _, q in pairs(taken) do n = n + q end
-            self:say(L("Collected {qty} {qty:t} and {cash} cr.", { qty = n, cash = util.money(cash) }))
-            self:rebuild()
-        end }
-    for _, amount in ipairs({ 10000, 50000, 200000 }) do
-        items[#items + 1] = {
-            label = L("Invest {amount} cr", { amount = util.money(amount) }),
-            value = self.player.credits >= amount and L("available") or L("too expensive"),
-            disabled = self.player.credits < amount,
-            action = function()
-                local ok = colonyMod.invest(c, self.player, amount)
-                self:say(ok and L("Investment committed.") or L("Not enough credits."), not ok)
-                self:rebuild()
-            end,
-        }
-    end
-    -- deliver supplies straight from the hold
-    for id in pairs(colonyMod.NEEDS) do
-        local held = self.player:cargoCount(id)
-        if held > 0 then
-            items[#items + 1] = {
-                label = L("Unload {qty} {qty:t} of {cargo:gen:lc}",
-                    { qty = held, cargo = i18n.term(commodities.get(id).name) }),
-                value = L("supply"),
-                action = function()
-                    self.player:removeCargo(id, held)
-                    colonyMod.supply(c, id, held)
-                    self:say(L("Supplies delivered."))
-                    self:rebuild()
-                end,
-            }
-        end
-    end
-    self.menu = ui.menu(items, { visible = listRows() })
-end
 
 -- ---------------------------------------------------------------------------
 -- Actions
@@ -416,101 +163,9 @@ function Port:launch()
     end
 end
 
-function Port:trade(sell)
-    local item = self.menu:current()
-    if not item or not item.commodity then return end
-    local id = item.commodity
-    local qty = self.quantity
-    if qty == "max" then
-        qty = sell and self.player:cargoCount(id) or 1e9
-    end
-    local cargo = i18n.term(commodities.get(id).name)
-    if sell then
-        local have = self.player:cargoCount(id)
-        local n, total = self.market:quote(id, min(qty, have), true)
-        n = min(n, have)
-        if n <= 0 then self:say(L("Nothing to sell."), true) return end
-        n, total = self.market:sell(id, n)
-        self.player:removeCargo(id, n)
-        self.player:earn(total)
-        self.player.record.trades = self.player.record.trades + 1
-        self.player.record.profit = self.player.record.profit + total
-        self:say(L("Sold {qty} {qty:t} of {cargo:gen:lc} for {cash} cr.",
-            { qty = n, cargo = cargo, cash = util.money(total) }))
-    else
-        local space = self.player:cargoFree()
-        local price = self.market:buyPrice(id) or 1
-        local affordable = floor(self.player.credits / max(price, 1))
-        local n = min(qty, space, affordable, self.market:available(id))
-        if n <= 0 then
-            self:say(space <= 0 and L("Hold is full.") or L("Cannot afford any."), true)
-            return
-        end
-        local bought, cost = self.market:buy(id, n)
-        self.player:spend(cost)
-        self.player:addCargo(id, bought)
-        self.player.record.trades = self.player.record.trades + 1
-        self:say(L("Bought {qty} {qty:t} of {cargo:gen:lc} for {cash} cr.",
-            { qty = bought, cargo = cargo, cash = util.money(cost) }))
-    end
-    self:buildMarketMenu(self:currentTab() == "blackMarket")
-end
 
-function Port:acceptMission()
-    local item = self.menu:current()
-    if not item or not item.mission then return end
-    local ok, why = missionsMod.accept(item.mission, self.player, self.world.day)
-    if ok then
-        self:say(L("Contract accepted."))
-        self.player:addLog(L("Accepted: {title}", { title = missionsMod.title(item.mission) }),
-            self.world.day, "info")
-        self:buildMissionMenu()
-    else
-        self:say(L("Cannot accept: {reason}", { reason = L(tostring(why)) }), true)
-    end
-end
 
-function Port:toggleModule()
-    local item = self.menu:current()
-    if not item or not item.moduleId then return end
-    local e = equipment.get(item.moduleId)
-    if item.sell then
-        local refund = floor(e.price * 0.55)
-        self.player:uninstall(item.moduleId)
-        self.player:earn(refund)
-        self:say(L("Sold {module:acc:lc} for {cash} cr.",
-            { module = i18n.term(e.name), cash = util.money(refund) }))
-    else
-        if self.player.credits < e.price then self:say(L("Not enough credits."), true) return end
-        local ok, why = self.player:install(item.moduleId)
-        if ok then
-            self.player:spend(e.price)
-            self:say(L("{module} fitted.", { module = i18n.term(e.name) }))
-        else
-            self:say(L("Cannot fit: {reason}", { reason = L(tostring(why)) }), true)
-        end
-    end
-    self:buildOutfitMenu()
-end
 
-function Port:buyShip()
-    local item = self.menu:current()
-    if not item or not item.shipDef then return end
-    local tradeIn = floor(self.player.shipDef.stats.price * 0.62)
-    local cost = item.shipDef.stats.price - tradeIn
-    if self.player.credits < cost then self:say(L("Not enough credits."), true) return end
-    if self.player:cargoUsed() > item.shipDef.stats.cargo then
-        self:say(L("New ship's hold is too small for your cargo."), true)
-        return
-    end
-    self.player:spend(cost)
-    self.player:setShip(item.shipDef, false)
-    self:say(L("Registered to {name}.", { name = item.shipDef.name }))
-    self.player:addLog(L("Bought a {class:acc:lc}.", { class = i18n.term(item.shipDef.roleName) }),
-        self.world.day, "info")
-    self.catalogue = nil
-    self:buildShipyardMenu()
-end
 
 -- ---------------------------------------------------------------------------
 -- Input
@@ -604,7 +259,7 @@ function Port:draw()
 
     -- body
     local tab = self:currentTab()
-    local listX, listY = 70, LIST_TOP
+    local listX, listY = 70, layout.LIST_TOP
     -- the side panel starts at w-380 and the menu's own furniture adds 13px on
     -- the right, so leave room for both
     local listW = w - 380 - listX - ui.MENU_BLEED_RIGHT - 24
@@ -617,12 +272,12 @@ function Port:draw()
     end
 
     if self.menu then
-        self.menu:setVisible(listRows())
-        self.menu:draw(listX, listY, listW, LIST_LINE, "small")
+        self.menu:setVisible(layout.rows())
+        self.menu:draw(listX, listY, listW, layout.LIST_LINE, "small")
     end
 
     -- side panel
-    self:drawSidePanel(w - 380, LIST_TOP, 320, h - LIST_TOP - FOOTER)
+    self:drawSidePanel(w - 380, layout.LIST_TOP, 320, h - layout.LIST_TOP - layout.FOOTER)
 
     -- footer: the status line sits between the list and the rule, so the list
     -- height above already reserves room for it
