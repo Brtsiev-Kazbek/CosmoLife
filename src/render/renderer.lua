@@ -25,11 +25,17 @@ local shaders = require("src.render.shaders")
 
 local Renderer = class("Renderer")
 
-local LAYER_FAR, LAYER_NEAR, LAYER_FX = 1, 2, 3
+-- The FX layer is additive and depth-tested against the *near* pass, whose far
+-- plane is 30 km. Anything additive that belongs to a celestial body -- a
+-- planet's air, its cloud deck -- is hundreds of thousands of kilometres away
+-- and was simply clipped out of existence. LAYER_FX_FAR is the same idea run
+-- against the far pass instead.
+local LAYER_FAR, LAYER_NEAR, LAYER_FX, LAYER_FX_FAR = 1, 2, 3, 4
 
 Renderer.LAYER_FAR = LAYER_FAR
 Renderer.LAYER_NEAR = LAYER_NEAR
 Renderer.LAYER_FX = LAYER_FX
+Renderer.LAYER_FX_FAR = LAYER_FX_FAR
 
 local NEAR_NEAR, NEAR_FAR = 0.2, 30000
 local FAR_FAR = 2e11
@@ -51,8 +57,8 @@ local IDENTITY_BASIS = {
 
 function Renderer:init()
     self.width, self.height = 1, 1
-    self.queues = { {}, {}, {} }
-    self.counts = { 0, 0, 0 }
+    self.queues = { {}, {}, {}, {} }
+    self.counts = { 0, 0, 0, 0 }
 
     self.env = {
         sunDir = vec3(0, -1, 0),          -- direction light travels
@@ -174,7 +180,7 @@ end
 function Renderer:beginFrame(camera)
     self.camera = camera
     camera.aspect = self.width / self.height
-    for i = 1, 3 do
+    for i = 1, 4 do
         local q = self.queues[i]
         for j = 1, self.counts[i] do q[j] = nil end
         self.counts[i] = 0
@@ -202,10 +208,13 @@ function Renderer:draw(model, pos, basis, opts)
     if not layer then
         layer = (dist - radius > LAYER_SPLIT) and LAYER_FAR or LAYER_NEAR
     end
-    if opts.additive then layer = LAYER_FX end
+    if opts.additive then
+        layer = (opts.layer == LAYER_FAR or dist - radius > LAYER_SPLIT)
+            and LAYER_FX_FAR or LAYER_FX
+    end
 
     -- frustum reject: a cheap cone test around the view direction
-    if layer ~= LAYER_FX and dist > radius then
+    if layer ~= LAYER_FX and layer ~= LAYER_FX_FAR and dist > radius then
         local cosA = (dx * cam.fwd.x + dy * cam.fwd.y + dz * cam.fwd.z) / dist
         local margin = radius / dist
         -- half diagonal of the frustum plus the object's angular radius
@@ -225,6 +234,8 @@ function Renderer:draw(model, pos, basis, opts)
         emissive = opts.emissive or 0,
         alpha = opts.alpha or 1,
         additive = opts.additive,
+        -- 1 = atmosphere, 2 = cloud deck; see the shell branches in flat3d
+        shell = opts.shell,
     }
 end
 
@@ -288,7 +299,7 @@ function Renderer:_drawQueue(layer, near, far)
     --
     -- The FX layer is additive and therefore order independent, so it is left
     -- alone rather than paying for a sort it cannot use.
-    if layer ~= LAYER_FX then
+    if layer ~= LAYER_FX and layer ~= LAYER_FX_FAR then
         -- `queue` is a reused array with stale entries past `count`; sort only
         -- the live prefix
         if count > 1 then
@@ -317,6 +328,7 @@ function Renderer:_drawQueue(layer, near, far)
         self:_send(s, "u_mvp", "column", mvp)
         self:_send(s, "u_model", "column", model)
         self:_send(s, "u_emissive", it.emissive)
+        self:_send(s, "u_shell", it.shell or 0)
         local tint = it.tint or WHITE
         self:_send(s, "u_tint", { tint[1], tint[2], tint[3], (tint[4] or 1) * it.alpha })
         love.graphics.draw(it.model.mesh)
@@ -387,6 +399,17 @@ function Renderer:endFrame(overlay2d)
 
     love.graphics.setDepthMode("lequal", true)
     self:_drawQueue(LAYER_FAR, self.farNear, FAR_FAR)
+
+    -- additive things that belong out there with the planets: tested against
+    -- the far pass, never written, and before the depth buffer is reused
+    if self.counts[LAYER_FX_FAR] > 0 then
+        love.graphics.setDepthMode("lequal", false)
+        love.graphics.setBlendMode("add")
+        self:_drawQueue(LAYER_FX_FAR, self.farNear, FAR_FAR)
+        love.graphics.setBlendMode("alpha")
+        love.graphics.setDepthMode("lequal", true)
+    end
+
     love.graphics.clear(false, false, true)
     self:_drawQueue(LAYER_NEAR, NEAR_NEAR, NEAR_FAR)
 

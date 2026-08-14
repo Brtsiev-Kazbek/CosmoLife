@@ -49,17 +49,67 @@ uniform vec3  u_rimColor;
 uniform float u_keyIntensity;
 uniform float u_saturation;
 uniform float u_exposure;
+uniform float u_shell;       // 0 = ordinary geometry, 1 = air, 2 = cloud deck
 
 vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc)
 {
     vec3 base = color.rgb * u_tint.rgb;
     vec3 n = normalize(v_normal);
 
+    // Shells -- the atmosphere and the cloud deck -- are spheres drawn around
+    // a planet, and only the hemisphere facing us may be drawn. Culling is off
+    // globally (procedural hulls are not reliably wound), and these two are
+    // additive, so without this the far side of the sphere would be added on
+    // top of the planet it is supposed to be behind.
+    if (u_shell > 0.5 && dot(n, v_viewPos) > 0.0) discard;
+
     // Two sided lighting: procedural hulls are not always perfectly wound and
     // we render with culling disabled, so flip the normal towards the camera.
     if (dot(n, v_viewPos) > 0.0) n = -n;
 
     vec3 toEye = normalize(-v_viewPos);
+
+    // ---- atmosphere ------------------------------------------------------
+    //
+    // A planet's air used to be a sphere of flat translucent colour, which
+    // reads as a bubble rather than as atmosphere. What makes it look like air
+    // is that you see through more of it at the edge of the disc than at the
+    // middle, and that it is lit from the side: bright blue where the sun is
+    // overhead, deep and thin on the night side, and a warm band at the
+    // terminator where you are looking through the whole depth of it towards
+    // the sun.
+    if (u_shell > 0.5 && u_shell < 1.5) {
+        float ndv = max(dot(n, toEye), 0.0);
+        // Path length through the air. A high exponent is what keeps the glow
+        // hugging the silhouette: a gentle falloff fills the whole disc with
+        // haze instead, and the planet underneath disappears behind it.
+        float limb = pow(1.0 - ndv, 3.4);
+        float sun = dot(n, -u_lightDir);
+        float day = clamp(sun * 2.2 + 0.06, 0.0, 1.0);
+        // Forward scattering: the sunset band. Narrow, and confined to the
+        // limb -- it is the band along the terminator, not a wash over
+        // everything facing away from the star.
+        float warm = pow(clamp(1.0 - abs(sun) * 5.0, 0.0, 1.0), 2.0) * limb;
+        vec3 col = mix(base, base * vec3(2.4, 1.05, 0.55), warm * 0.9);
+        float a = limb * day * u_tint.a;
+        return vec4(col * (0.35 + day * 1.1), a);
+    }
+
+    // ---- cloud deck ------------------------------------------------------
+    //
+    // Lit like ground, faded out towards the night side (additive cannot
+    // darken, so cloud simply stops being visible there) and thinned at the
+    // limb, where a flat deck would otherwise draw a hard ring around the
+    // planet.
+    if (u_shell > 1.5) {
+        float sun = dot(n, -u_lightDir);
+        float day = clamp(sun * 1.8 - 0.05, 0.0, 1.0);
+        float ndv = max(dot(n, toEye), 0.0);
+        // fade out towards the silhouette as well: a flat deck seen edge-on
+        // draws a hard bright ring around the planet otherwise
+        float a = u_tint.a * day * smoothstep(0.0, 0.55, ndv);
+        return vec4(base * (0.35 + day * 0.85), a);
+    }
 
     // key light: the star.  Quantised into bands for the retro look.
     float ndl = max(dot(n, -u_lightDir), 0.0);

@@ -208,6 +208,63 @@ step(46, "autopilot arrives without overshooting", function(game)
     selftest.autopilotClosest = closest
 end)
 
+-- A planet with air, framed from far enough away to see its limb.
+--
+-- The atmosphere used to be a sphere of flat translucent colour, which reads
+-- as a bubble; the scattering that makes it read as air -- brighter where the
+-- view grazes the limb, dark on the night side, warm at the terminator -- is
+-- view dependent and so lives in the shader. That means the only way to check
+-- it is to render it and look, which is what the screenshot is for.
+step(52, "a planet with air is framed for the camera", function(game)
+    local f = game.manager:current()
+    local systemGen = require("src.procgen.system")
+    local bodiesMod = require("src.render.bodies")
+
+    local best
+    for _, b in ipairs(systemGen.landables(game.world.system)) do
+        if not b.giant and (b.atmosphere or 0) > 0.2 then
+            if not best or (b.atmosphere or 0) > (best.atmosphere or 0) then best = b end
+        end
+    end
+    if not best then return end
+    selftest.airWorld = best
+
+    assert(bodiesMod.atmosphere(best), "a world with air produced no atmosphere shell")
+    io.write(string.format("    DIAG-AIR shell uniform=%s  clouds=%s  atm=%.2f  terrain=%s\n",
+        tostring(game.renderer.shader and game.renderer.shader:hasUniform("u_shell")),
+        tostring(bodiesMod.clouds(best) ~= nil), best.atmosphere or 0, tostring(best.terrain)))
+    io.flush()
+
+    -- park across the terminator: sun to one side, so both the lit limb and
+    -- the night side are in frame
+    local sun = game.world.system.star.pos
+    local ax, ay, az = best.pos.x - sun.x, best.pos.y - sun.y, best.pos.z - sun.z
+    local l = math.sqrt(ax * ax + ay * ay + az * az)
+    ax, ay, az = ax / l, ay / l, az / l
+    -- a perpendicular, so the camera looks along the day/night line
+    local px, py, pz = -az, 0, ax
+    local pl = math.sqrt(px * px + py * py + pz * pz)
+    px, py, pz = px / pl, py / pl, pz / pl
+
+    local d = best.radius * 3.6
+    f.ship.pos:set(best.pos.x + px * d + ax * d * 0.35,
+                   best.pos.y + py * d + best.radius * 0.5,
+                   best.pos.z + pz * d + az * d * 0.35)
+    f.ship.vel:set(0, 0, 0)
+    f.throttle = 0
+    if f.autopilot then f:toggleAutopilot() end
+    f.ship.fwd:set(best.pos.x - f.ship.pos.x, best.pos.y - f.ship.pos.y, best.pos.z - f.ship.pos.z)
+    f.ship.fwd:normalize()
+    f.ship.up:set(0, 1, 0)
+    require("src.lib.mat4").orthonormalize(f.ship.right, f.ship.up, f.ship.fwd)
+    game.camera.mode = "cockpit"
+    game:update(1 / 60)
+end)
+
+step(56, "back to the approach", function(game)
+    game.camera.mode = "chase"
+end)
+
 step(50, "autopilot handles a distant, large target", function(game)
     -- A planet is millions of metres away with a standoff tens of kilometres
     -- wide -- a different regime from a station, and the one where the cruise
@@ -958,7 +1015,8 @@ end)
 -- actually produces the picture you intended.
 local SHOTS = {
     [30] = "01-space",
-    [54] = "01b-approach",
+    [54] = "01c-atmosphere",
+    [58] = "01b-approach",
     [95] = "02-descent",
     [125] = "03-landed",
     [158] = "04-onfoot",

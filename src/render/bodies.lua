@@ -11,6 +11,7 @@ local MeshBuilder = require("src.render.mesh")
 local geometry = require("src.render.geometry")
 local palette = require("src.render.palette")
 local terrain = require("src.procgen.terrain")
+local noise = require("src.lib.noise")
 
 local bodies = {}
 
@@ -82,22 +83,100 @@ function bodies.planet(body, detail)
     return remember(key, b:build())
 end
 
---- Translucent atmosphere shell, drawn additively just outside the surface.
+--- The colour a body's air scatters.
+function bodies.airTint(body)
+    local kind = body.terrain or body.type
+    if kind == "toxic" then return palette.colors.moss end
+    if kind == "ice" then return palette.colors.rockIce end
+    if kind == "volcanic" then return palette.colors.orange end
+    if kind == "desert" then return palette.colors.ochre end
+    if body.giant then return palette.colors.hullLight end
+    return palette.colors.blue
+end
+
+--- Atmosphere shell, drawn additively just outside the surface.
+--
+-- The mesh is only a sphere: the scattering -- limb brightening, the day/night
+-- falloff and the warm terminator band -- is in the `u_shell` branch of
+-- flat3d, because all three depend on where the camera is and a baked mesh
+-- cannot know that. It is finer than it used to be because the limb is now a
+-- gradient across the silhouette rather than a flat wash, and a coarse sphere
+-- showed that gradient as facets.
 function bodies.atmosphere(body)
     if not body.atmosphere or body.atmosphere <= 0.03 then return nil end
     local key = "a" .. tostring(body.seed)
     if cache[key] then return cache[key] end
-    local rng = Rng.new(body.seed, "atmos")
-    local tint
-    if body.type == "toxic" then tint = palette.colors.moss
-    elseif body.type == "ice" then tint = palette.colors.rockIce
-    elseif body.type == "volcanic" then tint = palette.colors.orange
-    elseif body.giant then tint = palette.colors.hullLight
-    else tint = palette.colors.blue end
-    local a = util.clamp(0.10 + body.atmosphere * 0.10, 0.06, 0.30)
+    local tint = bodies.airTint(body)
+    local a = util.clamp(0.30 + body.atmosphere * 0.45, 0.24, 0.78)
     local col = { tint[1], tint[2], tint[3], a }
     local b = MeshBuilder.new()
-    geometry.sphere(b, 1.0, 28, 16, col)
+    geometry.sphere(b, 1.0, 48, 26, col)
+    return remember(key, b:build())
+end
+
+--- A cloud deck: only the cloudy cells of a lat/lon grid, as a shell.
+--
+-- Worlds with air had none, so an ocean world and a bare rock had the same
+-- silhouette from orbit. The cover comes from the same kind of domain-warped
+-- fbm the terrain uses, so the bands stretch out east-west the way weather
+-- does on a spinning planet, and only the cells above the cover threshold
+-- become geometry -- a clear sky costs nothing to draw.
+function bodies.clouds(body)
+    if body.giant then return nil end
+    local air = body.atmosphere or 0
+    if air <= 0.25 then return nil end
+    local key = "cl" .. tostring(body.seed)
+    if cache[key] ~= nil then return cache[key] or nil end
+
+    local seed = (body.seed or 1) + 5501
+    local cols, rows = 96, 48
+    -- how much of the sky is covered, from the thickness of the air
+    local threshold = util.lerp(0.62, 0.30, util.clamp((air - 0.25) / 1.2, 0, 1))
+    local b = MeshBuilder.new()
+    local any = false
+
+    local function cover(lat, lon)
+        local cl = cos(lat)
+        local dx, dy, dz = cl * cos(lon), sin(lat), cl * sin(lon)
+        -- stretched east-west: banded weather, not round blobs
+        local n = noise.fbm3(seed, dx * 2.2, dy * 5.5, dz * 2.2, 4, 2.1, 0.55) * 0.5 + 0.5
+        local warp = noise.perlin3(seed + 31, dx * 1.1, dy * 2.0, dz * 1.1) * 0.35
+        n = n + warp
+        -- thinner over the poles and along the equator, as on a real world
+        n = n - math.abs(math.abs(lat) - 0.62) * 0.22
+        return n
+    end
+
+    local white = palette.colors.white
+    for j = 0, rows - 1 do
+        local lat0 = (j / rows - 0.5) * pi
+        local lat1 = ((j + 1) / rows - 0.5) * pi
+        for i = 0, cols - 1 do
+            local lon0 = i / cols * TAU
+            local lon1 = (i + 1) / cols * TAU
+            local c = cover((lat0 + lat1) * 0.5, (lon0 + lon1) * 0.5)
+            if c > threshold then
+                -- denser cloud is brighter and more opaque
+                local t = util.clamp((c - threshold) / 0.22, 0, 1)
+                local col = { white[1], white[2], white[3], 0.10 + t * 0.30 }
+                local function p(lat, lon)
+                    local cl = cos(lat)
+                    return cl * cos(lon), sin(lat), cl * sin(lon)
+                end
+                local ax, ay, az = p(lat0, lon0)
+                local bx, by, bz = p(lat0, lon1)
+                local cx, cy, cz = p(lat1, lon1)
+                local dx2, dy2, dz2 = p(lat1, lon0)
+                b:tri(ax, ay, az, bx, by, bz, cx, cy, cz, col)
+                b:tri(ax, ay, az, cx, cy, cz, dx2, dy2, dz2, col)
+                any = true
+            end
+        end
+    end
+    if not any then
+        cache[key] = false
+        return nil
+    end
     return remember(key, b:build())
 end
 

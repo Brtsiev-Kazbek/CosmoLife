@@ -1638,29 +1638,59 @@ function Flight:submitBodies(renderer)
             local basis = self:bodyBasis(b)
             renderer:draw(bodies.planet(b, detail), b.pos, basis,
                 { scale = b.radius, layer = renderer.LAYER_FAR })
-            local atmo = bodies.atmosphere(b)
-            -- the shell is only meaningful from outside; inside it the sky
-            -- shader is doing the work
-            if atmo and dist > b.radius + S.atmosphereHeight then
-                renderer:draw(atmo, b.pos, basis, {
-                    scale = b.radius * (1 + S.atmosphereHeight / b.radius),
-                    alpha = 0.55, additive = true,
-                })
-            end
+            self:submitAir(renderer, b, basis, dist)
             local rings = bodies.rings(b)
             if rings then
                 renderer:draw(rings, b.pos, basis, { scale = b.radius, layer = renderer.LAYER_FAR })
             end
             self:submitCityLights(renderer, b, basis, dist)
             for _, m in ipairs(b.moons) do
-                renderer:draw(bodies.planet(m, math.max(12, math.floor(settings.q().bodyDetail * 0.4))), m.pos, self:bodyBasis(m),
+                local mbasis = self:bodyBasis(m)
+                renderer:draw(bodies.planet(m, math.max(12, math.floor(settings.q().bodyDetail * 0.4))), m.pos, mbasis,
                     { scale = m.radius, layer = renderer.LAYER_FAR })
+                -- a moon with air gets air: the shell used to be a planets-only
+                -- feature, so the one body a player is most likely to be
+                -- looking at up close had none
+                self:submitAir(renderer, m, mbasis, vec3.distance(m.pos, camPos))
             end
         end
     end
 
     -- give the far layer a near plane that clears whatever we are standing on
     renderer:setFarClearance(self.altitude)
+end
+
+--- A world's cloud deck and its atmosphere, seen from outside.
+--
+-- Both are additive shells around the body, and both are drawn in the far
+-- additive pass -- the ordinary FX layer is depth-tested against the near
+-- pass, whose far plane is 30 km, so a planet's air three hundred thousand
+-- kilometres away was clipped out of existence and never appeared at all.
+function Flight:submitAir(renderer, body, basis, dist)
+    -- Cloud deck first, so the air scatters over it the way it does.
+    local clouds = bodies.clouds(body)
+    if clouds and dist > body.radius * 1.02 then
+        -- turning faster than the ground below: a deck locked to the surface
+        -- is a painted texture, not weather
+        renderer:draw(clouds, body.pos, self:bodyBasis(body, 1.35), {
+            scale = body.radius * 1.006,
+            additive = true, layer = renderer.LAYER_FAR, shell = 2,
+        })
+    end
+
+    local atmo = bodies.atmosphere(body)
+    -- the shell is only meaningful from outside; inside it the sky shader is
+    -- doing the work
+    if atmo and dist > body.radius + S.atmosphereHeight then
+        -- The real top of the air is 90 km, which on a planet this size is
+        -- under three percent of the radius: physically right, and on screen a
+        -- hairline the scattering has nowhere to live. The shell gets a floor
+        -- so the halo is something you can actually see.
+        renderer:draw(atmo, body.pos, basis, {
+            scale = math.max(body.radius + S.atmosphereHeight, body.radius * 1.045),
+            additive = true, layer = renderer.LAYER_FAR, shell = 1,
+        })
+    end
 end
 
 --- Lit settlements on a world's night side, seen from orbit.
@@ -1708,10 +1738,13 @@ end
 
 --- Basis for a body, applying its spin about a polar axis tilted by
 --- `axialTilt`.  The sphere mesh is generated pole-up, so `up` is that axis.
-function Flight:bodyBasis(body)
-    body._basis = body._basis or { right = vec3(), up = vec3(), fwd = vec3() }
-    local b = body._basis
-    local spin = body.spin or 0
+-- `spinScale` lets a shell turn at a different rate to the ground under it:
+-- a cloud deck that rotated exactly with the planet would be painted on.
+function Flight:bodyBasis(body, spinScale)
+    local key = spinScale and "_basisAlt" or "_basis"
+    body[key] = body[key] or { right = vec3(), up = vec3(), fwd = vec3() }
+    local b = body[key]
+    local spin = (body.spin or 0) * (spinScale or 1)
     local tilt = body.axialTilt or 0
     local ct, st = math.cos(tilt), math.sin(tilt)
     local cs, ss = math.cos(spin), math.sin(spin)
