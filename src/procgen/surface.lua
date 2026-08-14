@@ -30,6 +30,24 @@ local Surface = class("Surface")
 
 local floor, sqrt, max, min, abs = math.floor, math.sqrt, math.max, math.min, math.abs
 
+-- Fold shading. How much a hollow darkens, how much a ridge lifts, and the
+-- curvature at which either reaches full strength. The lift is smaller than
+-- the shade: a crease reads as dark, an edge only as caught light.
+local AO_DEPTH = 0.30
+local AO_LIFT = 0.10
+local AO_SCALE = 0.55
+
+-- And the quad sizes it applies at, in metres.
+--
+-- The point of this is the shape of a fold you are standing in. A chunk built
+-- for viewing from 40 km has quads several hundred metres across, and
+-- modulating those per quad does not read as folds at all -- it reads as a
+-- chequerboard of light and dark rectangles laid over the planet, which is
+-- exactly what the first version put on the descent screenshot. So the effect
+-- fades out as the LOD coarsens.
+local AO_FADE_FULL = 150
+local AO_FADE_END = 400
+
 local CHUNK = config.render.terrainChunkSize
 local settings = require("src.settings")
 local RINGS = config.render.terrainRings
@@ -496,19 +514,64 @@ function Surface:_buildChunk(cx, cz, ringDistance, target)
             hs[j][i] = self:groundHeight(ox + i * step, oz + j * step)
         end
     end
+    -- Centre height of every quad, kept so the loop below can ask what a quad's
+    -- neighbours are doing without sampling the height field again.
+    local hcs = {}
+    for j = 0, res - 1 do
+        hcs[j] = {}
+        local r0, r1 = hs[j], hs[j + 1]
+        for i = 0, res - 1 do
+            hcs[j][i] = (r0[i] + r0[i + 1] + r1[i] + r1[i + 1]) * 0.25
+        end
+    end
+
+    -- Shading in the folds.
+    --
+    -- A hollow is darker than a slope of the same angle, because less of the
+    -- sky reaches into it -- that is most of what ambient occlusion buys, and
+    -- the height grid already says where the hollows are. Comparing a quad's
+    -- centre with its four neighbours gives the curvature: negative in a
+    -- gully, positive on a ridge. No second pass and no extra height samples.
+    --
+    -- At the chunk edge the neighbour is in the next chunk and not in this
+    -- grid, so the index is clamped. Adjacent quads differ anyway, so a quad
+    -- borrowing its neighbour's curvature is invisible; sampling across the
+    -- boundary would cost a ring of height evaluations, which is 17% of the
+    -- cost of building the chunk at all.
+    local aoStrength = util.clamp((AO_FADE_END - step) / (AO_FADE_END - AO_FADE_FULL), 0, 1)
+    local last = res - 1
+    local function curvature(i, j)
+        local h = hcs[j][i]
+        local w = hcs[j][i > 0 and i - 1 or 0]
+        local e = hcs[j][i < last and i + 1 or last]
+        local n = hcs[j > 0 and j - 1 or 0][i]
+        local s = hcs[j < last and j + 1 or last][i]
+        return (4 * h - w - e - n - s) / step
+    end
+
     for j = 0, res - 1 do
         for i = 0, res - 1 do
             local x0, z0 = i * step, j * step
             local x1, z1 = x0 + step, z0 + step
             local h00, h10 = hs[j][i], hs[j][i + 1]
             local h01, h11 = hs[j + 1][i], hs[j + 1][i + 1]
-            local hc = (h00 + h10 + h01 + h11) * 0.25
+            local hc = hcs[j][i]
             -- the quad's own corners already describe its slope, so the
             -- colour lookup does not have to re-sample the noise field
             local dhx = ((h10 + h11) - (h00 + h01)) / (2 * step)
             local dhz = ((h01 + h11) - (h00 + h10)) / (2 * step)
             local ny = 1 / sqrt(dhx * dhx + 1 + dhz * dhz)
             local col = self.field:colorAt(ox + x0 + step * 0.5, oz + z0 + step * 0.5, hc, ny)
+            local k = aoStrength > 0 and curvature(i, j) or 0
+            local shade = 1
+            if k < 0 then
+                shade = 1 - AO_DEPTH * aoStrength * min(-k * AO_SCALE, 1)
+            elseif k > 0 then
+                shade = 1 + AO_LIFT * aoStrength * min(k * AO_SCALE, 1)
+            end
+            if shade ~= 1 then
+                col = { col[1] * shade, col[2] * shade, col[3] * shade, col[4] }
+            end
             if abs(h00 - h11) <= abs(h10 - h01) then
                 b:tri(x0, h00, z0, x1, h10, z0, x1, h11, z1, col)
                 b:tri(x0, h00, z0, x1, h11, z1, x0, h01, z1, col)
