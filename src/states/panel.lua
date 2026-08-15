@@ -25,6 +25,12 @@ local C = palette.colors
 local L = i18n.format
 
 local TABS = {
+    -- The first page answers "what is my situation", which is the question a
+    -- player has when they open this. It used to open onto the galaxy map,
+    -- which answers "where could I go" before anybody asked.
+    { id = "summary",  label = "Overview", action = nil,
+      make = function() return require("src.states.summary").new() end,
+      args = function(p) return p.flight end },
     { id = "map",      label = "Galaxy map", action = "map",
       make = function() return require("src.states.galaxymap").new() end,
       args = function(p) return p.flight end },
@@ -45,7 +51,7 @@ local TABS = {
 Panel.TABS = TABS
 
 -- The tab the player was last on, so re-opening the panel goes where they
--- left it rather than always to the map.
+-- left it rather than always back to the first page.
 local lastTab = 1
 
 function Panel:init()
@@ -98,7 +104,7 @@ function Panel:keypressed(key)
         return
     end
     for i, t in ipairs(TABS) do
-        if config.is(t.action, key) then self:select(i) return end
+        if t.action and config.is(t.action, key) then self:select(i) return end
     end
     if self.child and self.child.keypressed then self.child:keypressed(key) end
 end

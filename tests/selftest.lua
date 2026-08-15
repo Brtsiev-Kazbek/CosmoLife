@@ -1165,6 +1165,10 @@ step(344, "the commander panel hosts every screen", function(game)
     for _, t in ipairs(Panel.TABS) do
         assert(seen[t.id], "the panel never showed the " .. t.id .. " tab")
     end
+    -- back to the overview for this frame's screenshot, then out: leaving it
+    -- open would cover the chase shot taken on the next one
+    panel:select(1)
+    panel:draw()
     panel:keypressed("escape")
 end)
 
@@ -1620,6 +1624,7 @@ local SHOTS = {
     [178] = "05-interior",
     [205] = "06-port",
     [268] = "07-chart",
+    [344] = "07b-panel",
     [345] = "08-chase",
     [358] = "09-title",
     [375] = "10-biome-1",
