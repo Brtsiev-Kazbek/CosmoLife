@@ -425,6 +425,13 @@ step(71, "profile: atmospheric entry", function(game)
     local lodChanges, lastLod = 0, f.surface and f.surface.lodLevel
     local total, n, updateMs, drawMs = 0, 0, 0, 0
     local worst, worstAlt = 0, 0
+    -- The sphere's tessellation must not change during a descent. It used to
+    -- switch at twelve radii, where the planet fills nine degrees of sky, and
+    -- with flat shading the whole body visibly re-formed; the swap now happens
+    -- far out where it is under a pixel wide, so from here to the ground it is
+    -- one mesh from start to finish.
+    local scene = require("src.flight.scene")
+    local detailChanges, lastDetail = 0, nil
     for i = 1, 150 do
         -- walk down from 40 km to about 2 km
         local alt = 40000 * (1 - i / 165)
@@ -444,7 +451,15 @@ step(71, "profile: atmospheric entry", function(game)
             lodChanges = lodChanges + 1
             lastLod = f.surface.lodLevel
         end
+        local det = scene.bodyDetail(f, body,
+            math.sqrt((body.pos.x - x) ^ 2 + (body.pos.y - y) ^ 2 + (body.pos.z - z) ^ 2))
+        if lastDetail and det ~= lastDetail then detailChanges = detailChanges + 1 end
+        lastDetail = det
     end
+    io.write(string.format("    DIAG-SPHERE %d segments through the whole descent, %d changes\n",
+        lastDetail or -1, detailChanges))
+    assert(detailChanges == 0, string.format(
+        "the planet re-tessellated %d times between 40 km and 2 km", detailChanges))
     io.write(string.format("    DIAG-DESCENT mean=%.0f ms  worst=%.0f ms at %.0f m  lodChanges=%d\n",
         total / n, worst, worstAlt, lodChanges))
     Surface.update, Surface._buildChunk = realUpdate, realBuild

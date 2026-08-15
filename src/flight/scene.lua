@@ -27,6 +27,39 @@ local scene = {}
 local sqrt, min, max, floor = math.sqrt, math.min, math.max, math.floor
 local C = palette.colors
 
+-- Sphere tessellation, chosen by how big the body looks rather than by how far
+-- away it is.
+--
+-- The rule used to be `dist < radius * 12`, which switches from 24 segments to
+-- 40 in a single frame at a point where the planet spans about nine degrees of
+-- sky. With flat shading every facet boundary is visible, so the whole planet
+-- visibly re-formed as you approached -- and it was the same switch on the way
+-- out, so a body drifting near the threshold flickered between the two.
+--
+-- Angular radius decides instead, and the two thresholds differ: full detail
+-- once the body is about two and a half degrees across, coarse again only well
+-- below that, and the gap between them is the hysteresis that stops the
+-- flicker. At that size the difference between the meshes is under a pixel on
+-- the silhouette, which is the point -- the swap happens where it cannot be
+-- seen instead of where it is most obvious.
+local DETAIL_IN = 0.022        -- angular radius in radians, ~2.5 degrees across
+local DETAIL_OUT = 0.013
+
+function scene.bodyDetail(f, body, dist)
+    local q = settings.q().bodyDetail
+    local coarse = max(12, floor(q * 0.45))
+    local ang = body.radius / max(dist, 1)
+
+    local state = f._bodyDetail
+    if not state then state = {} f._bodyDetail = state end
+    local hi = state[body]
+    if hi == nil then hi = ang > DETAIL_IN end
+    if ang > DETAIL_IN then hi = true
+    elseif ang < DETAIL_OUT then hi = false end
+    state[body] = hi
+    return hi and q or coarse
+end
+
 function scene.submitBodies(f, renderer)
     local sys = f.world.system
     local camPos = f.game.camera.pos
@@ -47,9 +80,7 @@ function scene.submitBodies(f, renderer)
     for _, b in ipairs(sys.bodies) do
         if b.kind == "planet" then
             local dist = vec3.distance(b.pos, camPos)
-            -- more segments when it fills the sky
-            local q = settings.q().bodyDetail
-            local detail = (dist < b.radius * 12) and q or math.max(16, math.floor(q * 0.6))
+            local detail = scene.bodyDetail(f, b, dist)
             local basis = scene.bodyBasis(f, b)
             renderer:draw(bodies.planet(b, detail), b.pos, basis,
                 { scale = b.radius, layer = renderer.LAYER_FAR })
@@ -61,7 +92,11 @@ function scene.submitBodies(f, renderer)
             scene.submitCityLights(f, renderer, b, basis, dist)
             for _, m in ipairs(b.moons) do
                 local mbasis = scene.bodyBasis(f, m)
-                renderer:draw(bodies.planet(m, math.max(12, math.floor(settings.q().bodyDetail * 0.4))), m.pos, mbasis,
+                -- a moon is chosen the same way, and used not to be: it was
+                -- pinned at four tenths of the preset however close it got,
+                -- which is why a moon you were about to land on looked faceted
+                local mdist = vec3.distance(m.pos, camPos)
+                renderer:draw(bodies.planet(m, scene.bodyDetail(f, m, mdist)), m.pos, mbasis,
                     { scale = m.radius, layer = renderer.LAYER_FAR })
                 -- a moon with air gets air: the shell used to be a planets-only
                 -- feature, so the one body a player is most likely to be
