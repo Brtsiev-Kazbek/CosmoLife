@@ -1048,6 +1048,7 @@ function Flight:draw(background)
         -- for the lead ring: the same numbers the bolt itself will use
         weaponSpeed = self.player:weapon().weapon.speed or config.combat.laserSpeed,
         weaponRange = config.combat.laserRange,
+        corridor = self.corridor,
         autopilot = self.autopilot ~= nil,
         landed = self.landedOn ~= nil,
         gearDown = self.gearDown,

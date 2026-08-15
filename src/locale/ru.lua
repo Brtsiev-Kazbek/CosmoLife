@@ -484,6 +484,7 @@ local strings = {
     ["CAMERA"] = "КАМЕРА",
     ["GRAPHICS"] = "ГРАФИКА",
     ["SOUND"] = "ЗВУК",
+    ["TOO FAST"] = "СЛИШКОМ БЫСТРО",
     ["Master volume"] = "Общая громкость",
     ["Effects"] = "Эффекты",
     ["Engine and weather"] = "Двигатель и погода",

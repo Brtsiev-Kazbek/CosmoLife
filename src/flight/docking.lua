@@ -81,6 +81,8 @@ function docking.updatePrompt(f)
         end
     end
 
+    f.corridor = docking.corridor(f)
+
     local action = context.resolve(s)
     if not action then f.dockPrompt = nil return end
     -- the old field names are what the HUD, the hints and the self-test read
@@ -93,6 +95,45 @@ function docking.updatePrompt(f)
         canister = action.kind == "scoop" and action.target or nil,
         surface = action.kind == "disembark" or nil,
     }
+end
+
+-- How far out the docking corridor is drawn, in metres. Far enough to line the
+-- ship up on the axis before arriving, which is the whole point of showing it;
+-- past this a station is a box in the distance and a frame around its mouth is
+-- clutter.
+local CORRIDOR_RANGE = 14000
+
+--- The mouth the player is heading for, if any, described for the HUD.
+--
+-- A station's dock is a specific point on one face, and the game used to
+-- convey that with the line "slow to under 120 m/s to dock" -- which says
+-- nothing about *where*. This gives the HUD what it needs to draw the opening
+-- and the axis in the world, so lining up is something you see rather than
+-- something you read.
+function docking.corridor(f)
+    if f.warpState == "cruise" then return nil end
+    local t = f.target
+    local st = t and t.station
+    if not st or st.derelict then return nil end
+
+    local ship = f.ship
+    local mesh = f:stationMesh(st)
+    local mx, my, mz, nx, ny, nz = stationGen.mouthWorld(st, mesh)
+    local dx, dy, dz = mx - ship.pos.x, my - ship.pos.y, mz - ship.pos.z
+    local dist = sqrt(dx * dx + dy * dy + dz * dz)
+    if dist > CORRIDOR_RANGE then return nil end
+
+    local c = f._corridor or {}
+    f._corridor = c
+    c.x, c.y, c.z = mx, my, mz
+    c.nx, c.ny, c.nz = nx, ny, nz
+    -- the radius traffic control actually measures against
+    c.radius = st.size * 0.55
+    c.distance = dist
+    c.speed = f:relativeSpeed(st.vel)
+    c.limit = DOCK_SPEED_LIMIT
+    c.tooFast = c.speed > DOCK_SPEED_LIMIT
+    return c
 end
 
 --- Runs whatever the context key is offering.

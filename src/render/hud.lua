@@ -373,6 +373,73 @@ local function drawTargetIndicator(ctx, w, h)
     love.graphics.setColor(1, 1, 1, 1)
 end
 
+--- The docking corridor, drawn where it actually is.
+--
+-- The game used to convey a dock with the line "slow to under 120 m/s to
+-- dock", which says nothing about *where* -- and a station's mouth is one
+-- specific opening on one face, quite possibly round the back from wherever
+-- you approached. This draws the opening and the axis running out of it, so
+-- lining up is something the player sees rather than reads, and colours the
+-- whole thing by whether the closing speed would be let in.
+local function drawCorridor(ctx, c, w, h)
+    local camera = ctx.camera
+    -- two axes across the mouth: any vector not parallel to the normal will do
+    local ax, ay, az = 0, 1, 0
+    if math.abs(c.ny) > 0.94 then ax, ay, az = 1, 0, 0 end
+    -- u = n x a, v = n x u
+    local ux, uy, uz = c.ny * az - c.nz * ay, c.nz * ax - c.nx * az, c.nx * ay - c.ny * ax
+    local ul = math.sqrt(ux * ux + uy * uy + uz * uz)
+    if ul < 1e-6 then return end
+    ux, uy, uz = ux / ul, uy / ul, uz / ul
+    local vx, vy, vz = c.ny * uz - c.nz * uy, c.nz * ux - c.nx * uz, c.nx * uy - c.ny * ux
+
+    local col = c.tooFast and C.uiWarn or C.uiPrimary
+    local r = c.radius
+
+    local function at(du, dv, dn)
+        return camera:project(
+            c.x + ux * du + vx * dv + c.nx * dn,
+            c.y + uy * du + vy * dv + c.ny * dn,
+            c.z + uz * du + vz * dv + c.nz * dn, w, h)
+    end
+
+    -- the mouth itself, and two rings up the approach axis: three squares of
+    -- shrinking screen size read as a tunnel without drawing one
+    ui.setColor(col, 0.9)
+    love.graphics.setLineWidth(2)
+    for i, dn in ipairs({ 0, r * 1.6, r * 3.4 }) do
+        local pts, ok = {}, true
+        for _, corner in ipairs({ { -1, -1 }, { 1, -1 }, { 1, 1 }, { -1, 1 } }) do
+            local px, py = at(corner[1] * r, corner[2] * r, dn)
+            if not px then ok = false break end
+            pts[#pts + 1] = px
+            pts[#pts + 1] = py
+        end
+        if ok then
+            ui.setColor(col, i == 1 and 0.95 or (0.5 / i))
+            love.graphics.polygon("line", pts)
+        end
+    end
+    love.graphics.setLineWidth(1)
+
+    -- the axis, so the direction to come in from is unambiguous
+    local mx, my = at(0, 0, 0)
+    local ex, ey = at(0, 0, r * 3.4)
+    if mx and ex then
+        ui.setColor(col, 0.35)
+        love.graphics.line(mx, my, ex, ey)
+    end
+
+    -- and the one number that decides whether this works, on the mouth rather
+    -- than in a corner
+    if mx then
+        local label = util.speed(c.speed)
+        if c.tooFast then label = label .. "  " .. L("TOO FAST") end
+        ui.textCenter(label, mx, my + r * 0.1 + 8, col, "small")
+    end
+    love.graphics.setColor(1, 1, 1, 1)
+end
+
 -- ---------------------------------------------------------------------------
 -- Artificial horizon
 -- ---------------------------------------------------------------------------
@@ -498,6 +565,7 @@ function hud.draw(ctx, w, h)
     end
     layer("target")
     drawTargetIndicator(ctx, w, h)
+    if ctx.corridor then drawCorridor(ctx, ctx.corridor, w, h) end
     pop()
 
     -- ---- left gauges ----------------------------------------------------
@@ -623,20 +691,20 @@ function hud.draw(ctx, w, h)
         local px, py = l.targetX, l.targetY
         local pw = l.targetW
         local textW = pw - 28
-        ui.panel(px, py, pw, t.detail and 118 or 78, L("TARGET"), accent)
+        -- Identity here, condition on the target itself.
+        --
+        -- The hull and shield bars used to be repeated in this panel, which
+        -- meant reading them in the corner while looking at the ship in the
+        -- middle of the screen. They are drawn on the target now
+        -- (drawTargetIndicator), and what is left here is what a bracket in
+        -- the world cannot say: who it is, how far, and what the scanner found.
+        local rows = t.detail and 3 or 2
+        ui.panel(px, py, pw, 26 + rows * 18, L("TARGET"), accent)
         ui.textFit(t.label or L("Unknown"), px + 14, py + 12, textW, C.uiText, "small")
         ui.text(util.distance(t.distance or 0), px + 14, py + 30, C.uiDim, "small")
-        if t.hull then
-            ui.text(L("HULL"), px + 14, py + 48, C.uiDim, "small")
-            ui.bar(px + 60, py + 50, pw - 80, 7, t.hull, t.hostile and C.uiDanger or C.uiPrimary)
-        end
-        if t.shield then
-            ui.text(L("SHLD"), px + 14, py + 62, C.uiDim, "small")
-            ui.bar(px + 60, py + 64, pw - 80, 7, t.shield, C.cyan)
-        end
         if t.detail then
-            ui.textFit(t.detail, px + 14, py + 82, textW, C.uiDim, "small")
-            if t.detail2 then ui.textFit(t.detail2, px + 14, py + 96, textW, C.uiDim, "small") end
+            ui.textFit(t.detail, px + 14, py + 48, textW, C.uiDim, "small")
+            if t.detail2 then ui.textFit(t.detail2, px + 14, py + 62, textW, C.uiDim, "small") end
         end
         pop()
     end

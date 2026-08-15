@@ -265,6 +265,20 @@ step(46, "autopilot arrives without overshooting", function(game)
     assert(not f.dockPrompt.blocked,
         "reached the mouth but could not dock: " .. tostring(f.dockPrompt.text))
 
+    -- The corridor the HUD draws in the world. Sitting at the mouth with the
+    -- station targeted is exactly when it must exist, and the frames drawn
+    -- after this step are what execute the drawing of it.
+    local c = f.corridor
+    assert(c, "no docking corridor at the mouth with the station targeted")
+    assert(c.radius > 0, "the corridor has no width")
+    assert(not c.tooFast, string.format(
+        "the corridor says %.0f m/s is too fast, but docking was allowed", c.speed))
+    local nlen = math.sqrt(c.nx * c.nx + c.ny * c.ny + c.nz * c.nz)
+    assert(math.abs(nlen - 1) < 1e-3, "the corridor axis is not a unit vector: " .. nlen)
+    io.write(string.format("    DIAG-CORRIDOR radius=%.0f m  closing=%.0f m/s  range=%.0f m\n",
+        c.radius, c.speed, c.distance))
+    io.flush()
+
     selftest.autopilotSpeed = speed
     selftest.autopilotClosest = closest
 end)
