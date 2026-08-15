@@ -23,6 +23,7 @@ local missions = require("src.port.missions")
 local outfitting = require("src.port.outfitting")
 local shipyard = require("src.port.shipyard")
 local colony = require("src.port.colony")
+local talk = require("src.port.talk")
 
 local Port = class("PortState")
 
@@ -31,12 +32,13 @@ local L = i18n.format
 local floor, min, max = math.floor, math.min, math.max
 
 
-local TAB_ORDER = { "summary", "market", "blackMarket", "missions", "outfitting", "shipyard", "colony" }
+local TAB_ORDER = { "summary", "market", "blackMarket", "missions", "talk", "outfitting", "shipyard", "colony" }
 -- Tab captions are looked up at draw time rather than stored, so switching
 -- language re-labels the screen without rebuilding the state.
 local TAB_NAME = {
     summary = "OVERVIEW", market = "MARKET", blackMarket = "BLACK MARKET",
-    missions = "CONTRACTS", outfitting = "OUTFITTING", shipyard = "SHIPYARD", colony = "COLONY",
+    missions = "CONTRACTS", talk = "LOCAL TALK", outfitting = "OUTFITTING",
+    shipyard = "SHIPYARD", colony = "COLONY",
 }
 
 function Port:init()
@@ -64,6 +66,8 @@ function Port:enter(place, opts)
     if svc.market ~= false then self.tabs[#self.tabs + 1] = "market" end
     if svc.blackMarket or place.blackMarket then self.tabs[#self.tabs + 1] = "blackMarket" end
     if svc.missions then self.tabs[#self.tabs + 1] = "missions" end
+    -- anywhere with people in it has people talking; a derelict does not
+    if (place.population or 0) > 0 then self.tabs[#self.tabs + 1] = "talk" end
     if svc.outfitting then self.tabs[#self.tabs + 1] = "outfitting" end
     if svc.shipyard then self.tabs[#self.tabs + 1] = "shipyard" end
     if place.colony then self.tabs[#self.tabs + 1] = "colony" end
@@ -73,7 +77,7 @@ function Port:enter(place, opts)
         for i, t in ipairs(self.tabs) do
             if t == initialTab or (initialTab == "refuel" and t == "summary")
                 or (initialTab == "repair" and t == "summary")
-                or (initialTab == "rumours" and t == "summary")
+                or (initialTab == "rumours" and t == "talk")
                 or (initialTab == "navdata" and t == "summary") then
                 self.tab = i
                 break
@@ -108,6 +112,8 @@ function Port:rebuild()
         self:buildOutfitMenu()
     elseif tab == "shipyard" then
         self:buildShipyardMenu()
+    elseif tab == "talk" then
+        self:buildTalkMenu()
     elseif tab == "colony" then
         self:buildColonyMenu()
     else
@@ -129,11 +135,13 @@ function Port:buildMissionMenu() return missions.buildMissionMenu(self) end
 function Port:buildOutfitMenu() return outfitting.buildOutfitMenu(self) end
 function Port:buildShipyardMenu() return shipyard.buildShipyardMenu(self) end
 function Port:buildColonyMenu() return colony.buildColonyMenu(self) end
+function Port:buildTalkMenu() return talk.buildTalkMenu(self) end
 
 function Port:trade(sell) return market.trade(self, sell) end
 function Port:acceptMission() return missions.acceptMission(self) end
 function Port:toggleModule() return outfitting.toggleModule(self) end
 function Port:buyShip() return shipyard.buyShip(self) end
+function Port:noteRumour() return talk.note(self) end
 
 
 
@@ -198,6 +206,8 @@ function Port:keypressed(key)
         if key == "return" or key == "space" then self:toggleModule() return end
     elseif tab == "shipyard" then
         if key == "return" or key == "space" then self:buyShip() return end
+    elseif tab == "talk" then
+        if key == "return" or key == "space" then self:noteRumour() return end
     end
 
     if self.menu then self.menu:keypressed(key) end
@@ -289,6 +299,8 @@ function Port:draw()
         hint = L("ENTER accept   Q/E tabs")
     elseif tab == "outfitting" or tab == "shipyard" then
         hint = L("ENTER buy or sell   Q/E tabs")
+    elseif tab == "talk" then
+        hint = L("ENTER note a lead   Q/E tabs")
     else
         hint = L("ENTER select   Q/E tabs")
     end
@@ -455,6 +467,30 @@ function Port:drawSidePanelContent(x, y, w, h, tab, item)
             ui.text(r[1], px, py, C.uiDim, "small")
             ui.textRight(r[2], x + w - 18, py, C.uiText, "small")
             py = py + 17
+        end
+
+    elseif tab == "talk" and item and item.rumour then
+        local r = item.rumour
+        py = py + ui.paragraph(require("src.sim.rumours").line(r), px, py, w - 36, C.uiText, "normal") + 10
+        if r.systemId then
+            ui.text(L("System"), px, py, C.uiDim, "small")
+            ui.textRight(r.systemName or "?", x + w - 18, py, C.uiText, "small")
+            py = py + 18
+            local stub = self.world.galaxy:byId(r.systemId)
+            if stub and self.world.stub then
+                local here = self.world.stub
+                local d = math.sqrt((stub.x - here.x) ^ 2 + (stub.y - here.y) ^ 2
+                    + (stub.z - here.z) ^ 2)
+                ui.text(L("Distance"), px, py, C.uiDim, "small")
+                ui.textRight(L("{n} ly", { n = string.format("%.2f", d) }),
+                    x + w - 18, py, C.uiText, "small")
+                py = py + 18
+            end
+            py = py + 6
+            ui.paragraph(L("Noted leads are marked on the galactic chart."),
+                px, py, w - 36, C.uiDim, "small")
+        else
+            ui.paragraph(L("Talk, and nothing you can steer by."), px, py, w - 36, C.uiDim, "small")
         end
 
     elseif tab == "colony" and self.place.colony then

@@ -15,6 +15,7 @@ local systemGen = require("src.procgen.system")
 local factions = require("src.sim.factions")
 local economy = require("src.sim.economy")
 local missionsMod = require("src.sim.missions")
+local rumoursMod = require("src.sim.rumours")
 local colonyMod = require("src.sim.colony")
 local Player = require("src.sim.player")
 local names = require("src.procgen.names")
@@ -35,6 +36,7 @@ function World:init(opts)
 
     self.markets = {}          -- portKey -> Market
     self.boards = {}           -- portKey -> mission board
+    self.rumourCache = {}      -- portKey -> what the bar is saying
     self.news = {}
     self.system = nil          -- the expanded current system
     self.stub = nil
@@ -94,6 +96,8 @@ function World:onNewDay(day)
             c.unrestReported = false
         end
     end
+
+    rumoursMod.expire(self.player, day)
 
     local failed = missionsMod.expire(self.player, day)
     for _, m in ipairs(failed) do
@@ -195,6 +199,28 @@ function World:board(port)
     return out
 end
 
+--- What is being said at a port, cached the same way the contract board is.
+--
+-- Talk goes stale slower than a contract board: three days for contracts, five
+-- for gossip, which is also what stops the bar rewriting itself every time the
+-- player walks back in.
+function World:rumours(port)
+    local key = self:portKey(port)
+    local entry = self.rumourCache[key]
+    if not entry or (self.day - entry.day) > 5 then
+        entry = {
+            day = self.day,
+            list = rumoursMod.generate({
+                seed = port.seed or 1, day = self.day, place = port, stub = self.stub,
+                galaxy = self.galaxy, diplomacy = self.diplomacy, player = self.player,
+                market = self:market(port),
+            }),
+        }
+        self.rumourCache[key] = entry
+    end
+    return entry.list
+end
+
 -- ---------------------------------------------------------------------------
 -- Hyperspace
 -- ---------------------------------------------------------------------------
@@ -246,6 +272,7 @@ function World:jump(stub)
 
     self.markets = {}
     self.boards = {}
+    self.rumourCache = {}
     self:enterSystem(stub)
     self.player:addLog(string.format("Jumped %.1f ly to %s.", dist, stub.name), self.day, "nav")
     return true, string.format("Arrived at %s", stub.name)
