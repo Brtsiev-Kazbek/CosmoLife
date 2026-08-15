@@ -184,6 +184,8 @@ end
 
 function Map:update(dt)
     self.world:update(dt)
+    -- Keyboard panning stays, because a chart you can only drive with a mouse
+    -- is a chart somebody cannot drive. It is the fallback now, not the way.
     local pan = 90 / self.scale * dt * 60
     if love.keyboard.isDown("left", "a") then self.cx = self.cx - pan end
     if love.keyboard.isDown("right", "d") then self.cx = self.cx + pan end
@@ -192,8 +194,14 @@ function Map:update(dt)
     if love.keyboard.isDown("pageup") then self.cy = self.cy + pan end
     if love.keyboard.isDown("pagedown") then self.cy = self.cy - pan end
     self:refreshIfMoved()
+    self.hover = self:nearestToCursor(love.graphics.getWidth(), love.graphics.getHeight())
 end
 
+--- The star under the pointer, if the pointer is near enough to one.
+--
+-- The radius is in pixels rather than light years on purpose: what the player
+-- is aiming at is a dot on a screen, and at low zoom a light year is a
+-- fraction of one.
 function Map:nearestToCursor(w, h)
     local mx, my = love.mouse.getPosition()
     local best, bestD = nil, 26
@@ -203,6 +211,28 @@ function Map:nearestToCursor(w, h)
         if d < bestD then best, bestD = s, d end
     end
     return best
+end
+
+--- Zooms about a screen point rather than about the middle.
+--
+-- Wheel zoom that always works on the centre makes the player chase what they
+-- were looking at: zoom in, lose it, pan back, zoom in again. Holding the
+-- point under the cursor still is what every map made in the last twenty years
+-- does, and it is the single biggest thing this screen was missing.
+function Map:zoomAt(factor, px, py)
+    local w, h = love.graphics.getWidth(), love.graphics.getHeight()
+    local before = self.scale
+    self.scale = util.clamp(self.scale * factor, 0.4, 40)
+    if self.scale == before then return end
+    px = px or w * 0.5
+    py = py or h * 0.5
+    -- the light-year position under the cursor must not move: solve for the
+    -- centre that keeps it fixed at the new scale
+    local lx = self.cx + (px - w * 0.5) / before
+    local lz = self.cz + (py - h * 0.5) / before
+    self.cx = lx - (px - w * 0.5) / self.scale
+    self.cz = lz - (py - h * 0.5) / self.scale
+    self:refresh()
 end
 
 function Map:keypressed(key)
@@ -215,11 +245,9 @@ function Map:keypressed(key)
         return
     end
     if key == "=" or key == "+" or key == "kp+" then
-        self.scale = min(self.scale * 1.35, 40)
-        self:refresh()
+        self:zoomAt(1.35)
     elseif key == "-" or key == "kp-" then
-        self.scale = max(self.scale / 1.35, 0.4)
-        self:refresh()
+        self:zoomAt(1 / 1.35)
     elseif key == "home" then
         local here = self.world.stub
         self.cx, self.cy, self.cz = here.x, here.y, here.z
@@ -256,19 +284,58 @@ function Map:cycleContract()
     self:select(s)
 end
 
+-- Two clicks within this many seconds, on the same star, is a double click.
+local DOUBLE_CLICK = 0.35
+
 function Map:mousepressed(x, y, button)
     local w, h = love.graphics.getWidth(), love.graphics.getHeight()
     local s = self:nearestToCursor(w, h)
-    if s then
-        self:select(s)
-        if button == 2 then self:jump() end
+
+    if button == 1 then
+        if s then
+            -- double click jumps, the way double click opens things
+            local now = love.timer.getTime()
+            if self._lastClickId == s.id and (now - (self._lastClickAt or 0)) < DOUBLE_CLICK then
+                self:select(s)
+                self:jump()
+                return
+            end
+            self._lastClickId, self._lastClickAt = s.id, now
+            self:select(s)
+        end
+        -- a press on empty space starts a drag; a press on a star selects it
+        -- and may still turn into one, because a player who grabs the chart
+        -- near a star still means to move the chart
+        self.drag = { x = x, y = y, cx = self.cx, cz = self.cz, moved = 0 }
+        return
+    end
+
+    if button == 3 then
+        -- middle button: pan, the CAD convention, without losing the selection
+        self.drag = { x = x, y = y, cx = self.cx, cz = self.cz, moved = 99 }
     end
 end
 
+function Map:mousereleased(x, y, button)
+    self.drag = nil
+end
+
+function Map:mousemoved(x, y, dx, dy)
+    local d = self.drag
+    if not d then return end
+    d.moved = d.moved + math.abs(dx) + math.abs(dy)
+    -- Drag the chart under the cursor, one light year per light year: the map
+    -- moves with the hand rather than the camera moving against it, which is
+    -- the difference between dragging paper and driving a machine.
+    self.cx = d.cx - (x - d.x) / self.scale
+    self.cz = d.cz - (y - d.y) / self.scale
+    self:refreshIfMoved()
+end
+
 function Map:wheelmoved(x, y)
-    if y > 0 then self.scale = min(self.scale * 1.2, 40)
-    elseif y < 0 then self.scale = max(self.scale / 1.2, 0.4) end
-    self:refresh()
+    if y == 0 then return end
+    local mx, my = love.mouse.getPosition()
+    self:zoomAt(y > 0 and 1.2 or 1 / 1.2, mx, my)
 end
 
 function Map:jump()
@@ -340,6 +407,7 @@ function Map:draw()
     -- nearer the viewer is. The exact figure, for the one system anyone needs
     -- it for, is a line in the panel.
     local labels = {}
+    local seen = { contract = 0, lead = 0, demand = 0 }
     for _, s in ipairs(self.systems) do
         local x, y = self:dotOf(s, w, h)
         if x > -20 and x < w + 20 and y > -20 and y < h + 20 then
@@ -370,22 +438,33 @@ function Map:draw()
                 and self.wantsCargo and self.wantsCargo[s.id] then
                 ui.setColor(C.cyan, 0.75)
                 love.graphics.circle("line", x, y, 7)
+                seen.demand = seen.demand + 1
             end
             if self.leads and self.leads[s.id] then
                 ui.setColor(C.magenta, shown and 0.95 or 0.3)
                 love.graphics.line(x - 12, y - 5, x - 15, y, x - 12, y + 5)
                 love.graphics.line(x + 12, y - 5, x + 15, y, x + 12, y + 5)
+                seen.lead = seen.lead + 1
             end
             if self.contracts and self.contracts[s.id] then
                 ui.setColor(C.amber, shown and 0.9 or 0.3)
                 love.graphics.setLineWidth(1.4)
                 love.graphics.polygon("line", x, y - 13, x + 13, y, x, y + 13, x - 13, y)
                 love.graphics.setLineWidth(1)
+                seen.contract = seen.contract + 1
             end
 
             if s.id == here.id then
                 ui.setColor(C.uiPrimary, 0.9)
                 love.graphics.circle("line", x, y, 16)
+            end
+            if self.hover and s.id == self.hover.id
+                and not (self.selected and s.id == self.selected.id) then
+                -- the pointer is over this one: say so before it is clicked,
+                -- because a chart of two thousand identical dots gives no other
+                -- clue that clicking will hit the one you mean
+                ui.setColor(C.uiText, 0.7)
+                love.graphics.circle("line", x, y, r + 5)
             end
             if self.selected and s.id == self.selected.id then
                 -- corners rather than a box: the star stays visible inside its
@@ -418,7 +497,45 @@ function Map:draw()
         end
     end
 
+    self.seenMarks = seen
     self:drawLabels(labels, w, h)
+
+    -- The hovered star's name, drawn after the thinning and regardless of it:
+    -- the one label the player has actually asked for is the one they must
+    -- always get.
+    if self.hover then
+        -- A tooltip rather than just a name: sweeping the pointer over the
+        -- chart should answer "what is that, and can I get there" without a
+        -- click and without replotting a course for every star passed over.
+        local s = self.hover
+        local hx, hy = self:dotOf(s, w, h)
+        local d = sqrt((s.x - here.x) ^ 2 + (s.y - here.y) ^ 2 + (s.z - here.z) ^ 2)
+        local rows = {
+            { s.name, C.uiText },
+            { L("{n} ly", { n = string.format("%.2f", d) }),
+              d <= self.jumpRange and C.uiPrimary or C.uiDim },
+            { L(s.economyName), C.uiDim },
+        }
+        local font = ui.font("small")
+        local tw = 0
+        for _, r in ipairs(rows) do tw = max(tw, font:getWidth(r[1])) end
+        tw = tw + 16
+        local th = #rows * 16 + 8
+        -- Flipped to the other side rather than run off the edge -- and the
+        -- info panel counts as an edge, because a tooltip laid over the panel
+        -- makes both of them unreadable.
+        local tx = hx + 14
+        if tx + tw > w - 380 then tx = hx - 14 - tw end
+        if tx < 20 then tx = 20 end
+        local ty = min(hy - 12, h - 100 - th)
+        love.graphics.setColor(0.015, 0.02, 0.03, 0.88)
+        love.graphics.rectangle("fill", tx, ty, tw, th)
+        ui.setColor(C.uiLine, 0.5)
+        love.graphics.rectangle("line", tx, ty, tw, th)
+        for i, r in ipairs(rows) do
+            ui.text(r[1], tx + 8, ty + 4 + (i - 1) * 16, r[2], "small")
+        end
+    end
 
     -- the course: every leg of it, not just the straight line to somewhere
     -- that may be four jumps away
@@ -471,6 +588,37 @@ function Map:draw()
         -- a label lying loose on the star field
         ui.textRight(L(FILTER_NAME[FILTERS[self.filter]]), w - 400, 62, C.cyan, "small")
     end
+    -- Legend, for the marks that are actually on screen.
+    --
+    -- A diamond, a pair of brackets and a ring are not guessable, and a legend
+    -- listing every mark the chart *can* draw is furniture. This names the ones
+    -- in front of the player and nothing else, so it disappears when there is
+    -- nothing to explain.
+    do
+        local seenMarks = self.seenMarks or {}
+        local ly = h - 116
+        local function entry(kind, text, col)
+            if (seenMarks[kind] or 0) == 0 then return end
+            love.graphics.setColor(0.015, 0.02, 0.03, 0.8)
+            local tw = ui.font("small"):getWidth(L(text)) + 34
+            love.graphics.rectangle("fill", 36, ly - 3, tw, 18)
+            ui.setColor(col, 0.9)
+            if kind == "contract" then
+                love.graphics.polygon("line", 46, ly + 1, 52, ly + 7, 46, ly + 13, 40, ly + 7)
+            elseif kind == "lead" then
+                love.graphics.line(43, ly + 2, 40, ly + 7, 43, ly + 12)
+                love.graphics.line(49, ly + 2, 52, ly + 7, 49, ly + 12)
+            else
+                love.graphics.circle("line", 46, ly + 7, 6)
+            end
+            ui.text(L(text), 62, ly, C.uiDim, "small")
+            ly = ly - 20
+        end
+        entry("demand", "buys your cargo", C.cyan)
+        entry("lead", "someone mentioned it", C.magenta)
+        entry("contract", "contract due here", C.amber)
+    end
+
     -- Scale bar: one grid square, labelled. A chart without one leaves the
     -- player guessing how far a gap is, which is the question the chart exists
     -- to answer.
@@ -490,7 +638,7 @@ function Map:draw()
         a = string.format("%.1f", self.player.fuel),
         b = string.format("%.1f", self.player.stats.fuel) })
     local fuelW = ui.font("small"):getWidth(fuel)
-    ui.textFit(L("WASD pan   +/- zoom   F filter   C contracts   ENTER jump   TAB close"),
+    ui.textFit(L("DRAG pan   WHEEL zoom   CLICK select   DOUBLE-CLICK jump   F filter   C contracts   TAB close"),
         40, h - 48, w - 100 - fuelW, C.uiDim, "small")
     ui.textRight(fuel, w - 40, h - 48, C.amber, "small")
 end

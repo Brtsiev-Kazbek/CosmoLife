@@ -441,6 +441,8 @@ local strings = {
         "центр {x}, {y}, {z} св. лет     масштаб {scale} px/св. год",
     ["WASD pan   PGUP/PGDN vertical   +/- zoom   ENTER jump   TAB close"] =
         "WASD сдвиг   PGUP/PGDN по высоте   +/- масштаб   ENTER прыжок   TAB закрыть",
+    ["DRAG pan   WHEEL zoom   CLICK select   DOUBLE-CLICK jump   F filter   C contracts   TAB close"] =
+        "ТЯНУТЬ сдвиг   КОЛЕСО масштаб   КЛИК выбрать   2 КЛИКА прыжок   F фильтр   C контракты   TAB закрыть",
     ["WASD pan   +/- zoom   C contracts   ENTER jump   TAB close"] =
         "WASD сдвиг   +/- масштаб   C контракты   ENTER прыжок   TAB закрыть",
     ["WASD pan   +/- zoom   F filter   C contracts   ENTER jump   TAB close"] =
@@ -448,6 +450,10 @@ local strings = {
     ["Buys your {cargo}"] = "Покупает ваш груз: {cargo}",
     -- Названия фильтров карты: берутся из таблицы, а не из литерала в L(),
     -- поэтому audit_locale их не видит — правятся руками.
+    -- Легенда карты: тоже из таблицы, не из литерала.
+    ["buys your cargo"] = "купит ваш груз",
+    ["someone mentioned it"] = "о ней говорили",
+    ["contract due here"] = "здесь ждут по контракту",
     ["ALL SYSTEMS"] = "ВСЕ СИСТЕМЫ",
     ["IN RANGE"] = "В ПРЕДЕЛАХ ПРЫЖКА",
     ["WANTS MY CARGO"] = "НУЖЕН МОЙ ГРУЗ",

@@ -1215,6 +1215,54 @@ step(266, "clicking a star on the chart selects that star", function(game)
         "clicking %s selected %s instead", target.name, hit.name))
 end)
 
+step(265, "the chart drags, zooms under the cursor and hovers", function(game)
+    local map = selftest.map
+    assert(map, "the galaxy map was not open")
+    local w, h = love.graphics.getWidth(), love.graphics.getHeight()
+
+    -- drag: the chart must move with the hand, one light year per light year
+    local cx0, cz0 = map.cx, map.cz
+    map:mousepressed(400, 300, 1)
+    map:mousemoved(460, 340, 60, 40)
+    local dx = (map.cx - cx0) * map.scale
+    local dz = (map.cz - cz0) * map.scale
+    assert(math.abs(dx + 60) < 0.01 and math.abs(dz + 40) < 0.01, string.format(
+        "a 60x40 px drag moved the chart by %.1fx%.1f px", -dx, -dz))
+    map:mousereleased(460, 340, 1)
+    map.cx, map.cz = cx0, cz0
+    map:refresh()
+
+    -- zoom about the cursor: whatever light-year position was under the
+    -- pointer has to still be under it afterwards. Zooming about the centre
+    -- instead is what makes a player chase the thing they were looking at.
+    local px, py = 300, 500
+    local function underCursor()
+        return map.cx + (px - w * 0.5) / map.scale, map.cz + (py - h * 0.5) / map.scale
+    end
+    local bx, bz = underCursor()
+    local scale0 = map.scale
+    map:zoomAt(1.2, px, py)
+    map:zoomAt(1.2, px, py)
+    assert(map.scale > scale0, "zooming in did not change the scale")
+    local ax, az = underCursor()
+    assert(math.abs(ax - bx) < 0.01 and math.abs(az - bz) < 0.01, string.format(
+        "the point under the cursor slid by %.2f, %.2f ly while zooming", ax - bx, az - bz))
+    map:zoomAt(scale0 / map.scale, px, py)
+
+    -- hover: put the pointer on a star and the chart must find that star
+    local target = map.systems[3] or map.systems[1]
+    assert(target, "the chart is empty")
+    local tx, ty = map:dotOf(target, w, h)
+    local realPos = love.mouse.getPosition
+    love.mouse.getPosition = function() return tx, ty end
+    local hit = map:nearestToCursor(w, h)
+    map.hover = hit
+    map:draw()
+    love.mouse.getPosition = realPos
+    assert(hit and hit.id == target.id, "hovering a star did not find it")
+    map.hover = nil
+end)
+
 step(267, "the chart plots a course and marks what is owed", function(game)
     local map = selftest.map
     assert(map, "the galaxy map was not open")
