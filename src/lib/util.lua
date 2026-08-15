@@ -135,6 +135,17 @@ function util.count(t)
     return n
 end
 
+--- The keys of a table as an array.
+--
+-- Mostly wanted with `table.sort` right after it: `pairs` order over a hash
+-- table is not stable between processes, so anything that draws random numbers
+-- or picks a winner while walking one has to sort first.
+function util.keys(t)
+    local out = {}
+    for k in pairs(t or {}) do out[#out + 1] = k end
+    return out
+end
+
 --- Stable sort helper that keeps the original order of equal elements.
 function util.sortBy(t, keyfn, descending)
     local keys = {}

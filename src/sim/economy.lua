@@ -102,8 +102,15 @@ function Market:_buildBaseline()
 end
 
 function Market:_seedStock()
-    local rng = Rng.new(self.seed, "stock")
+    -- Seeded per commodity rather than drawing from one stream in table order.
+    -- `pairs` order over a hash table is not stable between processes, and it
+    -- measurably was not: the same seed gave grain stocks from 862 to 1079 on
+    -- five consecutive runs, which is the one thing this project promises never
+    -- to do.  Keying the draw on the id also means adding a commodity does not
+    -- shift the fill of every commodity after it.
+    local rng = Rng.new(0)
     for id, eq in pairs(self.equilibrium) do
+        rng:seed(self.seed, "stock", id)
         local bias = self._bias[id] or 0
         local fill = util.clamp(0.55 + bias * 0.22 + rng:range(-0.25, 0.25), 0.08, 2.2)
         self.stock[id] = math.max(0, math.floor(eq * fill))
@@ -225,14 +232,19 @@ function Market:update(day)
     local steps = math.min(math.ceil(days), 40)
     local stepDays = days / steps
     local rng = Rng.new(self.seed, "tick", math.floor(day))
+    -- the drift stream is per commodity for the same reason the initial fill
+    -- is, and it is a separate object so that walking the table cannot move
+    -- the event roll below along with it
+    local drift = Rng.new(0)
 
     for id, eq in pairs(self.equilibrium) do
+        drift:seed(self.seed, "drift", math.floor(day), id)
         local c = commodities.get(id)
         local stock = self.stock[id] or 0
         for _ = 1, steps do
             local gap = eq - stock
             stock = stock + gap * config.economy.restockRate * stepDays
-            stock = stock + eq * rng:gauss(0, c.volatility * config.economy.driftAmplitude) * stepDays
+            stock = stock + eq * drift:gauss(0, c.volatility * config.economy.driftAmplitude) * stepDays
             if c.perishable then stock = stock * (1 - c.perishable * stepDays) end
         end
         self.stock[id] = math.max(0, stock)

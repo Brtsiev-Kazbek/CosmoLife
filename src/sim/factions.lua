@@ -202,8 +202,16 @@ function Diplomacy:update(day)
     self.nextEventDay = day + self.rng:range(8, 26)
     local rng = self.rng
 
+    -- Both loops below draw from `rng` while walking a hash table, and `pairs`
+    -- order is not stable between processes -- so the same seed produced a
+    -- different history on every run.  Sorted keys cost a table per event day
+    -- (one every 8-26 days) and make the galaxy reproducible again.
+    local keys = util.keys(self.relations)
+    table.sort(keys)
+
     -- relations drift toward zero, wars push them down
-    for k, v in pairs(self.relations) do
+    for _, k in ipairs(keys) do
+        local v = self.relations[k]
         if self.wars[k] then
             self.relations[k] = math.max(-1, v - 0.05)
         else
@@ -212,7 +220,10 @@ function Diplomacy:update(day)
     end
 
     -- peace talks
-    for k, w in pairs(self.wars) do
+    local warKeys = util.keys(self.wars)
+    table.sort(warKeys)
+    for _, k in ipairs(warKeys) do
+        local w = self.wars[k]
         local length = day - w.since
         if length > 25 and rng:bool(0.35 + length * 0.004) then
             self:makePeace(w.a, w.b, day)
@@ -225,7 +236,8 @@ function Diplomacy:update(day)
 
     -- new wars grow out of bad relations
     local worstK, worstV = nil, 0.0
-    for k, v in pairs(self.relations) do
+    for _, k in ipairs(keys) do
+        local v = self.relations[k]
         if not self.wars[k] and v < worstV then worstK, worstV = k, v end
     end
     if worstK and worstV < -0.55 and rng:bool(0.45) then

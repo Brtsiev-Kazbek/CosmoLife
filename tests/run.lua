@@ -300,6 +300,110 @@ test("a full trade loop is profitable", function(assert_)
     assert_(best.profit > 0, "best route loses money")
 end)
 
+test("the same seed gives the same market in every process", function(assert_)
+    -- `pairs` order over a hash table is not stable between processes, so any
+    -- code that draws random numbers while walking one drifts from run to run.
+    -- This did: before it was pinned, one seed gave grain stocks of 898, 862,
+    -- 936, 925 and 1079 on five consecutive runs of the same script -- in a
+    -- project whose whole premise is that a seed is a universe.
+    --
+    -- The fingerprints are the guard. A deliberate balance change moves them
+    -- and they get updated; a fingerprint that moves on its own means someone
+    -- is drawing from a table again.
+    local m = economy.Market.new({ seed = 11, economyId = "agricultural", population = 120000 })
+    m:update(120)
+    local sum = 0
+    for i, id in ipairs(m:tradedIds()) do sum = sum + i * math.floor(m.stock[id]) end
+    assert_(sum == 22410, "market fingerprint moved: " .. sum)
+
+    local d = factions.Diplomacy.new(21)
+    for day = 1, 600 do d:update(day) end
+    local keys = util.keys(d.relations)
+    table.sort(keys)
+    local acc = 0
+    for i, k in ipairs(keys) do acc = acc + i * math.floor(d.relations[k] * 1000 + 0.5) end
+    assert_(#keys == 15, "the galaxy grew or lost factions: " .. #keys)
+    assert_(acc == 15027, "diplomacy fingerprint moved: " .. acc)
+end)
+
+test("a market's fill does not depend on what else it trades", function(assert_)
+    -- The property that makes the fingerprint above hold: each commodity's
+    -- draw is keyed on its own id, so it cannot matter where in the walk it
+    -- came up -- which is also what stops adding a commodity from reshuffling
+    -- every other one.
+    local full = economy.Market.new({ seed = 12, economyId = "industrial", population = 90000 })
+    local id = full:tradedIds()[1]
+    local alone = economy.Market.new({ seed = 12, economyId = "industrial", population = 90000 })
+    for k in pairs(alone.equilibrium) do
+        if k ~= id then alone.equilibrium[k] = nil end
+    end
+    alone.stock = {}
+    alone:_seedStock()
+    assert_(alone.stock[id] == full.stock[id],
+        string.format("%s filled to %d alone and %d in company",
+            id, alone.stock[id] or -1, full.stock[id] or -1))
+end)
+
+test("a market assessment answers what is cheap here", function(assert_)
+    local trade = require("src.sim.trade")
+    -- the verdict band has to be wider than the drift, or every row is flagged
+    assert_(trade.verdict(trade.ratio(50, 100)) == "cheap", "half price is not called cheap")
+    assert_(trade.verdict(trade.ratio(200, 100)) == "dear", "double price is not called dear")
+    assert_(trade.verdict(trade.ratio(129, 100)) == "fair",
+        "the median row in the galaxy is flagged, which flags nothing")
+    assert_(trade.ratio(10, 0) == nil, "a zero reference price produced a ratio")
+
+    local m = economy.Market.new({ seed = 11, economyId = "agricultural", population = 120000 })
+    local id = m:tradedIds()[1]
+    local row = trade.assess(m, id, { credits = 1e6, free = 20 })
+    assert_(row.buy == m:buyPrice(id), "assessment disagrees with the market on price")
+    assert_(row.take <= 20, "the hold took more than it holds: " .. row.take)
+    -- the whole point of the column: an agricultural world's own produce is
+    -- under the galactic reference, not over it
+    local cheap = false
+    for _, cid in ipairs(m:tradedIds()) do
+        local r = trade.assess(m, cid, { credits = 1e9, free = 100 })
+        if r.verdict == "cheap" then cheap = true end
+    end
+    assert_(cheap, "a farm sells nothing below the galactic average")
+end)
+
+test("the hold, the purse and the shelf each cap a purchase", function(assert_)
+    local trade = require("src.sim.trade")
+    assert_(trade.take(10, 1, 1e6, 100, 999) == 10, "the hold did not cap the load")
+    assert_(trade.take(999, 1, 550, 100, 999) == 5, "the purse did not cap the load")
+    assert_(trade.take(999, 1, 1e6, 100, 7) == 7, "the shelf did not cap the load")
+    assert_(trade.take(999, 2, 1e6, 100, 999) == 499, "volume was ignored")
+    assert_(trade.take(0, 1, 0, 100, 0) == 0, "a broke pilot with no hold could still buy")
+
+    -- the best row is the biggest bet that can actually be placed, so a
+    -- bargain nobody can afford does not win
+    local rows = {
+        { id = "a", take = 10, upside = 200 },
+        { id = "b", take = 0, upside = 9000 },
+        { id = "c", take = 4, upside = 500 },
+    }
+    assert_(trade.best(rows).id == "c", "ranked the wrong row")
+    assert_(trade.best({ { id = "a", take = 5, upside = -10 } }) == nil,
+        "recommended a load that loses money")
+end)
+
+test("a colony's shortfall is what to put in the hold", function(assert_)
+    local colonyMod = require("src.sim.colony")
+    local trade = require("src.sim.trade")
+    local c = colonyMod.found({ seed = 31, body = { type = "rock", landable = true }, day = 0 })
+    c.population = 1000
+    c.stockpile = { provisions = 0, water = 0, medicine = 0, machinery = 0 }
+    local short = colonyMod.shortfall(c, 30)
+    assert_((short.provisions or 0) > 0, "a starving colony asks for nothing")
+    -- 0.9 t per 100 pop per day, 1000 pop, 30 days
+    assert_(math.abs((short.provisions or 0) - 270) < 1, "shortfall: " .. tostring(short.provisions))
+    c.stockpile.provisions = 1e6
+    assert_(colonyMod.shortfall(c, 30).provisions == nil, "a full store still asks for more")
+    assert_(trade.wanted({ c }, "water", 30) > 0, "the market cannot see the colony's needs")
+    assert_(trade.wanted(nil, "water", 30) == 0, "a pilot with no colonies was asked to supply one")
+end)
+
 test("contraband legality follows local law", function(assert_)
     local narc = commodities.get("narcotics")
     local strict = select(1, commodities.legalityIn(narc, 0.9))
@@ -741,7 +845,7 @@ test("every module loads", function(assert_)
         "src.render.renderer", "src.render.shaders", "src.render.sky",
         "src.sim.colony", "src.sim.combat", "src.sim.commodities", "src.sim.economy",
         "src.sim.equipment", "src.sim.factions", "src.sim.missions", "src.sim.npc",
-        "src.sim.player", "src.sim.world",
+        "src.sim.player", "src.sim.trade", "src.sim.world",
         "src.states.colonies", "src.states.flight", "src.states.galaxymap",
         "src.states.gameover", "src.states.logbook", "src.states.manager",
         "src.states.menu", "src.states.onfoot", "src.states.pause",
