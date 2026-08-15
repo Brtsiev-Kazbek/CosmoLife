@@ -315,6 +315,54 @@ step(45, "one tap on cruise flies you to the target", function(game)
     f:targetNearestPort()
 end)
 
+step(43, "traders carry real cargo between real markets", function(game)
+    -- Traffic used to be scenery: a trader picked a port by the modulus of its
+    -- seed, flew there with an empty hold and changed nothing. This is the
+    -- whole claim of the freight layer -- that the ships in the window are the
+    -- reason the prices move -- so it is checked against the markets
+    -- themselves rather than against the ships.
+    local f = game.manager:current()
+    local systemGen = require("src.procgen.system")
+    local ports = systemGen.ports(game.world.system)
+    if #ports < 2 then return end          -- a one-port system has no lanes
+
+    local before = {}
+    for _, p in ipairs(ports) do
+        local m = game.world:market(p)
+        local snap = {}
+        for id, n in pairs(m.stock) do snap[id] = n end
+        before[p] = snap
+    end
+
+    -- give every trader an errand and fly them to it
+    local carried, delivered = 0, 0
+    for _ = 1, 900 do
+        game:update(1 / 60)
+        for _, e in ipairs(f.npcs) do
+            if e.run and (e.run.qty or 0) > 0 then carried = carried + 1 end
+            delivered = math.max(delivered, e.runs or 0)
+        end
+        if carried > 0 and delivered > 0 then break end
+    end
+
+    assert(carried > 0, "no trader in the system ever loaded a hold")
+    assert(delivered > 0, "no trader ever completed a run")
+
+    -- and the stock really moved: somewhere sold and somewhere bought
+    local moved = false
+    for _, p in ipairs(ports) do
+        local m = game.world:market(p)
+        for id, was in pairs(before[p]) do
+            if math.abs((m.stock[id] or 0) - was) > 1 then moved = true break end
+        end
+        if moved then break end
+    end
+    assert(moved, "the freight ran and no market's stock changed")
+    io.write(string.format("    DIAG-FREIGHT %d holds loaded, %d runs completed\n",
+        carried, delivered))
+    io.flush()
+end)
+
 step(46, "autopilot arrives without overshooting", function(game)
     -- The failure this guards against: at cruise the ship covered ~10 km per
     -- frame while a station's standoff sphere is ~2 km across, so it stepped

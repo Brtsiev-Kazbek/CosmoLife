@@ -418,6 +418,118 @@ test("the worst input decides, and only outputs are gated", function(assert_)
         "an import was gated as though the world made it")
 end)
 
+test("freight moves stock, and moving stock moves prices", function(assert_)
+    local logistics = require("src.sim.logistics")
+
+    -- An extraction world with ore to spare, and a refinery that eats ore.
+    -- This is the lane the whole economy hangs off, and until now nothing
+    -- travelled it: NPC traders flew between random ports with empty holds.
+    local mine = economy.Market.new({ seed = 31, economyId = "extraction", population = 70000 })
+    local plant = economy.Market.new({ seed = 32, economyId = "refinery", population = 70000 })
+    plant.stock.ore = 0
+    plant.stock.minerals = 0
+
+    local run = logistics.plan(mine, plant)
+    assert_(run ~= nil, "no run worth flying between a mine and a refinery")
+    assert_(run.qty > 0, "the run carries nothing")
+    assert_(run.margin >= logistics.MIN_MARGIN, "the run flies for a margin of " .. run.margin)
+
+    local mineBefore = mine:available(run.id)
+    local plantBefore = plant:available(run.id)
+    local plantPrice = plant:buyPrice(run.id)
+
+    logistics.load(mine, run)
+    local profit = logistics.unload(plant, run)
+
+    assert_(mine:available(run.id) < mineBefore, "the cargo did not leave the seller")
+    assert_(plant:available(run.id) > plantBefore, "the cargo did not arrive at the buyer")
+    assert_(profit > 0, "the run lost money: " .. profit)
+    assert_(plant:buyPrice(run.id) < plantPrice, string.format(
+        "delivering %d tonnes did not soften the price (%d then %d)",
+        run.qty, plantPrice, plant:buyPrice(run.id)))
+end)
+
+test("a fed chain recovers and a cut one does not", function(assert_)
+    -- The claim that makes freight worth simulating at all: whether a factory
+    -- runs depends on whether the ships arrived. Two identical refineries,
+    -- both starved; one gets a delivery every few days.
+    local logistics = require("src.sim.logistics")
+    local mine = economy.Market.new({ seed = 33, economyId = "extraction", population = 90000 })
+    local supplied = economy.Market.new({ seed = 34, economyId = "refinery", population = 70000 })
+    local cut = economy.Market.new({ seed = 34, economyId = "refinery", population = 70000 })
+    for _, m in ipairs({ supplied, cut }) do
+        for id in pairs(require("src.sim.production").demand(m.economyId, m.equilibrium)) do
+            m.stock[id] = 0
+        end
+    end
+
+    for day = 1, 60 do
+        supplied:update(day)
+        cut:update(day)
+        mine:update(day)
+        if day % 4 == 0 then
+            local run = logistics.plan(mine, supplied)
+            if run then
+                logistics.load(mine, run)
+                logistics.unload(supplied, run)
+            end
+        end
+    end
+
+    assert_(supplied.supply > cut.supply * 1.5, string.format(
+        "the supplied refinery is at %.2f and the cut one at %.2f",
+        supplied.supply, cut.supply))
+    assert_(supplied:available("alloys") > cut:available("alloys"), string.format(
+        "deliveries made no difference to the output: %d against %d",
+        supplied:available("alloys"), cut:available("alloys")))
+end)
+
+test("freight runs whether or not anyone is watching", function(assert_)
+    -- The visible traders cross millions of kilometres and complete a run
+    -- every few minutes; if that were the only haulage the chains would starve
+    -- while the player watched. The world runs the freight that would be
+    -- happening anyway, with the same code, and this is what says so.
+    local World = require("src.sim.world")
+    local systemGen = require("src.procgen.system")
+    local function freshWorld()
+        local w = World.new({ seed = 4242 })
+        w:enterSystem(w.galaxy:findStartSystem())
+        return w
+    end
+    local world = freshWorld()
+    local ports = systemGen.ports(world.system)
+    if #ports < 2 then return end
+
+    local before = {}
+    for i, p in ipairs(ports) do
+        local m = world:market(p)
+        local snap = {}
+        for id, n in pairs(m.stock) do snap[id] = n end
+        before[i] = snap
+    end
+
+    for day = 1, 20 do world:runFreight(day) end
+
+    local moved = 0
+    for i, p in ipairs(ports) do
+        local m = world:market(p)
+        for id, was in pairs(before[i]) do
+            if math.abs((m.stock[id] or 0) - was) > 1 then moved = moved + 1 end
+        end
+    end
+    assert_(moved > 0, "twenty days of freight moved nothing anywhere")
+
+    -- and it is the same freight every time, because the galaxy is a seed
+    local again = freshWorld()
+    for day = 1, 20 do again:runFreight(day) end
+    local p1 = systemGen.ports(again.system)[1]
+    local a, b = world:market(ports[1]), again:market(p1)
+    for id, n in pairs(a.stock) do
+        assert_(math.abs((b.stock[id] or 0) - n) < 1e-9,
+            "two runs of the same seed hauled different freight: " .. id)
+    end
+end)
+
 test("a market assessment answers what is cheap here", function(assert_)
     local trade = require("src.sim.trade")
     -- the verdict band has to be wider than the drift, or every row is flagged
@@ -1264,7 +1376,7 @@ test("every module loads", function(assert_)
         "src.render.renderer", "src.render.shaders", "src.render.sky",
         "src.sim.colony", "src.sim.combat", "src.sim.commodities", "src.sim.economy",
         "src.sim.equipment", "src.sim.factions", "src.sim.missions", "src.sim.npc",
-        "src.sim.player", "src.sim.production", "src.sim.stick",
+        "src.sim.logistics", "src.sim.player", "src.sim.production", "src.sim.stick",
         "src.sim.trade", "src.sim.travel", "src.sim.world",
         "src.states.colonies", "src.states.flight", "src.states.galaxymap",
         "src.states.gameover", "src.states.logbook", "src.states.manager",

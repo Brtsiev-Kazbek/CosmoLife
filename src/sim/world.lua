@@ -16,6 +16,7 @@ local factions = require("src.sim.factions")
 local economy = require("src.sim.economy")
 local missionsMod = require("src.sim.missions")
 local rumoursMod = require("src.sim.rumours")
+local logisticsMod = require("src.sim.logistics")
 local colonyMod = require("src.sim.colony")
 local Player = require("src.sim.player")
 local names = require("src.procgen.names")
@@ -97,6 +98,7 @@ function World:onNewDay(day)
         end
     end
 
+    self:runFreight(day)
     rumoursMod.expire(self.player, day)
 
     local failed = missionsMod.expire(self.player, day)
@@ -108,6 +110,41 @@ function World:onNewDay(day)
 
     -- markets of the current system keep ticking while the player is here
     for _, m in pairs(self.markets) do m:update(day) end
+end
+
+--- A day's freight between the system's ports.
+--
+-- The visible traders are only ever a handful of ships crossing millions of
+-- kilometres; measured in the selftest, one completes a run in fifteen seconds
+-- of flight. If that were the only freight, the production chains would starve
+-- while the player watched, and a lane would mean nothing.
+--
+-- So the haulage that would be happening anyway happens anyway: a few runs a
+-- day, planned and settled against the same markets by the same code the NPC
+-- traders use, whether or not anyone is in the room. The ships in the window
+-- are instances of this, not a separate economy -- which is the only way a
+-- galaxy this size can be alive without being simulated in full.
+function World:runFreight(day)
+    local sys = self.system
+    if not sys then return end
+    local ports = systemGen.ports(sys)
+    if #ports < 2 then return end
+
+    -- deterministic: same day, same system, same freight
+    local rng = Rng.new(sys.seed or 1, "freight", math.floor(day))
+    local runs = util.clamp(math.floor(#ports * 0.8), 1, 6)
+    for _ = 1, runs do
+        local a = rng:int(1, #ports)
+        local b = rng:int(1, #ports)
+        if a ~= b then
+            local from, to = self:market(ports[a]), self:market(ports[b])
+            local run = logisticsMod.plan(from, to)
+            if run then
+                logisticsMod.load(from, run)
+                logisticsMod.unload(to, run)
+            end
+        end
+    end
 end
 
 function World:addNews(text, kind)

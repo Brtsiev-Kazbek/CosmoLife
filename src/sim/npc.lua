@@ -297,10 +297,22 @@ BEHAVIOUR.cruise = function(e, dt, ctx)
     if not e.waypoint then
         local ports = ctx.ports
         if ports and #ports > 0 then
-            local p = ports[(math.floor(e.seed) % #ports) + 1]
+            -- A trader with a route, if the world can give it one.
+            --
+            -- This used to pick a port by the modulus of the ship's seed and
+            -- fly there empty: traffic as scenery, with no effect on any
+            -- price. `ctx.assignRun` hands back a real errand -- so much of
+            -- that from here to there -- and arriving settles it against both
+            -- markets, which is what makes a lane something a player can watch
+            -- and something a pirate can cut.
+            local p
+            if e.aiKind == "trader" and ctx.assignRun then p = ctx.assignRun(e) end
+            p = p or ports[(math.floor(e.seed) % #ports) + 1]
             e.waypoint = { x = p.pos.x, y = p.pos.y, z = p.pos.z }
+            e.destPort = p
         else
             e.waypoint = { x = e.pos.x + e.fwd.x * 30000, y = e.pos.y + e.fwd.y * 30000, z = e.pos.z + e.fwd.z * 30000 }
+            e.destPort = nil
         end
     end
     local t = ctx.time + e.wanderPhase
@@ -310,7 +322,11 @@ BEHAVIOUR.cruise = function(e, dt, ctx)
         e.waypoint.y + math.sin(t * 0.17) * wob,
         e.waypoint.z + math.cos(t * 0.19) * wob, dt, 0.5)
     e.throttle = 0.75
-    if vec3.distance(e.pos, e.waypoint) < 1200 then e.waypoint = nil end
+    if vec3.distance(e.pos, e.waypoint) < 1200 then
+        if e.destPort and ctx.arriveRun then ctx.arriveRun(e, e.destPort) end
+        e.waypoint = nil
+        e.destPort = nil
+    end
 
     local target, dist = pickTarget(e, ctx)
     if target then

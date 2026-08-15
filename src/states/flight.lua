@@ -39,6 +39,7 @@ local salvage = require("src.sim.salvage")
 local context = require("src.sim.context")
 local autopilot = require("src.flight.autopilot")
 local travel = require("src.sim.travel")
+local logistics = require("src.sim.logistics")
 local stick = require("src.sim.stick")
 local audio = require("src.audio")
 local rocks = require("src.flight.rocks")
@@ -393,6 +394,49 @@ end
 function Flight:toggleAutopilot() return autopilot.toggle(self) end
 function Flight:cancelAutopilot(message) return autopilot.cancel(self, message) end
 function Flight:updateAutopilot(dt) return autopilot.update(self, dt) end
+
+--- Gives a trader somewhere to go and something to carry.
+--
+-- The port it is standing off is the seller; the run decides the buyer. The
+-- cargo is bought here and now -- the stock leaves this market at the moment
+-- the ship sets out, which is what a departing freighter does -- and is sold
+-- on arrival.
+function Flight:assignRun(e)
+    local ports = systemGen.ports(self.world.system)
+    if #ports < 2 then return nil end
+    -- nearest port is where it is loading, and the run is planned from there
+    local fromPort, bestD
+    for _, p in ipairs(ports) do
+        local d = (p.pos.x - e.pos.x) ^ 2 + (p.pos.y - e.pos.y) ^ 2 + (p.pos.z - e.pos.z) ^ 2
+        if not bestD or d < bestD then fromPort, bestD = p, d end
+    end
+    if not fromPort then return nil end
+
+    -- one candidate buyer per assignment rather than all of them: this runs
+    -- whenever a trader finishes a leg, and a full sweep of every pair of
+    -- ports in the system on that schedule is a cost with no visible return
+    local toPort = ports[1 + (math.floor(e.seed + (e.runs or 0)) % #ports)]
+    if toPort == fromPort then
+        toPort = ports[1 + ((math.floor(e.seed + (e.runs or 0)) + 1) % #ports)]
+    end
+    if not toPort or toPort == fromPort then return nil end
+
+    local run = logistics.plan(self.world:market(fromPort), self.world:market(toPort))
+    if not run then return toPort end
+    logistics.load(self.world:market(fromPort), run)
+    if (run.qty or 0) <= 0 then return toPort end
+    e.run = run
+    e.runs = (e.runs or 0) + 1
+    return toPort
+end
+
+--- Settles a trader's run when it reaches the port it was flying to.
+function Flight:arriveRun(e, port)
+    local run = e.run
+    e.run = nil
+    if not run or not port then return end
+    logistics.unload(self.world:market(port), run)
+end
 
 --- The ship's speed relative to something that is itself moving.
 function Flight:relativeSpeed(vel)
@@ -944,6 +988,9 @@ function Flight:update(dt, background)
         -- miners need a rock to work; without these the behaviour bailed out
         pickRock = function(e) return self:rockNear(e.pos) end,
         mineRock = function(e, rock) mining.hit(rock, 14, self.rockDamage or {}) end,
+        -- freight: where a trader is going and what it is carrying
+        assignRun = function(e) return self:assignRun(e) end,
+        arriveRun = function(e, port) return self:arriveRun(e, port) end,
     }
     npcMod.maintain(self.npcs, self.world.system, self.player, self.world.diplomacy,
         self.world.day, self.game.camera, dt, self.npcState)
