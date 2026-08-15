@@ -2238,6 +2238,109 @@ end)
 
 -- ---------------------------------------------------------------------------
 
+-- Sound.
+--
+-- The synthesis is plain Lua for exactly this reason: a machine with no sound
+-- card can still say whether a laser is the right shape. What cannot be
+-- checked here is whether it is audible -- that needs ears -- so these check
+-- the things that are checkable and would each produce silence or a crackle if
+-- they were wrong.
+local voices = require("src.audio.voices")
+
+test("every voice produces a usable buffer", function(assert_)
+    for _, name in ipairs(voices.order) do
+        local b = voices[name]()
+        check("every voice produces a usable buffer", b and b.n and b.n > 0,
+            name .. " produced nothing")
+        check("every voice produces a usable buffer", b.rate and b.rate > 8000,
+            name .. " has an implausible sample rate")
+        local bad, peak = 0, 0
+        for i = 1, b.n do
+            local v = b[i]
+            -- NaN is the one that matters: it silences the whole source rather
+            -- than clicking, so it would be invisible in a listening test too
+            if v ~= v or v < -1 or v > 1 then bad = bad + 1 end
+            if math.abs(v) > peak then peak = math.abs(v) end
+        end
+        check("every voice produces a usable buffer", bad == 0,
+            name .. " has " .. bad .. " samples outside -1..1 or NaN")
+        check("every voice produces a usable buffer", peak > 0.2,
+            string.format("%s peaks at %.3f -- inaudible", name, peak))
+    end
+    assert_(#voices.order >= 12, "the catalogue is only " .. #voices.order .. " voices")
+end)
+
+test("one-shot voices decay and loops do not", function(assert_)
+    local function tailOf(b)
+        local sum, n = 0, 0
+        for i = math.floor(b.n * 0.9), b.n do sum = sum + math.abs(b[i]) n = n + 1 end
+        return sum / math.max(n, 1)
+    end
+    local function bodyOf(b)
+        local sum, n = 0, 0
+        for i = math.floor(b.n * 0.1), math.floor(b.n * 0.4) do sum = sum + math.abs(b[i]) n = n + 1 end
+        return sum / math.max(n, 1)
+    end
+
+    -- an impact whose end is as loud as its middle is a tone, not an impact
+    for _, name in ipairs({ "laser", "hit", "explosion", "step", "uiMove" }) do
+        local b = voices[name]()
+        assert_(tailOf(b) < bodyOf(b) * 0.5, string.format(
+            "%s does not decay: tail %.4f against body %.4f", name, tailOf(b), bodyOf(b)))
+    end
+
+    -- and a loop that decays would fade out once a cycle
+    for _, name in ipairs({ "engine", "cruise", "wind" }) do
+        local b = voices[name]()
+        assert_(b.loop, name .. " is used as a loop but is not marked as one")
+        assert_(tailOf(b) > bodyOf(b) * 0.4, string.format(
+            "%s fades out, so it will pulse once a cycle: tail %.4f against body %.4f",
+            name, tailOf(b), bodyOf(b)))
+    end
+end)
+
+test("voices are deterministic and distinct", function(assert_)
+    local a1, a2 = voices.laser(), voices.laser()
+    assert_(a1.n == a2.n, "the same voice came out at two different lengths")
+    local same = true
+    for i = 1, a1.n do
+        if a1[i] ~= a2[i] then same = false break end
+    end
+    assert_(same, "the same voice built twice is not the same sound")
+
+    -- Distinctness matters as much: a catalogue where two entries are the same
+    -- buffer means one of them was written wrong and nothing would say so.
+    local seen = {}
+    for _, name in ipairs(voices.order) do
+        local b = voices[name]()
+        local sig = 0
+        for i = 1, b.n, 37 do sig = (sig + b[i] * i) % 1e6 end
+        for other, s in pairs(seen) do
+            check("voices are deterministic and distinct", math.abs(s - sig) > 1e-9,
+                name .. " and " .. other .. " are the same sound")
+        end
+        seen[name] = sig
+    end
+end)
+
+test("the runtime is a no-op with no sound device", function(assert_)
+    local audio = require("src.audio")
+    -- head-less, so there is no love.audio at all; every entry point has to
+    -- survive that, because this is also what a player with sound disabled
+    -- gets and a crash there would be a crash on startup
+    assert_(audio.init() == false, "audio reported a device in a head-less run")
+    assert_(audio.available == false, "audio is available without love.audio")
+    assert_(audio.reason ~= nil, "audio gave no reason for being unavailable")
+    audio.play("laser")
+    audio.loop("engine", 0.5, 1.2)
+    audio.update(1 / 60)
+    audio.stopLoops()
+    audio.setVolume(0.5, 0.5, 0.5)
+    assert_(true, "the no-op path raised")
+end)
+
+-- ---------------------------------------------------------------------------
+
 -- No source file may read a global that does not exist, or write one at all.
 --
 -- Lua reports neither at compile time: `cos(a)` is a call of a nil global and

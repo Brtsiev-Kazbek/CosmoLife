@@ -15,6 +15,7 @@ local input = require("src.input")
 local lighting = require("src.render.lighting")
 local flux = require("lib.flux")
 local i18n = require("src.i18n")
+local audio = require("src.audio")
 
 local Game = class("Game")
 
@@ -28,6 +29,9 @@ function Game:init()
     self.camera.fov = config.render.fov
     self.sky = Sky.new(1337)
     self.lightingPreset = settings.get("lightingPreset")
+    -- audio before applySettings, which is what pushes the volumes in; if
+    -- there is no sound device this reports why and every call becomes a no-op
+    audio.init()
     self:applySettings()
     self.manager = Manager.new(self)
     self.world = nil
@@ -74,6 +78,8 @@ function Game:applySettings()
     i18n.setLocale(settings.get("language"))
     r.settings.post = settings.get("post") and settings.q().post
     r.settings.shadows = settings.get("shadows") ~= false and settings.q().shadows ~= false
+    audio.setVolume(settings.get("volumeMaster"), settings.get("volumeEffects"),
+        settings.get("volumeAmbience"))
     r.settings.scanline = settings.get("scanline")
     r.settings.vignette = settings.get("vignette")
     r.settings.aberration = settings.get("aberration")

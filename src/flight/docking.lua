@@ -18,6 +18,7 @@ local salvage = require("src.sim.salvage")
 local context = require("src.sim.context")
 local hud = require("src.render.hud")
 local i18n = require("src.i18n")
+local audio = require("src.audio")
 
 local docking = {}
 
@@ -122,6 +123,7 @@ function docking.scoop(f, canister)
         hud.message(L("Hold is full."), "warn")
         return
     end
+    audio.play("scoop")
     hud.message(L("Scooped {n} {n:t} of {cargo:gen:lc}", {
         n = tonnes, cargo = i18n.term(commodities.get(id).name) }), "good")
     local rec = f.player.record
@@ -137,6 +139,7 @@ function docking.dock(f)
     -- Port itself files the arrival, so missions and fees are counted once
     f.player.hull = f.ship.hull
     f.player.shield = f.ship.shield
+    audio.play("dock")
     hud.message(p.station and L("Docked at {name}", { name = place.name })
         or L("Entered {name}", { name = place.name }), "good")
     f.manager:push(Port.new(), place, { flight = f, docked = true })
@@ -149,6 +152,7 @@ function docking.disembark(f)
     end
     local rec = f.player.record
     rec.walked = (rec.walked or 0) + 1
+    audio.play("hatch")
     local OnFoot = require("src.states.onfoot")
     f.manager:push(OnFoot.new(), {
         surface = f.surface,

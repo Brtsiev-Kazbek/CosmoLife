@@ -12,6 +12,7 @@ local palette = require("src.render.palette")
 local ui = require("src.ui.widgets")
 local factions = require("src.sim.factions")
 local i18n = require("src.i18n")
+local audio = require("src.audio")
 local L = i18n.format
 
 local hud = {}
@@ -24,6 +25,14 @@ hud.messages = {}
 function hud.message(text, kind)
     table.insert(hud.messages, 1, { text = text, kind = kind or "info", life = 6.5 })
     for i = #hud.messages, 7, -1 do hud.messages[i] = nil end
+    -- Only the two that mean something bad get a sound. A bleep on every line
+    -- of chatter trains the player to ignore it, which is the opposite of what
+    -- an alert is for.
+    if kind == "warn" then
+        audio.play("warn")
+    elseif kind == "alert" then
+        audio.play("alert")
+    end
 end
 
 function hud.update(dt)

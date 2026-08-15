@@ -1069,6 +1069,35 @@ end)
 --
 -- One triangle, a pass-through shader, one pixel read back. This is the check
 -- that would have caught it on the first frame it existed.
+-- Sound reaches the driver, or says why not.
+--
+-- Under xvfb there is no sound device -- the log says so before the window
+-- opens -- so this cannot check that anything is audible. What it can check is
+-- the thing that would break silently: that building the whole catalogue into
+-- SoundData and Sources does not throw, and that when there is no device the
+-- runtime says so and turns itself off rather than half working.
+step(347, "the sound catalogue builds or reports why it cannot", function()
+    local audio = require("src.audio")
+    if not audio.available then
+        io.write("    AUDIO  unavailable: " .. tostring(audio.reason) .. "\n")
+        io.flush()
+        -- and every entry point still has to be safe
+        audio.play("laser")
+        audio.loop("engine", 1)
+        audio.update(1 / 60)
+        return
+    end
+
+    local built, failed = 0, {}
+    for _, name in ipairs(audio.names()) do
+        local e = audio._entry(name)
+        if e and e.data then built = built + 1 else failed[#failed + 1] = name end
+    end
+    io.write(string.format("    AUDIO  %d of %d voices built\n", built, #audio.names()))
+    io.flush()
+    assert(#failed == 0, "voices that would not build: " .. table.concat(failed, ", "))
+end)
+
 step(346, "a mesh's vertex colour reaches the shader", function()
     local Builder = require("src.render.mesh")
     local want = { 0.24, 0.61, 0.93 }

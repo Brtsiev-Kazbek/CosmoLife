@@ -22,6 +22,7 @@ local salvage = require("src.sim.salvage")
 local hud = require("src.render.hud")
 local settings = require("src.settings")
 local i18n = require("src.i18n")
+local audio = require("src.audio")
 
 local combatState = {}
 
@@ -40,6 +41,10 @@ function combatState.updateWeapons(f, dt)
         f.muzzle = f.muzzle + 1
         f.heat = f.heat + def.energy * 0.8
         f.game.camera:addShake(0.035)
+        -- a mining laser is a different job and says so; the small pitch
+        -- wobble stops a burst sounding like one long tone
+        audio.play(def.mining and "mining" or "laser",
+            { pitch = 0.94 + (f.muzzle % 5) * 0.03 })
     end
 end
 
@@ -270,6 +275,7 @@ function combatState.useShieldCell(f)
     f.ship.shield = f.player.shield
     -- the recharge dumps heat, so it is not free in a long fight
     f.heat = min(1, (f.heat or 0) + 0.18)
+    audio.play("shieldCell")
     hud.message(L("Shield cell fired ({n} left)", { n = f.player.shieldCells }), "good")
 end
 
@@ -286,10 +292,26 @@ function combatState.fireMissile(f)
     local w = { weapon = { damage = 140, rate = 1, energy = 0, speed = config.combat.missileSpeed,
                            color = { 1, 0.8, 0.4 } } }
     combat.fire(f.arena, f.ship, w, f.ship.fwd.x, f.ship.fwd.y, f.ship.fwd.z, 0)
+    audio.play("missile")
     hud.message(L("Missile away ({n} left)", { n = f.player.missiles }), "info")
 end
 
 function combatState.onKill(f, victim, killer)
+    -- Heard for anything close enough to matter, not only for your own kills:
+    -- a hull going up two kilometres away is the loudest thing in the sky, and
+    -- distance is the only thing that decides whether you hear it.
+    local dx = victim.pos.x - f.ship.pos.x
+    local dy = victim.pos.y - f.ship.pos.y
+    local dz = victim.pos.z - f.ship.pos.z
+    local range = math.sqrt(dx * dx + dy * dy + dz * dz)
+    if range < 9000 then
+        audio.play("explosion", {
+            volume = util.clamp(1 - range / 9000, 0.08, 1),
+            -- further away is duller as well as quieter, which a pitch drop
+            -- stands in for well enough without a filter per source
+            pitch = 1 - util.clamp(range / 9000, 0, 1) * 0.25,
+        })
+    end
     if killer == f.ship then
         f.player.record.kills = f.player.record.kills + 1
         local faction = victim.faction

@@ -22,6 +22,7 @@ local i18n = require("src.i18n")
 local Walker = require("src.sim.walker")
 local context = require("src.sim.context")
 local weather = require("src.sim.weather")
+local audio = require("src.audio")
 
 local OnFoot = class("OnFootState")
 
@@ -139,6 +140,19 @@ function OnFoot:update(dt, background)
         self.walker.onGround = false
     end
     self.onGround = self.walker.onGround
+
+    -- footfalls, and the wind heard from outside a hull rather than through one
+    local stepped, effort = self.walker:stride(dt)
+    if stepped then
+        audio.play("step", { volume = 0.5 + effort * 0.5, pitch = 0.9 + effort * 0.35 })
+    end
+    local cond2 = self.flight and self.flight.weather
+    local air = util.clamp((self.flight and self.flight.airDensity or 0) * 1.4, 0, 1)
+    audio.loop("wind", air * util.clamp(0.2 + (cond2 and cond2.strength or 0) * 0.8, 0, 1),
+        0.9 + (cond2 and cond2.strength or 0) * 0.25)
+    audio.loop("engine", 0)
+    audio.loop("cruise", 0)
+    audio.update(dt)
 
     surface:update(self.pos.x, self.pos.z, dt, 0)
     self:updatePrompt()

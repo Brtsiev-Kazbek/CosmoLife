@@ -137,6 +137,27 @@ function Walker:groundSpeed()
     return sqrt(self.vel.x * self.vel.x + self.vel.z * self.vel.z)
 end
 
+--- Advances the stride and reports when a foot lands.
+--
+-- Distance covered, not elapsed time: steps then keep pace with the sprint and
+-- with any speed scale a low-gravity world applies, without a second set of
+-- constants that would drift out of agreement with the first.
+function Walker:stride(dt)
+    local speed = self:groundSpeed()
+    if not self.onGround or speed < 0.6 then
+        -- Carry most of the stride across a stop, so shuffling forward does
+        -- not reset the count and go silent; drain it slowly so a long pause
+        -- starts the next step from the front foot.
+        self.strideDistance = (self.strideDistance or 0) * (1 - util.clamp(dt * 2, 0, 1))
+        return false
+    end
+    local W = config.walk
+    self.strideDistance = (self.strideDistance or 0) + speed * dt
+    if self.strideDistance < (W.strideLength or 1.9) then return false end
+    self.strideDistance = self.strideDistance - (W.strideLength or 1.9)
+    return true, util.clamp(speed / math.max(W.runSpeed, 1), 0.25, 1)
+end
+
 --- Extra field of view while sprinting.  Cheap, and it reads as speed far
 --- better than a number on the HUD does.
 function Walker:fovBoost()

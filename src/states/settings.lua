@@ -13,6 +13,7 @@ local settings = require("src.settings")
 local input = require("src.input")
 local lighting = require("src.render.lighting")
 local i18n = require("src.i18n")
+local audio = require("src.audio")
 
 local Settings = class("SettingsState")
 
@@ -98,6 +99,8 @@ function Settings:apply()
     local r = game.renderer
     r.settings.post = settings.get("post")
     r.settings.shadows = settings.get("shadows") ~= false and settings.q().shadows ~= false
+    audio.setVolume(settings.get("volumeMaster"), settings.get("volumeEffects"),
+        settings.get("volumeAmbience"))
     r.settings.scanline = settings.get("scanline")
     r.settings.vignette = settings.get("vignette")
     r.settings.aberration = settings.get("aberration")

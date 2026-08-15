@@ -483,6 +483,12 @@ local strings = {
     -- ------------------------------------------------------- разделы настроек
     ["CAMERA"] = "КАМЕРА",
     ["GRAPHICS"] = "ГРАФИКА",
+    ["SOUND"] = "ЗВУК",
+    ["Master volume"] = "Общая громкость",
+    ["Effects"] = "Эффекты",
+    ["Engine and weather"] = "Двигатель и погода",
+    ["Every sound in the game is generated at startup, not loaded."] =
+        "Все звуки в игре синтезируются, а не загружаются из файлов.",
     ["LANGUAGE"] = "ЯЗЫК",
     ["WEAPON"] = "ОРУЖИЕ",
     ["ENGINE"] = "ДВИГАТЕЛЬ",

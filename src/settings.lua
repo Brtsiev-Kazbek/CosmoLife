@@ -87,6 +87,18 @@ settings.schema = {
               min = 3, max = 10, step = 1, format = "%.0f" },
         },
     },
+    {
+        section = "Sound",
+        items = {
+            { id = "volumeMaster", name = "Master volume", type = "number", default = 0.8,
+              min = 0, max = 1, step = 0.05, format = "%.2f",
+              help = "Every sound in the game is generated at startup, not loaded." },
+            { id = "volumeEffects", name = "Effects", type = "number", default = 1.0,
+              min = 0, max = 1, step = 0.05, format = "%.2f" },
+            { id = "volumeAmbience", name = "Engine and weather", type = "number", default = 0.7,
+              min = 0, max = 1, step = 0.05, format = "%.2f" },
+        },
+    },
 }
 
 --- Quality presets.

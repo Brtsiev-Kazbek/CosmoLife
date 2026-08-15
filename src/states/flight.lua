@@ -38,6 +38,7 @@ local input = require("src.input")
 local salvage = require("src.sim.salvage")
 local context = require("src.sim.context")
 local autopilot = require("src.flight.autopilot")
+local audio = require("src.audio")
 local rocks = require("src.flight.rocks")
 local docking = require("src.flight.docking")
 local scene = require("src.flight.scene")
@@ -281,6 +282,32 @@ function Flight:skyTint(body) return environment.skyTint(self, body) end
 function Flight:updateWeather(body) return environment.updateWeather(self, body) end
 
 
+
+--- The soundscape: the drive and the air outside it.
+--
+-- Both are continuous voices rather than events, so this only sets where they
+-- should be and audio.update slides them there. The two are exclusive: in
+-- cruise the drive is doing something else and sounds like it.
+function Flight:updateSound(dt)
+    local thrust = math.abs(self.throttle or 0)
+    local cruising = self.warpState == "cruise" or self.warpState == "spool"
+    -- an idling drive is still running, so it never goes fully silent in space
+    local idle = self.landedOn and 0 or 0.16
+    audio.loop("engine", cruising and 0 or (idle + thrust * 0.8),
+        0.75 + thrust * 0.55)
+    audio.loop("cruise", cruising and 0.75 or 0, 0.9 + (self.warpSpool or 0) * 0.2)
+
+    -- Wind needs air to be in and something to blow: on an airless moon the
+    -- loudest storm in the generator is still silence.
+    local air = util.clamp((self.airDensity or 0) * 1.4, 0, 1)
+    local w = self.weather
+    local strength = w and w.strength or 0
+    local speed = util.clamp((self.speed or 0) / 320, 0, 1)
+    audio.loop("wind", air * util.clamp(0.12 + strength * 0.7 + speed * 0.5, 0, 1),
+        0.85 + strength * 0.3)
+
+    audio.update(dt)
+end
 
 --- Roll and pitch relative to the local horizontal, for the attitude
 --- indicator.  In surface mode the local frame already *is* the horizontal,
@@ -810,6 +837,7 @@ function Flight:update(dt, background)
         self:targetNearestPort()
     end
     self:updateDockPrompt()
+    self:updateSound(dt)
 
     self.player.hull = self.ship.hull
     self.player.shield = self.ship.shield

@@ -111,6 +111,10 @@ config.walk = {
     accelAir     = 3.5,           -- keep your momentum through a jump
     sprintFov    = 7,             -- degrees of extra FOV at full sprint
     interactRange = 4.5,
+    -- Metres between footfalls. Steps are counted by distance rather than by
+    -- time, so a sprint and a low-gravity bound both keep their own pace
+    -- without a second set of constants to disagree with these.
+    strideLength = 2.1,
 }
 
 -- ---------------------------------------------------------------------------

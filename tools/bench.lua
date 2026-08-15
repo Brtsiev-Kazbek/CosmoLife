@@ -212,6 +212,23 @@ if body then
         peakMs, framesOverBudget, emptyFrames)
 end
 
+-- Sound synthesis.
+--
+-- Voices are built on first use, not at startup, so what this measures is the
+-- worst case: the hitch a player would get if every sound in the game happened
+-- for the first time in one frame. The realistic case is one voice, which is
+-- this divided by the size of the catalogue.
+local voicesMod = require("src.audio.voices")
+
+bench("synthesise every voice", "voices", function()
+    local n = 0
+    for _, name in ipairs(voicesMod.order) do
+        local b = voicesMod[name]()
+        n = n + (b.n > 0 and 1 or 0)
+    end
+    return n
+end)
+
 -- ---------------------------------------------------------------------------
 
 print(string.format("CosmoLife benchmark  (%d iteration%s)",

@@ -5,6 +5,7 @@
 
 local palette = require("src.render.palette")
 local util = require("src.lib.util")
+local audio = require("src.audio")
 
 local ui = {}
 
@@ -366,6 +367,7 @@ function Menu:move(delta)
     end
     if self.cursor ~= c then
         self.cursor = c
+        audio.play("uiMove")
         if self.onChange then self.onChange(self:current(), c) end
     end
     self:clampScroll()
@@ -374,6 +376,7 @@ end
 function Menu:select()
     local it = self:current()
     if not it or it.disabled then return nil end
+    audio.play("uiSelect")
     if it.action then it.action(it) end
     if self.onSelect then self.onSelect(it, self.cursor) end
     return it
