@@ -1045,6 +1045,9 @@ function Flight:draw(background)
         docking = self.relativeTo ~= nil,
         hostileNear = self.hostileNear,
         sinceCombat = self.sinceCombat,
+        -- for the lead ring: the same numbers the bolt itself will use
+        weaponSpeed = self.player:weapon().weapon.speed or config.combat.laserSpeed,
+        weaponRange = config.combat.laserRange,
         autopilot = self.autopilot ~= nil,
         landed = self.landedOn ~= nil,
         gearDown = self.gearDown,

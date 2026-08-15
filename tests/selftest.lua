@@ -94,6 +94,67 @@ step(40, "target and scan", function(game)
     f:scanTarget()
 end)
 
+-- A *ship* target, so the world-space indicator and the lead ring are drawn.
+--
+-- The lesson from the canister crash: a draw path that only runs in one
+-- situation has to be given that situation, or it is never executed by any
+-- test and the player is the first to run it. The indicator only appears for a
+-- contact with an `entity`, and nothing else in this run selects one.
+step(57, "a ship target draws the lead ring", function(game)
+    local f = game.manager:current()
+    -- Put one there rather than hoping traffic obliges: the whole point is to
+    -- execute the code, and "no ship was nearby today" is exactly how the
+    -- canister crash stayed hidden.
+    local npcMod = require("src.sim.npc")
+    local p = f.ship.pos
+    local e = npcMod.create({
+        -- a trader, not a pirate: a hostile spawn makes the tutorial chain
+        -- react and this step is about the drawing, not about the sim
+        seed = 8181, systemSeed = f.world.system.seed, kind = "trader",
+        faction = "independent",
+        x = p.x + f.ship.fwd.x * 900, y = p.y + f.ship.fwd.y * 900, z = p.z + f.ship.fwd.z * 900,
+    })
+    -- moving across the line of fire, so the lead point is somewhere other
+    -- than the hull and the ring has to be computed rather than short-circuited
+    e.vel:set(f.ship.right.x * 180, f.ship.right.y * 180, f.ship.right.z * 180)
+    f.npcs[#f.npcs + 1] = e
+    f:updateContacts()
+
+    local ship
+    for _, c in ipairs(f.contacts) do
+        if c.entity == e then ship = c break end
+    end
+    assert(ship, "the spawned ship did not appear in the contact list")
+    f.target = ship
+    assert(f.target.entity.vel, "a ship contact has no velocity to lead")
+
+    -- and the lead really is off the hull, which is what makes the ring worth
+    -- drawing at all
+    local aimMod = require("src.sim.aim")
+    local lx, ly, lz = aimMod.lead(
+        e.pos.x - p.x, e.pos.y - p.y, e.pos.z - p.z,
+        e.vel.x - f.ship.vel.x, e.vel.y - f.ship.vel.y, e.vel.z - f.ship.vel.z,
+        f.player:weapon().weapon.speed or 2400)
+    assert(lx, "no intercept on a ship crossing at 180 m/s")
+    local dx, dy, dz = lx - (e.pos.x - p.x), ly - (e.pos.y - p.y), lz - (e.pos.z - p.z)
+    local off = math.sqrt(dx * dx + dy * dy + dz * dz)
+    io.write(string.format("    TARGET lead sits %.0f m off the hull\n", off))
+    io.flush()
+    assert(off > 10, string.format("the lead point is only %.1f m off the hull", off))
+end)
+
+-- The frames between 57 and here drew the indicator and the ring; had either
+-- thrown, the run would already be over.
+step(62, "the ship target survived a drawn frame", function(game)
+    local f = game.manager:current()
+    assert(f.target and f.target.entity, "the ship target was lost before it was drawn")
+    for i = #f.npcs, 1, -1 do
+        if f.npcs[i].seed == 8181 then table.remove(f.npcs, i) end
+    end
+    f.target = nil
+    f:updateContacts()
+end)
+
 step(43, "the tutorial gives a first objective", function(game)
     -- A new commander used to be given nothing at all: no target, no prompt,
     -- no goal. The chain must produce a step immediately and advance as the

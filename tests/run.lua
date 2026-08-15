@@ -1355,6 +1355,33 @@ test("no HUD mode hides everything", function(assert_)
         "an unlisted layer does not fall back to dim")
 end)
 
+test("the lead point puts the bolt and the target in the same place", function(assert_)
+    local aim = require("src.sim.aim")
+
+    -- a stationary target 1000 m away, bolt at 2000 m/s: half a second, and
+    -- the lead point is the target itself
+    local t = aim.time(0, 0, 1000, 0, 0, 0, 2000)
+    assert_(t and math.abs(t - 0.5) < 1e-9, "flight time to a stationary target is " .. tostring(t))
+    local lx, ly, lz = aim.lead(0, 0, 1000, 0, 0, 0, 2000)
+    assert_(lz == 1000 and lx == 0 and ly == 0, "the lead on a stationary target moved")
+
+    -- crossing: the lead is exactly where the target will be, which is the
+    -- property that makes this worth drawing at all
+    local px, py, pz, ft = aim.lead(0, 0, 1000, 200, 0, 0, 2000)
+    assert_(ft, "no intercept on a crossing target")
+    assert_(math.abs(px - 200 * ft) < 1e-6, "the lead is not where the target will be")
+    -- and the bolt really does cover that distance in that time
+    local reach = math.sqrt(px * px + py * py + pz * pz)
+    assert_(math.abs(reach - 2000 * ft) < 1e-6, string.format(
+        "the bolt covers %.1f m in %.3f s, which is not %.1f", reach, ft, 2000 * ft))
+
+    -- something faster than the bolt, running away, cannot be hit, and saying
+    -- so is better than drawing a ring that promises a hit
+    assert_(aim.time(0, 0, 1000, 0, 0, 3000, 2000) == nil, "a target outrunning the bolt was hit")
+    assert_(aim.time(0, 0, 1000, 0, 0, 2000, 2000) == nil, "a target at exactly bolt speed was hit")
+    assert_(aim.time(0, 0, 1000, 0, 0, 0, 0) == nil, "a bolt with no speed still hit")
+end)
+
 test("the message strip keeps what matters", function(assert_)
     local hud = require("src.render.hud")
     local function texts(list)

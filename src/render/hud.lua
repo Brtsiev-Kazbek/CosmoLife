@@ -16,6 +16,7 @@ local audio = require("src.audio")
 local L = i18n.format
 
 local hudmode = require("src.render.hudmode")
+local aim = require("src.sim.aim")
 
 local hud = {}
 
@@ -308,6 +309,70 @@ local function drawContactMarker(camera, w, h, c, selected)
     love.graphics.setColor(1, 1, 1, 1)
 end
 
+--- The selected target, drawn on the target rather than in a corner.
+--
+-- A panel in the corner of the screen tells you about the thing you are trying
+-- to shoot while your eyes are on the thing you are trying to shoot. Putting
+-- the shield and hull on the target itself means one place to look, and the
+-- lead ring -- where to aim so the bolt and the ship arrive together -- is the
+-- only part of this HUD that helps land a shot rather than describing the
+-- situation.
+local function drawTargetIndicator(ctx, w, h)
+    local t = ctx.target
+    if not t or not t.entity then return end
+    local e = t.entity
+    local camera = ctx.camera
+    local x, y, dist = camera:project(e.pos.x, e.pos.y, e.pos.z, w, h)
+    if not x then return end
+
+    local col = t.hostile and C.uiDanger or C.cyan
+    local s = util.clamp(3200 / max(dist, 1), 14, 90)
+
+    -- corner brackets rather than a closed box: the target stays visible
+    -- inside its own indicator
+    ui.setColor(col, 0.95)
+    love.graphics.setLineWidth(2)
+    local arm = s * 0.42
+    for _, corner in ipairs({ { -1, -1 }, { 1, -1 }, { -1, 1 }, { 1, 1 } }) do
+        local px, py = x + corner[1] * s, y + corner[2] * s
+        love.graphics.line(px, py, px - corner[1] * arm, py)
+        love.graphics.line(px, py, px, py - corner[2] * arm)
+    end
+    love.graphics.setLineWidth(1)
+
+    -- health, under the frame, as wide as the frame is
+    local bw = s * 2
+    local by = y + s + 5
+    if t.shield then
+        ui.bar(x - s, by, bw, 4, t.shield, C.cyan)
+        by = by + 6
+    end
+    if t.hull then
+        ui.bar(x - s, by, bw, 4, t.hull, t.hostile and C.uiDanger or C.uiPrimary)
+    end
+
+    -- Lead ring. Only while the target is in weapon range: past that the
+    -- intercept is real but the bolt expires before it arrives, and a ring
+    -- promising a hit that cannot happen is worse than none.
+    local speed = ctx.weaponSpeed
+    if not speed or not e.vel or not ctx.ship then return end
+    if dist > (ctx.weaponRange or 0) then return end
+    local ship = ctx.ship
+    local lx, ly, lz = aim.lead(
+        e.pos.x - ship.pos.x, e.pos.y - ship.pos.y, e.pos.z - ship.pos.z,
+        e.vel.x - ship.vel.x, e.vel.y - ship.vel.y, e.vel.z - ship.vel.z, speed)
+    if not lx then return end
+    local px, py = camera:project(ship.pos.x + lx, ship.pos.y + ly, ship.pos.z + lz, w, h)
+    if not px then return end
+    ui.setColor(C.amber, 0.9)
+    love.graphics.circle("line", px, py, 7)
+    love.graphics.points(px, py)
+    -- a line back to the hull, so it is obvious which target the ring is for
+    ui.setColor(C.amber, 0.35)
+    love.graphics.line(px, py, x, y)
+    love.graphics.setColor(1, 1, 1, 1)
+end
+
 -- ---------------------------------------------------------------------------
 -- Artificial horizon
 -- ---------------------------------------------------------------------------
@@ -431,6 +496,9 @@ function hud.draw(ctx, w, h)
             drawContactMarker(ctx.camera, w, h, c, c == ctx.target)
         end
     end
+    layer("target")
+    drawTargetIndicator(ctx, w, h)
+    pop()
 
     -- ---- left gauges ----------------------------------------------------
     local gx, gy = l.leftX, l.gaugeY
