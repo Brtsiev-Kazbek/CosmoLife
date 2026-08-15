@@ -24,6 +24,44 @@ local tutorial = {}
 ---   hint    a second line explaining how, with {key} placeholders
 ---   done(ctx) -> bool
 ---   keys    actions whose bound keys are substituted into `hint`
+---   marker(ctx) -> x, y, z   where to point, when the step names a place
+--
+-- The marker matters more than it looks. Being told "dock at the station" is
+-- only half an instruction when a dozen unlabelled boxes are scattered across
+-- the sky; the HUD draws whatever the current objective points at, and until
+-- now the tutorial pointed at nothing at all.
+
+--- The nearest station in the contact list, for the steps that mean "go there".
+local function nearestStation(ctx)
+    local f = ctx.flight
+    if not f or not f.contacts then return nil end
+    local best, bestD
+    for _, c in ipairs(f.contacts) do
+        if c.station then
+            local d = c.distance or math.huge
+            if not bestD or d < bestD then best, bestD = c, d end
+        end
+    end
+    if not best then return nil end
+    return best.pos.x, best.pos.y, best.pos.z
+end
+
+--- The world the player is being sent down to.
+local function landableBody(ctx)
+    local f = ctx.flight
+    if not f or not f.contacts then return nil end
+    -- one they are already near beats one across the system
+    local best, bestD
+    for _, c in ipairs(f.contacts) do
+        if c.body and c.body.landable and not c.body.giant then
+            local d = c.distance or math.huge
+            if not bestD or d < bestD then best, bestD = c, d end
+        end
+    end
+    if not best then return nil end
+    return best.pos.x, best.pos.y, best.pos.z
+end
+
 tutorial.STEPS = {
     {
         id = "look",
@@ -34,6 +72,7 @@ tutorial.STEPS = {
     },
     {
         id = "target",
+        marker = nearestStation,
         text = "Select the station",
         hint = "{target} cycles targets. Pick the station ahead.",
         keys = { "target" },
@@ -44,6 +83,7 @@ tutorial.STEPS = {
     },
     {
         id = "autopilot",
+        marker = nearestStation,
         text = "Let the autopilot fly you there",
         hint = "{autopilot} engages it. {warp} is manual cruise.",
         keys = { "autopilot", "warp" },
@@ -58,6 +98,7 @@ tutorial.STEPS = {
     },
     {
         id = "dock",
+        marker = nearestStation,
         text = "Dock at the station",
         hint = "Slow to under 120 m/s and fly into the lit mouth. {dock} to dock.",
         keys = { "dock" },
@@ -96,6 +137,7 @@ tutorial.STEPS = {
     },
     {
         id = "land",
+        marker = landableBody,
         text = "Land on a planet",
         hint = "{landingGear} lowers the gear. Approach slowly and level.",
         keys = { "landingGear" },
@@ -172,6 +214,7 @@ function tutorial.source(state, keyName)
             hint = step.hint,
             hintArgs = tutorial.hintArgs(step, keyName),
             done = function(c) return step.done(c) end,
+            marker = step.marker,
         }
     end
 end

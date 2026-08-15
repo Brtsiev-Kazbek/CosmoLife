@@ -1355,6 +1355,37 @@ test("no HUD mode hides everything", function(assert_)
         "an unlisted layer does not fall back to dim")
 end)
 
+test("an objective knows where to point", function(assert_)
+    local objectivesMod = require("src.sim.objectives")
+
+    local port = { pos = { x = 100, y = 200, z = 300 }, station = { name = "Anvil" } }
+    local ctx = {
+        player = { missions = { {
+            state = "active", kind = "delivery", destSystemId = 7,
+            destName = "Anvil", titleText = "Deliver grain", quantity = 1,
+        } } },
+        systemId = 7,
+        findPort = function(name)
+            return name == "Anvil" and port or nil
+        end,
+    }
+
+    local obj = objectivesMod.contractSource(ctx)
+    assert_(obj, "an active contract produced no objective")
+    assert_(obj.marker, "a contract in this system offered no marker")
+    local x, y, z = obj.marker(ctx)
+    assert_(x == 100 and y == 200 and z == 300,
+        string.format("the marker points at %s,%s,%s rather than at the port",
+            tostring(x), tostring(y), tostring(z)))
+
+    -- a contract for somewhere else has nothing to point at *here*, and must
+    -- say so rather than pointing at a port with the same name in this system
+    ctx.systemId = 9
+    local away = objectivesMod.contractSource(ctx)
+    assert_(away, "a contract elsewhere produced no objective at all")
+    assert_(away.marker == nil, "a contract in another system still offered a marker")
+end)
+
 test("a basis rebuilt in a left-handed frame is not mirrored", function(assert_)
     local vec3lib = require("src.lib.vec3")
     local mat4lib = require("src.lib.mat4")

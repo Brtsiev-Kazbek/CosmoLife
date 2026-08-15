@@ -247,6 +247,29 @@ end
 -- World-space markers
 -- ---------------------------------------------------------------------------
 
+--- Points at something that is off the edge of the view.
+--
+-- Used by the selected target and by the objective marker, which is the whole
+-- reason it is a function: "where is the thing I am supposed to be flying to"
+-- has to be answerable when it is behind you, and answering it twice in two
+-- slightly different ways is how the two drift apart.
+local function drawEdgeArrow(camera, w, h, x, y, z, col)
+    local dx, dy, dz = x - camera.pos.x, y - camera.pos.y, z - camera.pos.z
+    local rxl = dx * camera.right.x + dy * camera.right.y + dz * camera.right.z
+    local uy = dx * camera.up.x + dy * camera.up.y + dz * camera.up.z
+    local ang = math.atan2 and math.atan2(-uy, rxl) or 0
+    local cx, cy = w * 0.5, h * 0.5
+    local r = min(w, h) * 0.36
+    local px, py = cx + cos(ang) * r, cy + sin(ang) * r
+    ui.setColor(col or C.uiWarn, 0.9)
+    love.graphics.push()
+    love.graphics.translate(px, py)
+    love.graphics.rotate(ang)
+    love.graphics.polygon("fill", 12, 0, -6, 7, -6, -7)
+    love.graphics.pop()
+    love.graphics.setColor(1, 1, 1, 1)
+end
+
 local function drawContactMarker(camera, w, h, c, selected)
     local x, y, dist = camera:project(c.pos.x, c.pos.y, c.pos.z, w, h)
     local col = c.color or C.uiPrimary
@@ -289,22 +312,7 @@ local function drawContactMarker(camera, w, h, c, selected)
             end
         end
     elseif selected then
-        -- off screen: point at it from the edge of the view
-        local dx = c.pos.x - camera.pos.x
-        local dy = c.pos.y - camera.pos.y
-        local dz = c.pos.z - camera.pos.z
-        local rxl = dx * camera.right.x + dy * camera.right.y + dz * camera.right.z
-        local uy = dx * camera.up.x + dy * camera.up.y + dz * camera.up.z
-        local ang = math.atan2 and math.atan2(-uy, rxl) or 0
-        local cx, cy = w * 0.5, h * 0.5
-        local r = min(w, h) * 0.36
-        local px, py = cx + cos(ang) * r, cy + sin(ang) * r
-        ui.setColor(C.uiWarn, 0.9)
-        love.graphics.push()
-        love.graphics.translate(px, py)
-        love.graphics.rotate(ang)
-        love.graphics.polygon("fill", 12, 0, -6, 7, -6, -7)
-        love.graphics.pop()
+        drawEdgeArrow(camera, w, h, c.pos.x, c.pos.y, c.pos.z, C.uiWarn)
     end
     love.graphics.setColor(1, 1, 1, 1)
 end
@@ -381,6 +389,38 @@ end
 -- you approached. This draws the opening and the axis running out of it, so
 -- lining up is something the player sees rather than reads, and colours the
 -- whole thing by whether the closing speed would be let in.
+--- Where the current objective is, drawn in the world.
+--
+-- The tracker has always been able to say where to go -- Tracker:markerPos,
+-- and contracts supply the destination port -- and the flight state has always
+-- put it in the HUD context. Nothing read it. So the game knew where your
+-- contract was and never said, and the player's answer was "I spend ages
+-- looking for it".
+--
+-- Deliberately quiet: a small diamond and a distance, in its own colour, and
+-- an arrow at the edge of the view when it is behind you. It is signage, not a
+-- target lock -- the thing you shoot and the thing you are going to are
+-- different questions and should not look alike.
+local function drawObjectiveMarker(ctx, w, h)
+    local m = ctx.objectiveMarker
+    if not m then return end
+    local camera = ctx.camera
+    local x, y, dist = camera:project(m[1], m[2], m[3], w, h)
+    local col = C.amber
+    if not x or x < 0 or x > w or y < 0 or y > h then
+        drawEdgeArrow(camera, w, h, m[1], m[2], m[3], col)
+        return
+    end
+
+    ui.setColor(col, 0.9)
+    love.graphics.setLineWidth(2)
+    local r = 11
+    love.graphics.polygon("line", x, y - r, x + r, y, x, y + r, x - r, y)
+    love.graphics.setLineWidth(1)
+    ui.textCenter(util.distance(dist or 0), x, y + r + 4, col, "small")
+    love.graphics.setColor(1, 1, 1, 1)
+end
+
 local function drawCorridor(ctx, c, w, h)
     local camera = ctx.camera
     -- two axes across the mouth: any vector not parallel to the normal will do
@@ -566,6 +606,9 @@ function hud.draw(ctx, w, h)
     layer("target")
     drawTargetIndicator(ctx, w, h)
     if ctx.corridor then drawCorridor(ctx, ctx.corridor, w, h) end
+    pop()
+    layer("objective")
+    drawObjectiveMarker(ctx, w, h)
     pop()
 
     -- ---- left gauges ----------------------------------------------------

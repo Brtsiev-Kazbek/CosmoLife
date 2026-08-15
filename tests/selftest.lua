@@ -143,11 +143,39 @@ step(57, "a ship target draws the lead ring", function(game)
     assert(off > 10, string.format("the lead point is only %.1f m off the hull", off))
 end)
 
+-- A contract with a destination in this system must light it up.
+--
+-- The tracker could always say where to go and the flight state put the answer
+-- in the HUD context, where nothing read it -- so the game knew where your
+-- contract was and never showed you. This gives the player such a contract and
+-- checks the marker exists; the frames after it are what draw it.
+step(58, "the objective is marked in the world", function(game)
+    local f = game.manager:current()
+    f:updateObjective()
+    f:updateObjectiveMarker()
+
+    local m = f.objectiveMarker
+    assert(m, "the current objective points at nothing: " ..
+        tostring(f.objective and f.objective.id))
+
+    -- it has to be *at* something, not merely non-nil
+    local best, bestD
+    for _, c in ipairs(f.contacts) do
+        local d = math.sqrt((c.pos.x - m[1]) ^ 2 + (c.pos.y - m[2]) ^ 2 + (c.pos.z - m[3]) ^ 2)
+        if not bestD or d < bestD then best, bestD = c, d end
+    end
+    io.write(string.format("    DIAG-OBJ '%s' marks %s, %.0f m off\n",
+        tostring(f.objective and f.objective.id), tostring(best and best.label), bestD or -1))
+    io.flush()
+    assert(bestD and bestD < 1, "the marker is not on any contact")
+end)
+
 -- The frames between 57 and here drew the indicator and the ring; had either
 -- thrown, the run would already be over.
 step(62, "the ship target survived a drawn frame", function(game)
     local f = game.manager:current()
     assert(f.target and f.target.entity, "the ship target was lost before it was drawn")
+    assert(f.objectiveMarker, "the objective marker was lost before it was drawn")
     for i = #f.npcs, 1, -1 do
         if f.npcs[i].seed == 8181 then table.remove(f.npcs, i) end
     end

@@ -295,6 +295,22 @@ function Flight:updateWeather(body) return environment.updateWeather(self, body)
 
 
 
+--- Where the current objective is in the world, if it can say.
+--
+-- The tracker has always been able to answer this and nothing ever asked: the
+-- position was computed straight into the HUD context and read by nobody, so
+-- the game knew where your contract was and never showed you. One call a
+-- frame, kept on the state so the HUD and anything else that wants it see the
+-- same answer.
+function Flight:updateObjectiveMarker()
+    if not self.objectives then self.objectiveMarker = nil return end
+    local x, y, z = self.objectives:markerPos(self._objCtx)
+    if not x then self.objectiveMarker = nil return end
+    local m = self.objectiveMarker or {}
+    m[1], m[2], m[3] = x, y, z
+    self.objectiveMarker = m
+end
+
 --- How long ago anything violent happened, and whether it is still nearby.
 --
 -- The HUD uses this to decide it is in a fight (render/hudmode.lua). Firing is
@@ -914,6 +930,7 @@ function Flight:update(dt, background)
         self:targetNearestPort()
     end
     self:updateDockPrompt()
+    self:updateObjectiveMarker()
     self:updateCombatMood(dt)
     self:updateSound(dt)
 
@@ -1108,8 +1125,7 @@ function Flight:draw(background)
         objective = self.objective and self:objectiveText(self.objective) or nil,
         objectiveFlash = self.objectiveFlash,
         objectiveHint = self.objective and self:objectiveHint(self.objective) or nil,
-        objectiveMarker = self.objectives and select(1, self.objectives:markerPos(self._objCtx)) and
-            { self.objectives:markerPos(self._objCtx) } or nil,
+        objectiveMarker = self.objectiveMarker,
     }, w, h)
 
     if settings.get("showHints") and not self.game.showHelp then
