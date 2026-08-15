@@ -1186,6 +1186,23 @@ step(267, "the chart plots a course and marks what is owed", function(game)
     assert(map.selected and map.selected.id == far.s.id,
         "C did not centre the chart on the system a contract is owed at")
     map:draw()
+
+    -- every filter, drawn. A filter that errors on the third press is a
+    -- filter nobody finds until they press it.
+    local player2 = game.world.player
+    local hadCargo = next(player2.cargo) ~= nil
+    if not hadCargo then player2:addCargo("grain", 1) end
+    map:refreshDemand()
+    local wanted = 0
+    for _ in pairs(map.wantsCargo) do wanted = wanted + 1 end
+    assert(wanted > 0, "nowhere in 240 ly of chart buys anything in the hold")
+    for _ = 1, 4 do
+        map:keypressed("f")
+        map:draw()
+    end
+    assert((map.filter or 1) == 1, "the filters did not come back round to all systems")
+    if not hadCargo then player2:removeCargo("grain", 1) end
+
     -- left in place for the screenshot at 268; step 275 takes it back out
     selftest.plantedMission = mission
 end)

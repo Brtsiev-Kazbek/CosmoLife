@@ -398,6 +398,15 @@ local strings = {
         "WASD сдвиг   PGUP/PGDN по высоте   +/- масштаб   ENTER прыжок   TAB закрыть",
     ["WASD pan   +/- zoom   C contracts   ENTER jump   TAB close"] =
         "WASD сдвиг   +/- масштаб   C контракты   ENTER прыжок   TAB закрыть",
+    ["WASD pan   +/- zoom   F filter   C contracts   ENTER jump   TAB close"] =
+        "WASD сдвиг   +/- масштаб   F фильтр   C контракты   ENTER прыжок   TAB закрыть",
+    ["Buys your {cargo}"] = "Покупает ваш груз: {cargo}",
+    -- Названия фильтров карты: берутся из таблицы, а не из литерала в L(),
+    -- поэтому audit_locale их не видит — правятся руками.
+    ["ALL SYSTEMS"] = "ВСЕ СИСТЕМЫ",
+    ["IN RANGE"] = "В ПРЕДЕЛАХ ПРЫЖКА",
+    ["WANTS MY CARGO"] = "НУЖЕН МОЙ ГРУЗ",
+    ["LAWFUL"] = "СТРОГИЙ ЗАКОН",
     ["class {c}"] = "класс {c}",
     ["At war with {faction:ins}"] = "Война с {faction:ins}",
     ["Unvisited - long range survey"] = "Не посещена — данные дальней разведки",

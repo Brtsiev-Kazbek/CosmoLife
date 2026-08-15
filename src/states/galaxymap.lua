@@ -57,6 +57,41 @@ function Map:findContracts()
     self.contracts = out
 end
 
+--- What this system's economy eats that the player is carrying.
+--
+-- Asked of the economy table, not of a market: building a market for every
+-- star in view costs 0.11 ms each and there are a thousand of them, while
+-- `consumes` is a table lookup and answers the same question -- who wants
+-- this -- for nothing.
+function Map:demandAt(s)
+    local eco = commodities.economy(s.economyId)
+    local out = {}
+    for id in pairs(self.player.cargo or {}) do
+        if (eco.consumes[id] or 0) > 0 then out[#out + 1] = id end
+    end
+    table.sort(out)
+    return out
+end
+
+-- Filters dim what does not match rather than hiding it: a chart with holes
+-- in it is a chart you cannot navigate by.
+local FILTERS = { "none", "range", "demand", "lawful" }
+local FILTER_NAME = {
+    none = "ALL SYSTEMS", range = "IN RANGE", demand = "WANTS MY CARGO", lawful = "LAWFUL",
+}
+
+function Map:passesFilter(s, here)
+    local f = FILTERS[self.filter or 1]
+    if f == "none" then return true end
+    if f == "range" then
+        return (s.x - here.x) ^ 2 + (s.y - here.y) ^ 2 + (s.z - here.z) ^ 2
+            <= self.jumpRange ^ 2
+    end
+    if f == "demand" then return (self.wantsCargo and self.wantsCargo[s.id]) == true end
+    if f == "lawful" then return (s.lawLevel or 0) >= 0.6 end
+    return true
+end
+
 --- Selects a system, replotting the course only when it really changed.
 function Map:select(s)
     if not s or (self.selected and self.selected.id == s.id) then return end
@@ -90,7 +125,27 @@ function Map:refresh()
     local radius = min((love.graphics.getWidth() * 0.5) / self.scale + 20, 240)
     self.systems = self.world.galaxy:systemsNear(self.cx, self.cy, self.cz, radius, SLAB)
     self.jumpRange = self.player.stats.jumpRange or 10
+    self:refreshDemand()
     self._viewKey = string.format("%.0f,%.0f,%.0f,%.3f", self.cx, self.cy, self.cz, self.scale)
+end
+
+--- Which systems in view would buy what is in the hold.
+--
+-- Recomputed with the visible set rather than per frame or per system drawn:
+-- an empty hold skips it entirely, and a full one is a handful of table
+-- lookups per star.
+function Map:refreshDemand()
+    local out = {}
+    local cargo = self.player.cargo or {}
+    if next(cargo) then
+        for _, s in ipairs(self.systems) do
+            local eco = commodities.economy(s.economyId)
+            for id in pairs(cargo) do
+                if (eco.consumes[id] or 0) > 0 then out[s.id] = true break end
+            end
+        end
+    end
+    self.wantsCargo = out
 end
 
 --- Rebuilds the visible set only when the view actually moved.
@@ -164,6 +219,8 @@ function Map:keypressed(key)
         self:refresh()
     elseif key == "c" then
         self:cycleContract()
+    elseif key == "f" then
+        self.filter = ((self.filter or 1) % #FILTERS) + 1
     elseif key == "r" then
         self.showRange = not self.showRange
     end
@@ -281,8 +338,17 @@ function Map:draw()
 
             local r = util.clamp(2 + math.log(1 + s.population) * 0.22, 2, 8)
             local visited = self.player.knownSystems[s.id] ~= nil
-            love.graphics.setColor(col[1], col[2], col[3], visited and 1 or 0.5)
+            local shown = self:passesFilter(s, here)
+            local alpha = (visited and 1 or 0.5) * (shown and 1 or 0.22)
+            love.graphics.setColor(col[1], col[2], col[3], alpha)
             love.graphics.circle("fill", x, y - dy * self.scale, r)
+
+            -- somewhere that eats what is in the hold: an open ring, which is
+            -- the one mark on this chart that answers "where do I sell this"
+            if shown and self.wantsCargo and self.wantsCargo[s.id] then
+                ui.setColor(C.cyan, 0.8)
+                love.graphics.circle("line", x, y - dy * self.scale, r + 4)
+            end
 
             if s.id == here.id then
                 ui.setColor(C.uiPrimary, 1)
@@ -298,7 +364,7 @@ function Map:draw()
             if self.contracts and self.contracts[s.id] then
                 local cy = y - dy * self.scale
                 local d = r + 11
-                ui.setColor(C.amber, 0.9)
+                ui.setColor(C.amber, shown and 0.9 or 0.3)
                 love.graphics.setLineWidth(1.4)
                 love.graphics.polygon("line", x, cy - d, x + d, cy, x, cy + d, x - d, cy)
                 love.graphics.setLineWidth(1)
@@ -309,7 +375,7 @@ function Map:draw()
             if self.scale > 2.4 then
                 labels[#labels + 1] = {
                     text = s.name, x = floor(x + r + 5), y = floor(y - dy * self.scale - 7),
-                    col = col, alpha = visited and 0.9 or 0.4,
+                    col = col, alpha = (visited and 0.9 or 0.4) * (shown and 1 or 0.3),
                     rank = (s.id == here.id and 1e9 or 0)
                         + (self.selected and s.id == self.selected.id and 1e9 or 0)
                         + (self.contracts and self.contracts[s.id] and 1e8 or 0)
@@ -363,12 +429,19 @@ function Map:draw()
         x = string.format("%.0f", self.cx), y = string.format("%.0f", self.cy),
         z = string.format("%.0f", self.cz), scale = string.format("%.1f", self.scale),
     }), 40, 62, C.uiDim, "small")
+    -- the active filter has to be on screen: a chart where two thirds of the
+    -- stars have gone dim, with nothing saying why, reads as a bug
+    if (self.filter or 1) > 1 then
+        -- on the header's own line: at y+80 it hung below the wash and read as
+        -- a label lying loose on the star field
+        ui.textRight(L(FILTER_NAME[FILTERS[self.filter]]), w - 400, 62, C.cyan, "small")
+    end
     ui.rule(40, h - 60, w - 80, C.uiLine, 0.4)
     local fuel = L("FUEL") .. " " .. L("{a} / {b} t", {
         a = string.format("%.1f", self.player.fuel),
         b = string.format("%.1f", self.player.stats.fuel) })
     local fuelW = ui.font("small"):getWidth(fuel)
-    ui.textFit(L("WASD pan   +/- zoom   C contracts   ENTER jump   TAB close"),
+    ui.textFit(L("WASD pan   +/- zoom   F filter   C contracts   ENTER jump   TAB close"),
         40, h - 48, w - 100 - fuelW, C.uiDim, "small")
     ui.textRight(fuel, w - 40, h - 48, C.amber, "small")
 end
@@ -435,6 +508,7 @@ function Map:drawInfo(x, y, w)
         and sqrt((s.x - self.world.stub.x) ^ 2 + (s.y - self.world.stub.y) ^ 2
                  + (s.z - self.world.stub.z) ^ 2) > self.jumpRange) and 18 or 0
     local h = 310 + wars * 18 + extra + #contracts * 32
+        + (#self:demandAt(s) > 0 and 18 or 0)
     ui.panel(x, y, w, h, L("SYSTEM"))
     local px, py = x + 18, y + 18
     ui.textFit(s.name, px, py, w - 36, C.uiPrimary, "large")
@@ -507,6 +581,14 @@ function Map:drawInfo(x, y, w)
                 px, py, w - 36, C.uiDanger, "small")
             py = py + 18
         end
+    end
+    local demand = self:demandAt(s)
+    if #demand > 0 then
+        local names = {}
+        for i = 1, min(#demand, 3) do names[i] = L(commodities.get(demand[i]).name) end
+        ui.textFit(L("Buys your {cargo}", { cargo = table.concat(names, ", ") }),
+            px, py, w - 36, C.cyan, "small")
+        py = py + 18
     end
     if self.player.knownSystems[s.id] then
         ui.text(L("Visited"), px, py, C.uiPrimary, "small")
