@@ -59,6 +59,9 @@ function outfitting.toggleModule(p)
         local ok, why = p.player:install(item.moduleId)
         if ok then
             p.player:spend(e.price)
+            -- the tutorial's outfitting chapter asks for exactly this
+            local rec = p.player.record
+            rec.fitted = (rec.fitted or 0) + 1
             p:say(L("{module} fitted.", { module = i18n.term(e.name) }))
         else
             p:say(L("Cannot fit: {reason}", { reason = L(tostring(why)) }), true)

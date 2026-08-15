@@ -62,6 +62,48 @@ local function landableBody(ctx)
     return best.pos.x, best.pos.y, best.pos.z
 end
 
+--- Anything at all worth pointing at, for a step that just means "look".
+local function nearestContact(ctx)
+    local f = ctx.flight
+    if not f or not f.contacts then return nil end
+    local best, bestD
+    for _, c in ipairs(f.contacts) do
+        if c.marker then
+            local d = c.distance or math.huge
+            if not bestD or d < bestD then best, bestD = c, d end
+        end
+    end
+    if not best then return nil end
+    return best.pos.x, best.pos.y, best.pos.z
+end
+
+--- A point of interest that holds rocks.
+local function nearestRocks(ctx)
+    local f = ctx.flight
+    if not f or not f.contacts then return nil end
+    for _, c in ipairs(f.contacts) do
+        if c.poi and c.poi.kind == "asteroids" then
+            return c.pos.x, c.pos.y, c.pos.z
+        end
+    end
+    return nil
+end
+
+--- Whoever is shooting at you.
+local function nearestHostile(ctx)
+    local f = ctx.flight
+    if not f or not f.contacts then return nil end
+    local best, bestD
+    for _, c in ipairs(f.contacts) do
+        if c.hostile then
+            local d = c.distance or math.huge
+            if not bestD or d < bestD then best, bestD = c, d end
+        end
+    end
+    if not best then return nil end
+    return best.pos.x, best.pos.y, best.pos.z
+end
+
 tutorial.STEPS = {
     {
         id = "look",
@@ -149,6 +191,47 @@ tutorial.STEPS = {
         hint = "{disembark} leaves the ship once you are down.",
         keys = { "disembark" },
         done = function(ctx) return (ctx.player.record.walked or 0) > 0 end,
+    },
+
+    -- Everything past here used to be left for the player to find on their
+    -- own. The chain stopped at "step outside", so mining, fighting, fitting
+    -- your ship and founding a colony -- four of the things the game is
+    -- actually about -- were never mentioned to anybody.
+    {
+        id = "scan",
+        marker = nearestContact,
+        text = "Scan something",
+        hint = "Hold a target in the reticle; the scanner does the rest.",
+        done = function(ctx) return (ctx.player.record.scanned or 0) > 0 end,
+    },
+    {
+        id = "mine",
+        marker = nearestRocks,
+        text = "Mine an asteroid",
+        hint = "Fit a mining laser, find a cluster, and hold {fire} on a rock.",
+        keys = { "fire" },
+        done = function(ctx) return (ctx.player.record.mined or 0) > 0 end,
+    },
+    {
+        id = "outfit",
+        marker = nearestStation,
+        text = "Fit something to your ship",
+        hint = "OUTFITTING tab. A better scanner or shield pays for itself.",
+        done = function(ctx) return (ctx.player.record.fitted or 0) > 0 end,
+    },
+    {
+        id = "fight",
+        marker = nearestHostile,
+        text = "Win a fight",
+        hint = "Pirates carry bounties. {fire} shoots; the ring is where to aim.",
+        keys = { "fire" },
+        done = function(ctx) return (ctx.player.record.kills or 0) > 0 end,
+    },
+    {
+        id = "colony",
+        text = "Start something of your own",
+        hint = "COLONIES tab, on a world with room for one.",
+        done = function(ctx) return (ctx.player.record.coloniesFounded or 0) > 0 end,
     },
 }
 

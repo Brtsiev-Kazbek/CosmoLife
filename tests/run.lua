@@ -1675,13 +1675,23 @@ test("the tutorial chain advances, skips and finishes", function(assert_)
     assert_(after ~= nil and after.id == "buy",
         "expected to skip to 'buy', landed on " .. tostring(after and after.id))
 
-    -- the whole chain completes and stays completed
+    -- The whole chain completes and stays completed.
+    --
+    -- The list below is every step's completion condition, which is the point:
+    -- when the chain grew past "step outside" into mining, fighting,
+    -- outfitting and colonies, this test is what says whether the new steps
+    -- can be finished at all rather than parking the player on one for ever.
     p.cargo = { grain = 3 }
     p.record.jumps = 2
     p.record.trades = 5
     p.missions = { {} }
     p.record.landings = 1
     p.record.walked = 1
+    p.record.scanned = 1
+    p.record.mined = 4
+    p.record.fitted = 1
+    p.record.kills = 1
+    p.record.coloniesFounded = 1
     assert_(tutorial.current(state, ctx) == nil, "the chain did not finish")
     assert_(state.done == true, "the chain did not mark itself done")
     assert_(tutorial.current(state, ctx) == nil, "a finished chain produced a step again")

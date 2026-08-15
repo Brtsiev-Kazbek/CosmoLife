@@ -598,6 +598,21 @@ local strings = {
     ["{landingGear} lowers the gear. Approach slowly and level."] =
         "{landingGear} выпускает шасси. Подходите медленно и ровно.",
     ["Step outside"] = "Выйдите наружу",
+    ["Scan something"] = "Просканируйте что-нибудь",
+    ["Hold a target in the reticle; the scanner does the rest."] =
+        "Держите цель в прицеле — сканер сделает остальное.",
+    ["Mine an asteroid"] = "Добудьте руду из астероида",
+    ["Fit a mining laser, find a cluster, and hold {fire} on a rock."] =
+        "Поставьте шахтёрский лазер, найдите скопление и держите {fire} на камне.",
+    ["Fit something to your ship"] = "Оснастите корабль",
+    ["OUTFITTING tab. A better scanner or shield pays for itself."] =
+        "Вкладка ОСНАЩЕНИЕ. Хороший сканер или щит окупают себя.",
+    ["Win a fight"] = "Выиграйте бой",
+    ["Pirates carry bounties. {fire} shoots; the ring is where to aim."] =
+        "За пиратов дают награду. {fire} — огонь, кольцо показывает упреждение.",
+    ["Start something of your own"] = "Начните своё дело",
+    ["COLONIES tab, on a world with room for one."] =
+        "Вкладка КОЛОНИИ, на мире, где есть место.",
     ["{disembark} leaves the ship once you are down."] =
         "{disembark} выпускает вас из корабля после посадки.",
     ["All objectives complete. The galaxy is yours."] =

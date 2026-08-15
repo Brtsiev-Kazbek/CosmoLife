@@ -67,6 +67,8 @@ function rocks.updateMining(f)
                         local taken = min(tonnes, free)
                         if taken > 0 then
                             f.player:addCargo(ore, taken)
+                            local rec = f.player.record
+                            rec.mined = (rec.mined or 0) + taken
                             hud.message(L("Mined {n} {n:t} of {cargo:gen:lc}", {
                                 n = taken, cargo = i18n.term(commodities.get(ore).name) }), "good")
                         else
