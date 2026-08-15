@@ -289,6 +289,13 @@ local strings = {
     ["CURRENT SYSTEM"] = "ТЕКУЩАЯ СИСТЕМА",
     ["ENTER TO JUMP"] = "ENTER — ПРЫЖОК",
     ["OUT OF JUMP RANGE"] = "ВНЕ ДАЛЬНОСТИ ПРЫЖКА",
+    ["{n} {n:jump}, {t} t of fuel"] = "{n} {n:jump}, {t} т топлива",
+    ["next: {name}"] = "следующая: {name}",
+    ["No course: nothing within one jump leads there."] =
+        "Курс не проложен: туда не ведёт ни один прыжок.",
+    ["OWED HERE"] = "ЗДЕСЬ ЖДУТ",
+    ["{name} - {n} {n:day}"] = "{name} — {n} {n:day}",
+    ["No contracts to plot"] = "Нет контрактов для отметки",
     ["NOT ENOUGH FUEL"] = "НЕ ХВАТАЕТ ТОПЛИВА",
 
     -- настройки
@@ -389,6 +396,8 @@ local strings = {
         "центр {x}, {y}, {z} св. лет     масштаб {scale} px/св. год",
     ["WASD pan   PGUP/PGDN vertical   +/- zoom   ENTER jump   TAB close"] =
         "WASD сдвиг   PGUP/PGDN по высоте   +/- масштаб   ENTER прыжок   TAB закрыть",
+    ["WASD pan   +/- zoom   C contracts   ENTER jump   TAB close"] =
+        "WASD сдвиг   +/- масштаб   C контракты   ENTER прыжок   TAB закрыть",
     ["class {c}"] = "класс {c}",
     ["At war with {faction:ins}"] = "Война с {faction:ins}",
     ["Unvisited - long range survey"] = "Не посещена — данные дальней разведки",

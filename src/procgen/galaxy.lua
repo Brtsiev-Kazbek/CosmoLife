@@ -240,6 +240,11 @@ end
 
 --- Every system within `radius` light years of a point.
 --
+-- The `distance` it writes onto each system is only good until the next sweep:
+-- sector contents are cached and shared, so a second call from anywhere
+-- rewrites the field on the same tables. Read it before doing anything else,
+-- or measure the distance yourself.
+--
 -- `halfHeight` limits how far above and below the plane sectors are scanned.
 -- The galaxy is a thin disc, so a chart looking at a 200 ly circle does not
 -- need the 200 ly of empty space over it: passing a slab height turns an

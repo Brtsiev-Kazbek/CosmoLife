@@ -1135,9 +1135,72 @@ step(266, "clicking a star on the chart selects that star", function(game)
         "clicking %s selected %s instead", target.name, hit.name))
 end)
 
+step(267, "the chart plots a course and marks what is owed", function(game)
+    local map = selftest.map
+    assert(map, "the galaxy map was not open")
+    local here = game.world.stub
+
+    -- a few jumps out -- the case the map used to answer with "OUT OF JUMP
+    -- RANGE" and nothing else. Not the far edge of the chart: the chart holds
+    -- 240 ly and a course across all of it is a different (slower) test.
+    local far
+    for _, s in ipairs(map.systems) do
+        local d = math.sqrt((s.x - here.x) ^ 2 + (s.y - here.y) ^ 2 + (s.z - here.z) ^ 2)
+        if d > map.jumpRange * 2.2 and d < map.jumpRange * 4
+            and (not far or d > far.d) then far = { s = s, d = d } end
+    end
+    assert(far, "the chart holds nothing beyond two jumps to plot a course to")
+
+    map:select(far.s)
+    assert(map.route, "no course to a system " .. math.floor(far.d) .. " ly away: "
+        .. tostring(map.routeReason))
+    assert(map.route.jumps >= 2, "a system beyond the drive was reached in one jump")
+    local prev, worst = here, 0
+    for _, s in ipairs(map.route.hops) do
+        worst = math.max(worst, math.sqrt((s.x - prev.x) ^ 2 + (s.y - prev.y) ^ 2 + (s.z - prev.z) ^ 2))
+        prev = s
+    end
+    assert(worst <= map.jumpRange + 1e-6,
+        string.format("a leg of %.1f ly is beyond the %.1f ly drive", worst, map.jumpRange))
+    assert(map.route.hops[#map.route.hops].id == far.s.id, "the course ends somewhere else")
+
+    -- a contract with a destination on the chart: the diamond, the label rank
+    -- and the panel's list are all paths nothing else in the test walks
+    -- every field the mission code touches while this sits in the list:
+    -- `expire` reads expires and factionId, the panel reads title and destName
+    local mission = {
+        state = "active", type = "delivery", destSystemId = far.s.id, destName = far.s.name,
+        title = "Deliver grain", commodity = "grain", quantity = 4, reward = 5000,
+        expires = (game.world.day or 0) + 6, factionId = "independent",
+        employer = "Selftest Freight", days = 6,
+    }
+    local player = game.world.player
+    player.missions[#player.missions + 1] = mission
+    map:findContracts()
+    assert(map.contracts[far.s.id], "a contract destination is not marked on the chart")
+    map:draw()
+
+    -- and the key that puts the cursor on it without any panning at all
+    map:select(here)
+    map:cycleContract()
+    assert(map.selected and map.selected.id == far.s.id,
+        "C did not centre the chart on the system a contract is owed at")
+    map:draw()
+    -- left in place for the screenshot at 268; step 275 takes it back out
+    selftest.plantedMission = mission
+end)
+
 step(275, "hyperspace jump", function(game)
     local map = selftest.map
     if not map then return end
+    if selftest.plantedMission then
+        local list = game.world.player.missions
+        for i, m in ipairs(list) do
+            if m == selftest.plantedMission then table.remove(list, i) break end
+        end
+        selftest.plantedMission = nil
+        map:findContracts()
+    end
     local targets = game.world:jumpTargets()
     local pick
     for _, t in ipairs(targets) do

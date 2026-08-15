@@ -14,6 +14,8 @@ local factions = require("src.sim.factions")
 local i18n = require("src.i18n")
 local commodities = require("src.sim.commodities")
 local hud = require("src.render.hud")
+local routeMod = require("src.sim.route")
+local missionsMod = require("src.sim.missions")
 
 local Map = class("GalaxyMapState")
 
@@ -35,6 +37,49 @@ function Map:enter(flight)
     self.selected = here
     self.showRange = true
     self:refresh()
+    self:findContracts()
+    self:planRoute()
+end
+
+--- Systems the player has promised to reach, by id.
+--
+-- The chart knew nothing about the contracts in the hold, so a delivery to a
+-- system four jumps away was a name in a list and a search on the map.
+function Map:findContracts()
+    local out = {}
+    for _, m in ipairs(self.player.missions or {}) do
+        if m.state == "active" and m.destSystemId then
+            local list = out[m.destSystemId] or {}
+            list[#list + 1] = m
+            out[m.destSystemId] = list
+        end
+    end
+    self.contracts = out
+end
+
+--- Selects a system, replotting the course only when it really changed.
+function Map:select(s)
+    if not s or (self.selected and self.selected.id == s.id) then return end
+    self.selected = s
+    self:planRoute()
+end
+
+--- A course to the selection, however many jumps it takes.
+--
+-- The chart used to say "OUT OF JUMP RANGE" and stop there, which is the least
+-- useful true thing it could say: a map exists for the places you cannot reach
+-- directly. Plotted on selection rather than per frame -- the search is a few
+-- milliseconds on a long haul.
+function Map:planRoute()
+    self.route, self.routeReason = nil, nil
+    local s, here = self.selected, self.world.stub
+    if not s or s.id == here.id then return end
+    local world = self.world
+    self.route, self.routeReason = routeMod.plan({
+        galaxy = world.galaxy, from = here, to = s,
+        jumpRange = self.jumpRange,
+        fuelCost = function(d) return world:fuelCost(d) end,
+    })
 end
 
 -- How far above and below the plane the chart looks.  The disc is thin, so
@@ -115,18 +160,42 @@ function Map:keypressed(key)
     elseif key == "home" then
         local here = self.world.stub
         self.cx, self.cy, self.cz = here.x, here.y, here.z
-        self.selected = here
+        self:select(here)
         self:refresh()
+    elseif key == "c" then
+        self:cycleContract()
     elseif key == "r" then
         self.showRange = not self.showRange
     end
+end
+
+--- Centres the chart on the next system a contract is owed at.
+--
+-- Panning to a name read off the contracts list was the slowest thing the map
+-- asked anyone to do, and it is the one thing the map already knows.
+function Map:cycleContract()
+    local ids = util.keys(self.contracts or {})
+    if #ids == 0 then
+        hud.message(L("No contracts to plot"), "warn")
+        return
+    end
+    table.sort(ids)
+    local at = 0
+    for i, id in ipairs(ids) do
+        if self.selected and self.selected.id == id then at = i end
+    end
+    local s = self.world.galaxy:byId(ids[(at % #ids) + 1])
+    if not s then return end
+    self.cx, self.cy, self.cz = s.x, s.y, s.z
+    self:refresh()
+    self:select(s)
 end
 
 function Map:mousepressed(x, y, button)
     local w, h = love.graphics.getWidth(), love.graphics.getHeight()
     local s = self:nearestToCursor(w, h)
     if s then
-        self.selected = s
+        self:select(s)
         if button == 2 then self:jump() end
     end
 end
@@ -224,6 +293,16 @@ function Map:draw()
                 ui.setColor(C.uiWarn, 1)
                 love.graphics.rectangle("line", x - r - 7, y - dy * self.scale - r - 7, (r + 7) * 2, (r + 7) * 2)
             end
+            -- somewhere you owe someone something: a diamond, so it reads
+            -- differently from the current system's rings and the selection box
+            if self.contracts and self.contracts[s.id] then
+                local cy = y - dy * self.scale
+                local d = r + 11
+                ui.setColor(C.amber, 0.9)
+                love.graphics.setLineWidth(1.4)
+                love.graphics.polygon("line", x, cy - d, x + d, cy, x, cy + d, x - d, cy)
+                love.graphics.setLineWidth(1)
+            end
             -- Labels are collected, not drawn here. Printing one per system
             -- turned the chart into an unreadable wall of text the moment the
             -- view held more than a few dozen stars.
@@ -233,6 +312,7 @@ function Map:draw()
                     col = col, alpha = visited and 0.9 or 0.4,
                     rank = (s.id == here.id and 1e9 or 0)
                         + (self.selected and s.id == self.selected.id and 1e9 or 0)
+                        + (self.contracts and self.contracts[s.id] and 1e8 or 0)
                         + (visited and 1e6 or 0) + (s.population or 0),
                 }
             end
@@ -241,14 +321,30 @@ function Map:draw()
 
     self:drawLabels(labels, w, h)
 
-    -- route line
+    -- the course: every leg of it, not just the straight line to somewhere
+    -- that may be four jumps away
     if self.selected and self.selected.id ~= here.id then
         local hx, hy = self:dotOf(here, w, h)
-        local sx, sy = self:dotOf(self.selected, w, h)
-        local dist = sqrt((self.selected.x - here.x) ^ 2 + (self.selected.y - here.y) ^ 2 + (self.selected.z - here.z) ^ 2)
-        ui.setColor(dist <= self.jumpRange and C.uiPrimary or C.uiDanger, 0.7)
         love.graphics.setLineWidth(1)
-        love.graphics.line(hx, hy, sx, sy)
+        if self.route then
+            local px, py = hx, hy
+            -- over a field of a few thousand stars a hairline is not a course
+            love.graphics.setLineWidth(1.6)
+            ui.setColor(C.uiPrimary, 0.85)
+            for i, s in ipairs(self.route.hops) do
+                local x, y = self:dotOf(s, w, h)
+                love.graphics.line(px, py, x, y)
+                -- a stop on the way, drawn smaller than a selection
+                if i < #self.route.hops then
+                    love.graphics.circle("line", x, y, 4)
+                end
+                px, py = x, y
+            end
+        else
+            local sx, sy = self:dotOf(self.selected, w, h)
+            ui.setColor(C.uiDanger, 0.7)
+            love.graphics.line(hx, hy, sx, sy)
+        end
     end
 
     -- The chart furniture sits over the star field, so it gets a wash behind
@@ -272,7 +368,7 @@ function Map:draw()
         a = string.format("%.1f", self.player.fuel),
         b = string.format("%.1f", self.player.stats.fuel) })
     local fuelW = ui.font("small"):getWidth(fuel)
-    ui.textFit(L("WASD pan   PGUP/PGDN vertical   +/- zoom   ENTER jump   TAB close"),
+    ui.textFit(L("WASD pan   +/- zoom   C contracts   ENTER jump   TAB close"),
         40, h - 48, w - 100 - fuelW, C.uiDim, "small")
     ui.textRight(fuel, w - 40, h - 48, C.amber, "small")
 end
@@ -332,7 +428,13 @@ function Map:drawInfo(x, y, w)
     for _, war in ipairs(self.world.diplomacy:activeWars()) do
         if war.a == s.factionId or war.b == s.factionId then wars = wars + 1 end
     end
-    local h = 300 + wars * 18
+    local contracts = (self.contracts and self.contracts[s.id]) or {}
+    -- the course line and the contract list are both variable, and the panel
+    -- has to be told about every line it will hold or the last one falls out
+    local extra = (self.selected and self.selected.id ~= self.world.stub.id
+        and sqrt((s.x - self.world.stub.x) ^ 2 + (s.y - self.world.stub.y) ^ 2
+                 + (s.z - self.world.stub.z) ^ 2) > self.jumpRange) and 18 or 0
+    local h = 310 + wars * 18 + extra + #contracts * 32
     ui.panel(x, y, w, h, L("SYSTEM"))
     local px, py = x + 18, y + 18
     ui.textFit(s.name, px, py, w - 36, C.uiPrimary, "large")
@@ -344,9 +446,15 @@ function Map:drawInfo(x, y, w)
     dist = sqrt((s.x - here.x) ^ 2 + (s.y - here.y) ^ 2 + (s.z - here.z) ^ 2)
     local cost = self.world:fuelCost(dist)
 
+    -- Beyond one jump the direct cost is a fiction -- it clamps at 24 t and
+    -- reads as a flat contradiction of the course total printed below it.
+    -- What the trip costs is what the legs cost.
+    local outOfRange = dist > self.jumpRange
+    local fuelShown = (outOfRange and self.route) and self.route.fuel or cost
+
     local rows = {
         { L("Distance"), L("{n} ly", { n = string.format("%.2f", dist) }) },
-        { L("Fuel needed"), L("{n} t", { n = string.format("%.1f", cost) }) },
+        { L("Fuel needed"), L("{n} t", { n = string.format("%.1f", fuelShown) }) },
         { L("Allegiance"), L(faction.name) },
         { L("Government"), L(s.governmentName) },
         { L("Economy"), L(s.economyName) },
@@ -366,8 +474,21 @@ function Map:drawInfo(x, y, w)
     end
 
     py = py + 6
-    if dist > self.jumpRange then
-        ui.text(L("OUT OF JUMP RANGE"), px, py, C.uiDanger, "small")
+    if outOfRange then
+        -- "out of range" on its own is a dead end; the course is the answer
+        if self.route then
+            ui.text(L("{n} {n:jump}, {t} t of fuel",
+                { n = self.route.jumps, t = string.format("%.1f", self.route.fuel) }),
+                px, py, C.uiPrimary, "small")
+            py = py + 18
+            ui.textFit(L("next: {name}", { name = self.route.hops[1].name }),
+                px, py, w - 36, C.uiText, "small")
+        else
+            ui.text(L("OUT OF JUMP RANGE"), px, py, C.uiDanger, "small")
+            py = py + 18
+            ui.paragraph(L("No course: nothing within one jump leads there."),
+                px, py, w - 36, C.uiDim, "small")
+        end
     elseif cost > self.player.fuel then
         ui.text(L("NOT ENOUGH FUEL"), px, py, C.uiDanger, "small")
     elseif s.id == here.id then
@@ -391,6 +512,22 @@ function Map:drawInfo(x, y, w)
         ui.text(L("Visited"), px, py, C.uiPrimary, "small")
     else
         ui.paragraph(L("Unvisited - long range survey"), px, py, w - 36, C.uiDim, "small")
+    end
+    py = py + 22
+
+    -- what you promised, and by when
+    if #contracts > 0 then
+        ui.text(L("OWED HERE"), px, py, C.amber, "small")
+        py = py + 18
+        local day = self.world.day or 0
+        for _, m in ipairs(contracts) do
+            ui.textFit(missionsMod.title(m), px, py, w - 36, C.uiText, "small")
+            py = py + 15
+            local left = floor(max(0, (m.expires or day) - day))
+            ui.textFit(L("{name} - {n} {n:day}", { name = m.destName or "?", n = left }),
+                px + 8, py, w - 44, left <= 1 and C.uiWarn or C.uiDim, "small")
+            py = py + 17
+        end
     end
 end
 

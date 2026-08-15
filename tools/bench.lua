@@ -60,6 +60,19 @@ bench("galaxy sweep 60ly", "systems found", function()
     return #list
 end)
 
+-- Plotting a course is on a keypress, not in a frame, but it is the most
+-- expensive thing the chart does and it grows with the distance asked for.
+bench("plot a 60 ly course", "jumps", function()
+    local routeMod = require("src.sim.route")
+    local list = g:systemsNear(startStub.x, startStub.y, startStub.z, 60, 24)
+    local to = list[#list]
+    local r = routeMod.plan({
+        galaxy = g, from = startStub, to = to, jumpRange = 10,
+        fuelCost = function(d) return math.min(0.6 + (d / 10) ^ 1.7 * 3.4, 24) end,
+    })
+    return r and r.jumps or 0
+end)
+
 bench("system build", "bodies", function()
     local sys = systemGen.build(startStub, diplo, 5)
     return #sys.bodies

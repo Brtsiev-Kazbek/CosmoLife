@@ -404,6 +404,65 @@ test("a colony's shortfall is what to put in the hold", function(assert_)
     assert_(trade.wanted(nil, "water", 30) == 0, "a pilot with no colonies was asked to supply one")
 end)
 
+test("a course is plotted through systems in range", function(assert_)
+    local routeMod = require("src.sim.route")
+    -- a line of stops 9 ly apart with a cloud of decoys 3 ly apart beside it:
+    -- a search that counted fuel took the scenic route through the decoys to
+    -- save half a percent of a tank, which is not a course anyone flies
+    local all = {}
+    for i = 0, 6 do all[#all + 1] = { id = "line" .. i, name = "L" .. i, x = i * 9, y = 0, z = 0 } end
+    for i = 0, 20 do all[#all + 1] = { id = "dec" .. i, name = "D" .. i, x = i * 3, y = 0, z = 6 } end
+    local fake = { systemsNear = function(_, x, y, z, r)
+        local out = {}
+        for _, v in ipairs(all) do
+            local d = math.sqrt((v.x - x) ^ 2 + (v.y - y) ^ 2 + (v.z - z) ^ 2)
+            if d <= r then v.distance = d; out[#out + 1] = v end
+        end
+        table.sort(out, function(a, b) return a.distance < b.distance end)
+        return out
+    end }
+    local function fuel(d) return 0.6 + (d / 10) ^ 1.7 * 3.4 end
+
+    local r = routeMod.plan({ galaxy = fake, from = all[1], to = all[7],
+                              jumpRange = 10, fuelCost = fuel })
+    assert_(r ~= nil, "no course over a line of systems 9 ly apart")
+    assert_(r.jumps == 6, "took " .. tostring(r and r.jumps) .. " jumps where 6 would do")
+    assert_(r.hops[#r.hops].id == all[7].id, "the course does not end at the destination")
+    assert_(math.abs(r.fuel - 6 * fuel(9)) < 0.01, "fuel does not match the legs flown")
+
+    -- a leg longer than the drive can manage is not a course at all
+    local far = { id = "far", name = "F", x = 400, y = 0, z = 0 }
+    all[#all + 1] = far
+    local none, why = routeMod.plan({ galaxy = fake, from = all[1], to = far,
+                                      jumpRange = 10, fuelCost = fuel })
+    assert_(none == nil and why ~= nil, "plotted a course across an empty gulf")
+
+    -- one hop when one hop does it, and no hops when you are already there
+    local one = routeMod.plan({ galaxy = fake, from = all[1], to = all[2],
+                                jumpRange = 10, fuelCost = fuel })
+    assert_(one.jumps == 1, "a system within range took " .. one.jumps .. " jumps")
+    local here = routeMod.plan({ galaxy = fake, from = all[1], to = all[1],
+                                 jumpRange = 10, fuelCost = fuel })
+    assert_(here.jumps == 0 and here.fuel == 0, "burned fuel going nowhere")
+end)
+
+test("a course through the real galaxy is plotted the same every time", function(assert_)
+    local routeMod = require("src.sim.route")
+    local g = Galaxy.new(7)
+    local from = g:findStartSystem()
+    local function fuel(d) return util.clamp(0.6 + (d / 10) ^ 1.7 * 3.4, 0.4, 24) end
+    local near = g:systemsNear(from.x, from.y, from.z, 60, 44)
+    local to = near[#near]
+    local span = to.distance      -- read now: the next sweep overwrites it
+    local first = routeMod.plan({ galaxy = g, from = from, to = to, jumpRange = 10, fuelCost = fuel })
+    assert_(first ~= nil, "no course across 60 ly of populated space")
+    assert_(first.jumps * 10 >= span * 0.9,
+        "the course claims to cross " .. math.floor(span) .. " ly in " .. first.jumps .. " jumps")
+    local again = routeMod.plan({ galaxy = g, from = from, to = to, jumpRange = 10, fuelCost = fuel })
+    assert_(again.jumps == first.jumps and math.abs(again.fuel - first.fuel) < 1e-9,
+        "the same course was plotted twice and came out different")
+end)
+
 test("contraband legality follows local law", function(assert_)
     local narc = commodities.get("narcotics")
     local strict = select(1, commodities.legalityIn(narc, 0.9))
