@@ -66,12 +66,72 @@ end
 
 hud.messages = {}
 
+-- ---------------------------------------------------------------------------
+-- Messages
+-- ---------------------------------------------------------------------------
+
+-- How many lines can be on screen at once.
+--
+-- It was seven, and the strip drew as many as fitted the band, so a busy
+-- moment -- arriving in a system, being scanned, taking a contract -- filled a
+-- third of the screen with text nobody reads. Three is what a player takes in
+-- between glances at the world.
+hud.MAX_MESSAGES = 3
+
+-- Which lines survive when there are more than three. A warning has to beat
+-- the chatter that arrives on top of it, or the one line that mattered is
+-- gone before it is read.
+local PRIORITY = { alert = 3, warn = 2, good = 1, info = 0 }
+
+hud.PRIORITY = PRIORITY
+
+local MESSAGE_LIFE = 6.5
+
+--- Adds a line to a message list, keeping the list within its cap.
+--
+-- Pure, so the rule can be tested without a window: the list goes in, the list
+-- comes out, and nothing here draws or makes a sound. Returns true when the
+-- line is genuinely new, which is what decides whether an alarm sounds -- a
+-- warning repeating every frame must not become a klaxon.
+function hud.push(list, text, kind, cap)
+    kind = kind or "info"
+    cap = cap or hud.MAX_MESSAGES
+
+    -- The same line again refreshes the one already there rather than stacking
+    -- copies of itself. "Hold is full" fires once per scoop attempt, which
+    -- used to push everything else off the screen on its own.
+    for i, m in ipairs(list) do
+        if m.text == text then
+            m.life = MESSAGE_LIFE
+            m.kind = kind
+            table.remove(list, i)
+            table.insert(list, 1, m)
+            return false
+        end
+    end
+
+    table.insert(list, 1, { text = text, kind = kind, life = MESSAGE_LIFE })
+
+    -- Over the cap, the lowest priority goes, and the oldest of those. The new
+    -- line is not exempt: three alerts and an incoming "info" means the info
+    -- never appears, which is the correct answer.
+    while #list > cap do
+        local worst, worstRank = 1, math.huge
+        for i = #list, 1, -1 do
+            local rank = PRIORITY[list[i].kind] or 0
+            if rank < worstRank then worst, worstRank = i, rank end
+        end
+        table.remove(list, worst)
+    end
+    return true
+end
+
 function hud.message(text, kind)
-    table.insert(hud.messages, 1, { text = text, kind = kind or "info", life = 6.5 })
-    for i = #hud.messages, 7, -1 do hud.messages[i] = nil end
-    -- Only the two that mean something bad get a sound. A bleep on every line
-    -- of chatter trains the player to ignore it, which is the opposite of what
-    -- an alert is for.
+    local fresh = hud.push(hud.messages, text, kind)
+    -- Only the two that mean something bad get a sound, and only when the line
+    -- is new. A bleep on every line of chatter trains the player to ignore it,
+    -- which is the opposite of what an alert is for.
+    if not fresh then return end
     if kind == "warn" then
         audio.play("warn")
     elseif kind == "alert" then

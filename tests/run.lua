@@ -1355,6 +1355,46 @@ test("no HUD mode hides everything", function(assert_)
         "an unlisted layer does not fall back to dim")
 end)
 
+test("the message strip keeps what matters", function(assert_)
+    local hud = require("src.render.hud")
+    local function texts(list)
+        local out = {}
+        for i, m in ipairs(list) do out[i] = m.text end
+        return table.concat(out, ",")
+    end
+
+    -- newest first, capped at three
+    local list = {}
+    for _, t in ipairs({ "a", "b", "c", "d" }) do hud.push(list, t, "info") end
+    assert_(#list == 3, "the strip kept " .. #list .. " lines")
+    assert_(texts(list) == "d,c,b", "expected d,c,b and got " .. texts(list))
+
+    -- a warning survives the chatter that lands on top of it
+    list = {}
+    hud.push(list, "warning", "warn")
+    for _, t in ipairs({ "x", "y", "z" }) do hud.push(list, t, "info") end
+    local kept = false
+    for _, m in ipairs(list) do if m.text == "warning" then kept = true end end
+    assert_(kept, "a warning was pushed off the strip by chatter: " .. texts(list))
+
+    -- and an alert beats a warning in turn
+    list = {}
+    hud.push(list, "alert", "alert")
+    hud.push(list, "warn1", "warn")
+    hud.push(list, "warn2", "warn")
+    hud.push(list, "warn3", "warn")
+    assert_(list[#list].text == "alert" or texts(list):find("alert"),
+        "the alert did not survive three warnings: " .. texts(list))
+
+    -- the same line again refreshes rather than stacking
+    list = {}
+    assert_(hud.push(list, "same", "warn") == true, "a new line reported as a repeat")
+    list[1].life = 1
+    assert_(hud.push(list, "same", "warn") == false, "a repeat reported as new")
+    assert_(#list == 1, "a repeated line stacked: " .. texts(list))
+    assert_(list[1].life > 1, "a repeated line did not have its life refreshed")
+end)
+
 test("text fitting never returns something wider than asked", function(assert_)
     -- ui.fit does the width maths; without a graphics context we can still
     -- check the byte-level contract that stops it splitting a UTF-8 character
