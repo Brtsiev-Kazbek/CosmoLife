@@ -54,8 +54,14 @@ local AO_FADE_END = 400
 
 -- Distance at which a town drops to its silhouette mesh, in metres. Past this
 -- a window or a walkway is well under a pixel, so what the swap changes is the
--- triangle count rather than the picture.
+-- triangle count rather than the picture. A city is bigger than a village and
+-- has to keep its detail further out, so the figure scales with the built
+-- ground rather than being one number for a hamlet and a capital alike.
 local SETTLEMENT_DETAIL_RANGE = 3200
+
+local function detailRangeFor(mesh)
+    return max(SETTLEMENT_DETAIL_RANGE, (mesh.cityRadius or mesh.radius or 0) * 4)
+end
 
 local CHUNK = config.render.terrainChunkSize
 local settings = require("src.settings")
@@ -467,14 +473,25 @@ function Surface:update(x, z, dt, altitude)
     self:_updateSettlements(x, z)
 end
 
---- Detail meshes for any settlement close enough to see, one per frame.
+--- Town meshes for anything close enough to see, one build per frame.
+--
+-- Two stages: the silhouette as soon as the town is in range at all, the full
+-- mesh when the player is close enough for it to be more than a smudge. That
+-- is what lets the range go from sixteen kilometres to sixty without paying
+-- for a city's windows across the horizon.
 function Surface:_updateSettlements(x, z)
+    local range = math.min(self.viewRange * 4, settings.q().settlementRange)
     for _, s in ipairs(self.settlements) do
         local d = sqrt((x - s.x) ^ 2 + (z - s.z) ^ 2)
-        if d < math.min(self.viewRange, settings.q().settlementRange)
-            and not self.settlementMeshes[s.place.seed] then
+        local mesh = self.settlementMeshes[s.place.seed]
+        if not mesh then
+            if d < range then
+                self:_buildSettlement(s, true)
+                return     -- one town per frame is plenty
+            end
+        elseif mesh.layoutOnly and d < detailRangeFor(mesh) then
             self:_buildSettlement(s)
-            return     -- one town per frame is plenty
+            return
         end
     end
 end
@@ -693,7 +710,14 @@ function Surface:_isSea(h, x, z)
     return h <= sea - (x * x + z * z) / (2 * self.radius) + 0.6
 end
 
-function Surface:_buildSettlement(s)
+--- Builds a town's meshes. `lodOnly` stops at the layout and the silhouette.
+--
+-- A city is expensive to mesh -- measured on the largest, 127 ms of vertices
+-- against 45 ms for the layout alone -- and from ten kilometres up none of
+-- those vertices are visible. So a town that comes into range gets its layout
+-- and its silhouette (63 ms, less than the old villages cost), and pays for
+-- its windows only when the player is close enough to see one.
+function Surface:_buildSettlement(s, lodOnly)
     local place = s.place
     local detail = settlementGen.generate({
         seed = place.seed,
@@ -706,6 +730,14 @@ function Surface:_buildSettlement(s)
         pads = place.pads or 2,
         services = place.services,
         player = place.player,
+        layoutOnly = lodOnly or nil,
+        -- Districts stand on their own ground: the flattening plate only
+        -- covers the core, so a city that ignored the terrain would turn a
+        -- hillside into a table. Frame-invariant, because it is the difference
+        -- between two heights of the same physical place.
+        groundAt = function(lx, lz)
+            return self:groundHeight(s.x + lx, s.z + lz) - s.h
+        end,
     })
     -- The far stand-in, built once alongside the town it stands in for.
     --
@@ -719,9 +751,11 @@ function Surface:_buildSettlement(s)
     return detail
 end
 
---- Ensures a settlement's mesh exists right now (used when landing at one).
+--- Ensures a settlement's full mesh exists right now (used when landing at
+--- one, where a silhouette would be a town made of blocks under the boots).
 function Surface:ensureSettlement(place)
-    if self.settlementMeshes[place.seed] then return self.settlementMeshes[place.seed] end
+    local have = self.settlementMeshes[place.seed]
+    if have and not have.layoutOnly then return have end
     for _, s in ipairs(self.settlements) do
         if s.place == place then return self:_buildSettlement(s) end
     end
@@ -789,21 +823,33 @@ function Surface:draw(renderer, opts)
             -- is more than a pixel, so what changes is the triangle count and
             -- not the picture. The lit windows go with the detail: at this
             -- range they are a glow the size of a full stop.
-            local far = false
-            if eye and mesh.lodModel then
+            local dist = 0
+            if eye then
                 local dx, dz = s.x - eye.x, s.z - eye.z
                 local dy = eye.y or 0
-                far = sqrt(dx * dx + dz * dz + dy * dy) > SETTLEMENT_DETAIL_RANGE
+                dist = sqrt(dx * dx + dz * dz + dy * dy)
             end
+            local far = mesh.model == nil
+                or (eye and mesh.lodModel and dist > detailRangeFor(mesh))
+
+            -- Which layer, on the same rule the ground uses.
+            --
+            -- A town was always drawn into the near layer, and the near layer
+            -- is cut off at thirty kilometres -- so from 40 km up a city was
+            -- not merely small, it was *not drawn at all*, and raising the
+            -- build range would have meshed cities that nothing could show.
+            -- Measured with the renderer's own triangle count: 6014 triangles
+            -- of city at 12 km, and none whatsoever at 40.
+            local layer = (dist > split) and renderer.LAYER_FAR or renderer.LAYER_NEAR
             if far then
-                renderer:draw(mesh.lodModel, pos, basis, { layer = renderer.LAYER_NEAR })
+                renderer:draw(mesh.lodModel, pos, basis, { layer = layer })
             else
                 if mesh.model then
-                    renderer:draw(mesh.model, pos, basis, { layer = renderer.LAYER_NEAR })
+                    renderer:draw(mesh.model, pos, basis, { layer = layer })
                 end
                 if mesh.glowModel then
                     renderer:draw(mesh.glowModel, pos, basis,
-                        { layer = renderer.LAYER_NEAR, emissive = opts and opts.nightGlow or 1 })
+                        { layer = layer, emissive = opts and opts.nightGlow or 1 })
                 end
             end
         end

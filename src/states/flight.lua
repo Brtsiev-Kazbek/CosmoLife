@@ -39,6 +39,7 @@ local salvage = require("src.sim.salvage")
 local context = require("src.sim.context")
 local autopilot = require("src.flight.autopilot")
 local travel = require("src.sim.travel")
+local stick = require("src.sim.stick")
 local audio = require("src.audio")
 local rocks = require("src.flight.rocks")
 local docking = require("src.flight.docking")
@@ -51,11 +52,6 @@ local Flight = class("FlightState")
 local sqrt, min, max, abs, floor = math.sqrt, math.min, math.max, math.abs, math.floor
 local atan2 = math.atan2 or math.atan
 local FL = config.flight
-
--- Dead zone at the middle of the virtual stick, as a fraction of full
--- deflection. Small, because the response curve above it already gives the
--- fine control; this only exists so that "hands off" really is zero.
-local STICK_DEAD = 0.04
 local S = config.scale
 local C = palette.colors
 local L = i18n.format
@@ -452,34 +448,19 @@ function Flight:readRotation(dt, basis, agility)
     -- any manual input takes the ship back: an autopilot you cannot override
     -- instantly is a trap, not a convenience
     if self.autopilot and (pitch ~= 0 or yaw ~= 0 or roll ~= 0
-        or math.abs(self.stickX or 0) > STICK_DEAD or math.abs(self.stickY or 0) > STICK_DEAD) then
+        or math.abs(self.stickX or 0) > stick.DEAD or math.abs(self.stickY or 0) > stick.DEAD) then
         self:cancelAutopilot("Autopilot disengaged")
     end
 
     if self.mouseSteer then
-        local sx, sy = self.stickX or 0, self.stickY or 0
-        local len = math.sqrt(sx * sx + sy * sy)
-        if len < STICK_DEAD then
-            -- a small dead zone, snapped rather than scaled: without it the
-            -- ship never quite stops turning and the reticle creeps
-            sx, sy = 0, 0
-            self.stickX, self.stickY = 0, 0
-        else
-            -- a squared response near the middle: most of the disc is spent on
-            -- the small corrections that aiming is made of, and full
-            -- deflection still turns as hard as it ever did
-            local k = ((len - STICK_DEAD) / (1 - STICK_DEAD)) ^ 1.6 / len
-            sx, sy = sx * k, sy * k
-        end
-        pitch = pitch - sy
-        yaw = yaw + sx
-
-        -- optional self-centring, for players who want the old rate feel
-        local ret = settings.get("mouseReturn") or 0
-        if ret > 0 then
-            local decay = math.exp(-ret * dt)
-            self.stickX, self.stickY = (self.stickX or 0) * decay, (self.stickY or 0) * decay
-        end
+        local cx, cy, kx, ky = stick.command(self.stickX, self.stickY)
+        self.stickX, self.stickY = kx, ky
+        pitch = pitch - cy
+        yaw = yaw + cx
+        -- self-centring, so the ship settles when the hand stops. Zero holds
+        -- the deflection for players who want a real stick.
+        self.stickX, self.stickY = stick.centre(self.stickX, self.stickY,
+            settings.get("mouseReturn"), dt)
     end
 
     -- Steer in the frame the player is looking through, not the hull's.
@@ -1406,29 +1387,15 @@ end
 
 --- Mouse motion moves a virtual stick, and the stick is the command.
 --
--- The old scheme accumulated motion into a value that decayed with a 60 ms
--- time constant, which makes the mouse a *rate* device: the ship turns while
--- you are moving the hand and stops when you stop, with nothing on screen
--- saying how hard you are pulling. It flies like a wet towel, and it is why
--- fine aim was so hard.
---
--- A virtual stick is what every space sim with a mouse ended up with. The
--- deflection is a position, clamped to a disc; where it sits is drawn on the
--- HUD; and letting go of the mouse holds the turn instead of cancelling it.
--- Position in, command out, with the state visible -- which is the whole of
--- the difference.
+-- The arithmetic lives in `sim/stick.lua` so its calibration can be tested.
+-- Sensitivity is pixels to full deflection, not a fraction per pixel: the
+-- fraction was inherited from the rate controller this replaced and worked out
+-- at full deflection every twenty pixels, which is why the ship used to spin
+-- at a touch.
 function Flight:mousemoved(x, y, dx, dy)
     if not self.mouseSteer then return end
-    local sens = settings.get("mouseSensitivity") * 0.9
-    local invert = settings.get("invertY") and -1 or 1
-    local sx = (self.stickX or 0) + dx * sens
-    local sy = (self.stickY or 0) + dy * sens * invert
-    -- clamped to a disc rather than a square: a corner of a square is 1.41
-    -- times the deflection of an edge, so a diagonal pull turned faster than
-    -- any straight one
-    local len = math.sqrt(sx * sx + sy * sy)
-    if len > 1 then sx, sy = sx / len, sy / len end
-    self.stickX, self.stickY = sx, sy
+    self.stickX, self.stickY = stick.move(self.stickX, self.stickY, dx, dy,
+        settings.get("stickRange"), settings.get("invertY"))
 end
 
 function Flight:wheelmoved(x, y)

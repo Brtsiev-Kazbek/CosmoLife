@@ -1954,6 +1954,120 @@ step(TOUR_START + (TOUR_SLOTS + 1) * TOUR_STRIDE, "the tour actually showed vari
     end
 end)
 
+-- ---------------------------------------------------------------------------
+-- Cities, from the altitudes a player actually sees them from.
+--
+-- The report was "I cannot see the cities on planets", and the cause was
+-- scale: a settlement of four million people was 42 boxes in a 233 m circle,
+-- which is 23 pixels from 10 km up and six from 40. Fixing that is only worth
+-- anything if the town is also *built* at those altitudes -- the mesh used to
+-- appear at sixteen kilometres and not before -- so this checks both: the mesh
+-- exists, and it covers a readable part of the screen.
+local CITY_ALTITUDES = { 2000, 12000, 40000 }
+
+local function plantCity(game)
+    local f = game.manager:current()
+    local surf = f.surface
+    if not surf then return nil end
+    local place = selftest.cityPlace
+    if not place then
+        place = {
+            kind = "settlement", name = "Selftest City", seed = 90210,
+            latitude = surf.originLat, longitude = surf.originLon,
+            population = 4200000, tier = 5, pads = 4, economyId = "industrial",
+            techLevel = 7, factionId = "independent", body = surf.body,
+            services = { market = true }, pos = { x = 0, y = 0, z = 0 },
+        }
+        selftest.cityPlace = place
+        -- On the body, not just handed to setOrigin: the surface re-origins
+        -- itself once the ship moves more than six chunks from the frame
+        -- centre, and that re-registration reads `body.settlements`. A city
+        -- planted only in the argument vanished at 40 km, which looked exactly
+        -- like the rendering defect this step is here to catch.
+        surf.body.settlements = surf.body.settlements or {}
+        surf.body.settlements[#surf.body.settlements + 1] = place
+        surf:setOrigin(surf.originLat, surf.originLon, surf.body.settlements)
+    end
+    return f, surf, place
+end
+
+--- Screen radius of the planted city, in pixels.
+local function citySpan(game, f, surf, mesh)
+    local camera = game.camera
+    local w, h = game.renderer.width, game.renderer.height
+    local g = surf:groundHeight(0, 0)
+    local c = surf:toWorld(0, g, 0)
+    -- measured across the line of sight, so the span is the city's size and
+    -- not its foreshortening
+    local edge = surf:toWorld(0, g, mesh.cityRadius or mesh.radius)
+    local cx, cy = camera:project(c.x, c.y, c.z, w, h)
+    local ex, ey = camera:project(edge.x, edge.y, edge.z, w, h)
+    if not cx or not ex then return nil end
+    return math.sqrt((ex - cx) ^ 2 + (ey - cy) ^ 2)
+end
+
+for slot, alt in ipairs(CITY_ALTITUDES) do
+    step(404 + (slot - 1) * 4, string.format("a city is visible from %d km", alt / 1000), function(game)
+        local f, surf, place = plantCity(game)
+        assert(surf, "no surface to plant a city on")
+
+        -- Stood off and looking down at it, the way a player arrives, rather
+        -- than straight overhead: the perspective is what says whether a city
+        -- reads as a city, and a plan view of it says nothing.
+        local ground = surf:groundHeight(0, 0)
+        -- A steep look-down rather than a shallow one: at 45 degrees the
+        -- ridge between the camera and the city hid the city, which makes a
+        -- picture of a mountain rather than of a town.
+        local back = alt * 0.45
+        f.local_.pos:set(-back, ground + alt, 0)
+        f.local_.vel:set(0, 0, 0)
+        local d = math.sqrt(back * back + alt * alt)
+        f.local_.fwd:set(back / d, -alt / d, 0)
+        f.local_.up:set(alt / d, back / d, 0)
+        require("src.lib.mat4").orthonormalize(f.local_.right, f.local_.up, f.local_.fwd)
+        f:syncFromLocal()
+        game.camera.mode = "cockpit"
+        -- the town builds in two stages, one per frame, and the chunks under
+        -- it stream in on a time budget
+        for _ = 1, 40 do game:update(1 / 60) end
+
+        local mesh = surf.settlementMeshes[place.seed]
+        assert(mesh, string.format(
+            "no city mesh at %d km: the build range is %.0f km",
+            alt / 1000, require("src.settings").q().settlementRange / 1000))
+        assert(mesh.districts and mesh.districts > 0,
+            "the planted city grew no districts at all")
+
+        -- Does the city reach the renderer at all?
+        --
+        -- The projected size below says how big it would be; this says whether
+        -- it is there. Both are needed, and it was the second that was broken:
+        -- towns were always drawn into the near layer, which is cut off at
+        -- thirty kilometres, so from 40 km a city contributed exactly zero
+        -- triangles -- measured this way, by drawing the frame with the town
+        -- and without it.
+        local saved = surf.settlements
+        game:update(1 / 60); game:draw()
+        local withCity = game.renderer.stats.triangles
+        surf.settlements = {}
+        game:update(1 / 60); game:draw()
+        local without = game.renderer.stats.triangles
+        surf.settlements = saved
+        assert(withCity - without > 500, string.format(
+            "from %d km the city contributes %d triangles to the frame",
+            alt / 1000, withCity - without))
+
+        local span = citySpan(game, f, surf, mesh)
+        assert(span, "the city did not project onto the screen")
+        assert(span > 12, string.format(
+            "a %.1f km city is %.0f px across from %d km up",
+            (mesh.cityRadius or 0) * 2 / 1000, span * 2, alt / 1000))
+        io.write(string.format("    DIAG-CITY %5d m: %.0f px radius, %d blocks, %d triangles in frame\n",
+            alt, span, mesh.blocks or 0, withCity - without))
+        io.flush()
+    end)
+end
+
 local SHOTS = {
     [30] = "01-space",
     [54] = "01c-atmosphere",
@@ -1974,6 +2088,9 @@ local SHOTS = {
     [393] = "10-biome-4",
     [399] = "10-biome-5",
     [405] = "10-biome-6",
+    [406] = "11-city-2km",
+    [410] = "11-city-12km",
+    [414] = "11-city-40km",
 }
 
 selftest.lastFrame = 420

@@ -151,8 +151,13 @@ local strings = {
     ["Quit to desktop"] = "Выйти из игры",
     ["CRT filter"] = "ЭЛТ-фильтр",
     ["Stick self-centring"] = "Возврат стика в центр",
-    ["How fast the mouse stick returns to the middle on its own. Zero holds the deflection, which is what a stick does."] =
-        "Насколько быстро стик мыши сам возвращается в центр. Ноль удерживает отклонение — как настоящая ручка.",
+    ["How fast the mouse stick returns to the middle on its own, so the ship settles when your hand stops. Zero holds the deflection, which is what a real stick does."] =
+        "Насколько быстро стик мыши сам возвращается в центр, чтобы корабль успокаивался, когда рука остановилась. Ноль удерживает отклонение — как настоящая ручка.",
+    ["Look sensitivity"] = "Чувствительность обзора",
+    ["How fast the view turns on foot."] = "Скорость поворота обзора пешком.",
+    ["Mouse travel for full turn"] = "Ход мыши до полного отклонения",
+    ["Pixels of mouse movement that deflect the flight stick fully. Lower is twitchier."] =
+        "Сколько пикселей мыши отклоняют ручку до упора. Меньше — резче.",
     ["Travel assist"] = "Помощь в перелёте",
     ["In cruise with a target selected, holds the speed that arrives at it and drops out on arrival."] =
         "В сверхсвете с выбранной целью держит скорость подхода и сам выходит по прибытии.",

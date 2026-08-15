@@ -79,7 +79,11 @@ local function landingPad(b, g, r, rng, colors, index)
     b:pop()
 end
 
-local function road(b, x0, z0, x1, z1, width, col)
+-- `plain` skips the dashed centre line. A district ring road is a hundred
+-- metres of quad seen from a kilometre up, where the dashes are invisible and
+-- cost more than everything else in the district put together: measured, the
+-- centre lines of four ring roads were 12 000 of a city's 48 000 triangles.
+local function road(b, x0, z0, x1, z1, width, col, plain)
     local dx, dz = x1 - x0, z1 - z0
     local len = sqrt(dx * dx + dz * dz)
     if len < 0.5 then return end
@@ -88,6 +92,7 @@ local function road(b, x0, z0, x1, z1, width, col)
     b:translate((x0 + x1) * 0.5, 0.06, (z0 + z1) * 0.5)
     b:rotateY(a)
     geometry.slab(b, width, len, 0, col)
+    if plain then b:pop() return end
     -- centre line
     local dashes = max(1, floor(len / 4))
     for i = 0, dashes - 1 do
@@ -169,6 +174,13 @@ function settlement.generate(opts)
     local colors = buildings.colorScheme(rng, { factionColor = opts.factionColor })
     local solid = MeshBuilder.new()
     local glow = MeshBuilder.new()
+    -- `layoutOnly` runs the whole generator for its *decisions* and throws the
+    -- geometry away, so a town that is only ever seen from ten kilometres up
+    -- costs its layout and its silhouette rather than its every window.
+    if opts.layoutOnly then
+        solid:discardVertices()
+        glow:discardVertices()
+    end
 
     -- Town size grows with tier; the radius has to hold the buildings we want.
     local buildingBudget = ({ 6, 11, 18, 28, 42 })[tier]
@@ -308,15 +320,115 @@ function settlement.generate(opts)
     end
     if tier >= 2 then fence(solid, glow, radius * 1.02, rng, colors) end
 
-    local model = solid:build()
-    local glowModel = glow:build()
+    -- ---- districts ------------------------------------------------------
+    --
+    -- Everything above is the *core*: the plaza, the pads, the ring road and
+    -- the buildings you can walk into. It is the whole settlement today, and
+    -- that is the defect -- a world capital of four million people came out as
+    -- 42 boxes inside a 233 m circle, which from 10 km up is 23 pixels and
+    -- from 40 km is six. A city has to be city-sized before any amount of
+    -- draw-distance work can make it visible.
+    --
+    -- So the core is left exactly as it is (it is walked through, it holds the
+    -- interiors, and it is what the tests measure) and the city grows outward
+    -- from it in rings of blocks. Blocks are plain volumes: at this distance
+    -- from the plaza nobody reads a window, and the whole point is that a
+    -- district costs about twelve triangles per building.
+    local cityRadius = radius
+    local pop = max(opts.population or 0, 1)
+    local districts = util.clamp(floor(math.log(pop) / math.log(10) - 2.2), 0, 4)
+    local blockCount = 0
+    if districts > 0 then
+        local ground = opts.groundAt
+        -- Pulled towards a neutral grey rather than taken straight from the
+        -- scheme. The scheme is derived from the faction and the biome, so on
+        -- a red world the city came out the same red as the rock it stands on
+        -- and vanished into it; built ground has to read as built.
+        local blockCol = palette.mix(colors.wall, C.steel, 0.55)
+        local roofCol = palette.shade(blockCol, 0.68)
+        local ringW = 380
+        for d = 1, districts do
+            local r0 = radius * 1.14 + (d - 1) * ringW
+            local r1 = r0 + ringW * 0.82
+            cityRadius = max(cityRadius, r1)
+
+            -- a ring road and a few radials, so the blocks read as a plan and
+            -- not as scatter
+            local segs = 24 + d * 6
+            local rMid = (r0 + r1) * 0.5
+            for i = 0, segs - 1 do
+                local a0, a1 = i / segs * TAU, (i + 1) / segs * TAU
+                road(solid, cos(a0) * rMid, sin(a0) * rMid,
+                     cos(a1) * rMid, sin(a1) * rMid, 9, roadCol, true)
+            end
+
+            -- Blocks, laid on a grid rather than scattered.
+            --
+            -- The first version rejection-sampled them like the core's
+            -- buildings, and it was wrong twice: the ring came out as a
+            -- sprinkle of boxes with empty ground between, which is not what a
+            -- city looks like from the air, and `overlaps` is a linear scan of
+            -- everything placed so far, so the cost grew as the square of the
+            -- city. A row of buildings along the street cannot overlap by
+            -- construction, and it reads as a plan.
+            local ringLen = TAU * ((r0 + r1) * 0.5)
+            local cells = max(6, floor(ringLen / 130))
+            local tall = 1 - (d - 1) / (districts + 0.5)
+            for i = 0, cells - 1 do
+                -- a gap here and there: a solid annulus of buildings is as
+                -- unconvincing as a sprinkle
+                if rng:bool(0.86) then
+                    local a = (i + 0.5) / cells * TAU
+                    local ca, sa = cos(a), sin(a)
+                    -- along the street (tangent) and across it (radial)
+                    local tx, tz = -sa, ca
+                    for j = -1, 1 do
+                        local rr = (r0 + r1) * 0.5 + rng:range(-ringW * 0.18, ringW * 0.18)
+                        local along = j * 34 + rng:range(-4, 4)
+                        local x = ca * rr + tx * along
+                        local z = sa * rr + tz * along
+                        local w = rng:range(16, 26)
+                        local dd = w * rng:range(0.8, 1.25)
+                        local hh = rng:range(10, 30) * (0.4 + tall * 1.0)
+                        local y = ground and ground(x, z) or 0
+                        solid:push():translate(x, y, z):rotateY(a)
+                        geometry.boxStanding(solid, w, hh, dd, blockCol, roofCol)
+                        solid:pop()
+                        -- lit faces, so a city is visible at night from an
+                        -- altitude where no single window could be
+                        if rng:bool(0.4) then
+                            glow:push():translate(x, y + hh * 0.6, z):rotateY(a)
+                            geometry.boxStanding(glow, w * 0.55, hh * 0.1, dd * 0.55,
+                                colors.glow or C.amber, colors.glow or C.amber)
+                            glow:pop()
+                        end
+                        placed[#placed + 1] = {
+                            x = x, z = z, y = y, rot = a,
+                            radius = max(w, dd) * 0.5, height = hh, kind = "block",
+                        }
+                        blockCount = blockCount + 1
+                    end
+                end
+            end
+        end
+    end
+
+    local model = not opts.layoutOnly and solid:build() or nil
+    local glowModel = not opts.layoutOnly and glow:build() or nil
 
     return {
+        layoutOnly = opts.layoutOnly or nil,
         seed = opts.seed,
         name = opts.name or names.settlement(opts.seed or 1),
         model = model,
         glowModel = glowModel,
+        -- `radius` stays the core's, because the walking plate, the collision
+        -- and the flattening all key off it; `cityRadius` is how far the built
+        -- ground actually reaches and is what the draw distance has to use.
         radius = radius * 1.12,
+        cityRadius = cityRadius * 1.06,
+        districts = districts,
+        blocks = blockCount,
         plateRadius = radius * 1.05,
         buildings = placed,
         pads = pads,
@@ -324,6 +436,7 @@ function settlement.generate(opts)
         colors = colors,
         tier = tier,
         triangles = (model and model.triangles or 0) + (glowModel and glowModel.triangles or 0),
+        layoutTriangles = solid:triangleCount() + glow:triangleCount(),
     }
 end
 
@@ -331,9 +444,14 @@ end
 --- town is still visible from orbit without paying for its detail.
 function settlement.generateLod(place, detail)
     local b = MeshBuilder.new()
-    local col = detail and detail.colors and detail.colors.wall or C.hull
+    -- The same neutral pull as the districts, and for the same reason: this is
+    -- the mesh that stands in for the city at every distance where the city
+    -- has to be *noticed*, and painted in the scheme's own colour it dissolved
+    -- into the red rock it was standing on.
+    local base = detail and detail.colors and detail.colors.wall or C.hull
+    local col = palette.mix(base, C.steel, 0.55)
     for _, bl in ipairs(detail.buildings) do
-        b:push():translate(bl.x, 0, bl.z)
+        b:push():translate(bl.x, bl.y or 0, bl.z)
         geometry.boxStanding(b, bl.radius * 1.2, bl.height, bl.radius * 1.2, col, palette.shade(col, 0.8))
         b:pop()
     end

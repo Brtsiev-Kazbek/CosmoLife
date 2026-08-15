@@ -73,6 +73,23 @@ bench("plot a 60 ly course", "jumps", function()
     return r and r.jumps or 0
 end)
 
+-- A city is built in two stages -- layout and silhouette when it comes into
+-- range, vertices only when the player is close enough to see one -- and both
+-- land in a single frame, so both belong in the budget.
+bench("city layout + silhouette", "structures", function()
+    local settlement = require("src.procgen.settlement")
+    local layout = settlement.generate({ seed = 4242, tier = 5, population = 4.2e6,
+        economyId = "industrial", pads = 4, layoutOnly = true })
+    settlement.generateLod({ seed = 4242 }, layout)
+    return #layout.buildings
+end)
+
+bench("city full mesh", "triangles", function()
+    local settlement = require("src.procgen.settlement")
+    return settlement.generate({ seed = 4242, tier = 5, population = 4.2e6,
+        economyId = "industrial", pads = 4 }).triangles
+end)
+
 bench("system build", "bodies", function()
     local sys = systemGen.build(startStub, diplo, 5)
     return #sys.bodies

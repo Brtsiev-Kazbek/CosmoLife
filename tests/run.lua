@@ -479,6 +479,41 @@ test("a noted lead lives in the log and then expires", function(assert_)
     assert_(#player.leads == 0, "expiry left the lead in place")
 end)
 
+test("the mouse stick is calibrated in pixels, not in twitches", function(assert_)
+    local stick = require("src.sim.stick")
+
+    -- The defect, in one number. The stick inherited the sensitivity of the
+    -- rate controller it replaced -- a fraction of full deflection per pixel,
+    -- 0.0495 at its default -- so twenty pixels of hand movement put it on the
+    -- rail. Sensitivity is pixels to full deflection now, and this is what
+    -- that has to mean.
+    local sx, sy = stick.move(0, 0, 20, 0, 320)
+    assert_(sx < 0.08, string.format("20 px of mouse deflected the stick to %.2f", sx))
+    sx, sy = stick.move(0, 0, 320, 0, 320)
+    assert_(math.abs(sx - 1) < 1e-9, string.format("320 px gave %.3f, not full deflection", sx))
+
+    -- clamped to a disc: a diagonal pull must not out-turn a straight one
+    sx, sy = stick.move(0, 0, 900, 900, 320)
+    assert_(math.abs(math.sqrt(sx * sx + sy * sy) - 1) < 1e-9,
+        "the stick left the unit disc on a diagonal")
+
+    -- dead zone snaps to zero, so hands off really is hands off
+    local cx, cy, kx, ky = stick.command(0.02, 0.02)
+    assert_(cx == 0 and cy == 0 and kx == 0 and ky == 0, "the dead zone leaks a command")
+
+    -- and the curve spends the middle of the disc on small corrections
+    local half = select(1, stick.command(0.5, 0))
+    assert_(half < 0.5 * 0.8, string.format(
+        "half deflection commands %.2f: the response curve is missing", half))
+    local full = select(1, stick.command(1, 0))
+    assert_(math.abs(full - 1) < 1e-9, "full deflection no longer commands a full turn")
+
+    -- self-centring settles the ship when the hand stops
+    local rx = select(1, stick.centre(1, 0, 3, stick.halfLife(3)))
+    assert_(math.abs(rx - 0.5) < 1e-9, "the half-life of the self-centring is wrong")
+    assert_(select(1, stick.centre(1, 0, 0, 1)) == 1, "a rate of zero still moved the stick")
+end)
+
 test("travel assist arrives instead of overshooting", function(assert_)
     local travel = require("src.sim.travel")
     local ceiling = 1e6
@@ -788,6 +823,85 @@ test("standing water is its own mesh, and only where there is water", function(a
     assert_(surf._seaLevelMetres == nil, "a barren world reports a sea level")
 end)
 
+test("a city is the size of a city", function(assert_)
+    local settlement = require("src.procgen.settlement")
+    local function town(pop, tier)
+        return settlement.generate({ seed = 4242, tier = tier, population = pop,
+                                     economyId = "industrial", pads = 3 })
+    end
+
+    -- The defect: a world capital of four million people came out as 42 boxes
+    -- in a 233 m circle -- 23 pixels from 10 km up and six from 40 km, which
+    -- is why the player could not see their cities. Size follows population
+    -- now, and this is the floor it has to clear.
+    local city = town(4.2e6, 5)
+    assert_(city.cityRadius > 750, string.format(
+        "a four million city is %.0f m across", city.cityRadius * 2))
+    assert_(#city.buildings > 150, "the city has only " .. #city.buildings .. " structures")
+    assert_(city.districts == 4, "the largest city grew " .. city.districts .. " districts")
+
+    -- and a hamlet is still a hamlet: this is not a global size increase
+    local hamlet = town(120, 1)
+    assert_(hamlet.districts == 0, "a hamlet of 120 people grew districts")
+    assert_(hamlet.cityRadius < 200, "a hamlet is " .. math.floor(hamlet.cityRadius) .. " m")
+
+    -- the budget, measured rather than hoped for
+    assert_(city.triangles < 40000, string.format(
+        "the city is %d triangles", city.triangles))
+    local lod = settlement.generateLod({ seed = 4242 }, city)
+    assert_(lod.triangles < city.triangles * 0.25, string.format(
+        "the silhouette is %d against the city's %d", lod.triangles, city.triangles))
+    assert_(lod.radius > city.cityRadius * 0.5, string.format(
+        "the silhouette covers %.0f m of a %.0f m city", lod.radius, city.cityRadius))
+
+    -- Districts stand on their own ground. The flattening plate only covers
+    -- the core, so a city that ignored the terrain would turn a hillside into
+    -- a table -- and a block on a 1-in-10 slope has to be a metre lower for
+    -- every ten it stands out from the middle.
+    local slope = settlement.generate({ seed = 4242, tier = 5, population = 4.2e6,
+        economyId = "industrial", pads = 3,
+        groundAt = function(x, z) return x * 0.1 end })
+    local checked = 0
+    for _, b in ipairs(slope.buildings) do
+        if b.kind == "block" then
+            assert_(math.abs(b.y - b.x * 0.1) < 1e-6, string.format(
+                "a block at x=%.0f sits at y=%.1f on a slope that is %.1f there",
+                b.x, b.y, b.x * 0.1))
+            checked = checked + 1
+        end
+    end
+    assert_(checked > 100, "only " .. checked .. " blocks were on the slope")
+end)
+
+test("the layout of a town does not depend on whether its mesh is built", function(assert_)
+    -- What makes the two-stage build safe: a town in range gets its layout and
+    -- silhouette (45 ms), and pays for its vertices only when the player is
+    -- close (127 ms). That is only sound if both passes lay out the same town,
+    -- which they do because it is the same code with the vertices thrown away.
+    local settlement = require("src.procgen.settlement")
+    local opts = { seed = 77, tier = 4, population = 800000, economyId = "hightech", pads = 4 }
+    local full = settlement.generate(opts)
+    opts.layoutOnly = true
+    local layout = settlement.generate(opts)
+
+    assert_(layout.model == nil, "the layout pass built a mesh anyway")
+    assert_(#layout.buildings == #full.buildings, string.format(
+        "%d buildings against %d", #layout.buildings, #full.buildings))
+    assert_(math.abs(layout.cityRadius - full.cityRadius) < 1e-9, "the towns are different sizes")
+    for i, b in ipairs(full.buildings) do
+        local a = layout.buildings[i]
+        assert_(a.x == b.x and a.z == b.z and a.kind == b.kind,
+            "building " .. i .. " moved between the two passes")
+    end
+    -- The count is an upper bound, not an identity: a degenerate triangle is
+    -- only detectable once it has been transformed, which is exactly the work
+    -- the layout pass skips. Two out of thirty-two thousand, measured.
+    assert_(layout.layoutTriangles >= full.triangles
+        and layout.layoutTriangles < full.triangles * 1.001, string.format(
+        "the layout counted %d triangles for a mesh of %d",
+        layout.layoutTriangles, full.triangles))
+end)
+
 test("a walker stands on the ground that is drawn", function(assert_)
     -- The reported symptom was walking under the planet. The cause is that the
     -- ground has two heights: the analytic field, and the triangle mesh
@@ -1076,7 +1190,7 @@ test("every module loads", function(assert_)
         "src.render.renderer", "src.render.shaders", "src.render.sky",
         "src.sim.colony", "src.sim.combat", "src.sim.commodities", "src.sim.economy",
         "src.sim.equipment", "src.sim.factions", "src.sim.missions", "src.sim.npc",
-        "src.sim.player", "src.sim.trade", "src.sim.world",
+        "src.sim.player", "src.sim.stick", "src.sim.trade", "src.sim.world",
         "src.states.colonies", "src.states.flight", "src.states.galaxymap",
         "src.states.gameover", "src.states.logbook", "src.states.manager",
         "src.states.menu", "src.states.onfoot", "src.states.pause",
