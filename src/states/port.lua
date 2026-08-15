@@ -268,7 +268,7 @@ function Port:draw()
         ui.text(L("COMMODITY"), listX, listY - 20, C.uiDim, "small")
         -- right-aligned against the same edge the values use, so the header
         -- lines up with them instead of relying on space padding
-        ui.textRight(L("BUY / SELL   STOCK   HOLD"), listX + listW, listY - 20, C.uiDim, "small")
+        ui.textRight(L("VS AVG   BUY / SELL   STOCK   HOLD"), listX + listW, listY - 20, C.uiDim, "small")
     end
 
     if self.menu then
@@ -337,7 +337,40 @@ function Port:drawSidePanelContent(x, y, w, h, tab, item)
         ui.text(L("Sell here"), px, py, C.uiDim, "small")
         ui.textRight(util.money(sell) .. " " .. L("cr"), x + w - 18, py,
             sell > c.base and C.uiPrimary or C.uiDanger, "small")
-        py = py + 24
+        py = py + 22
+
+        -- the three questions the screen exists to answer: is this cheap, how
+        -- much of it can I leave with, and does anyone I answer to want it
+        local a = self.assessed and self.assessed[c.id]
+        if a then
+            local off = floor(math.abs((a.ratio or 1) - 1) * 100 + 0.5)
+            if a.verdict == "cheap" then
+                ui.text(L("{n}% under the average", { n = off }), px, py, C.uiPrimary, "small")
+            elseif a.verdict == "dear" then
+                ui.text(L("{n}% over the average", { n = off }), px, py, C.uiWarn, "small")
+            else
+                ui.text(L("About the average price"), px, py, C.uiDim, "small")
+            end
+            py = py + 18
+            if a.take > 0 then
+                ui.text(L("Your hold takes {n} {n:t} for {cash} cr",
+                    { n = a.take, cash = util.money(a.take * a.buy) }), px, py, C.uiText, "small")
+            elseif a.stock <= 0 then
+                ui.text(L("None in stock"), px, py, C.uiDim, "small")
+            elseif self.player:cargoFree() <= 0 then
+                ui.text(L("Hold is full."), px, py, C.uiDim, "small")
+            else
+                ui.text(L("Cannot afford any."), px, py, C.uiDim, "small")
+            end
+            py = py + 18
+            if a.wanted > 0 then
+                ui.text(L("Your colonies are short {n} {n:t}", { n = floor(a.wanted + 0.5) }),
+                    px, py, C.uiWarn, "small")
+                py = py + 18
+            end
+            py = py + 6
+        end
+
         local ev = self.market.events[c.id]
         if ev then
             py = py + ui.paragraph(ev.text, px, py, w - 36, C.uiWarn, "small") + 8
@@ -349,6 +382,15 @@ function Port:drawSidePanelContent(x, y, w, h, tab, item)
         end
         ui.text(L("In your hold: {qty} {qty:t}", { qty = self.player:cargoCount(c.id) }),
             px, py, C.uiText, "small")
+        py = py + 22
+        -- a shelf of thirty rows is a search problem; this is the answer to it
+        if self.bestBuy and self.bestBuy.id ~= c.id then
+            ui.textFit(L("Best value here: {name}",
+                { name = L(commodities.get(self.bestBuy.id).name) }),
+                px, py, w - 36, C.uiDim, "small")
+        elseif self.bestBuy then
+            ui.text(L("Best value on this shelf"), px, py, C.uiPrimary, "small")
+        end
 
     elseif tab == "missions" and item and item.mission then
         local m = item.mission

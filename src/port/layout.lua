@@ -11,7 +11,10 @@ local layout = {}
 
 layout.LIST_TOP = 152
 layout.LIST_LINE = 24
-layout.FOOTER = 76        -- rule, hint line and status line below the list
+-- Rule, hint line and status line below the list. The status line is drawn at
+-- h-82 in a normal-weight font, so a reserve of 76 was six pixels short of it:
+-- at 540 px the last row of the list sat under "Sold 10 tonnes of water".
+layout.FOOTER = 88
 
 --- How many list rows fit on screen at the current window height.
 function layout.rows()

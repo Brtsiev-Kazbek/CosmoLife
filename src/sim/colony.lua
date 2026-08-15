@@ -266,6 +266,20 @@ function colony.suppliesLeft(c)
     return worst == math.huge and 0 or worst
 end
 
+--- How much of each need the colony is short of `days` of cover.
+--
+-- `suppliesLeft` answers "how long until trouble" in one number; this answers
+-- "what do I put in the hold", which is the question the market screen asks.
+function colony.shortfall(c, days)
+    local out = {}
+    for id, rate in pairs(NEEDS) do
+        local want = rate * (c.population / 100) * (days or 30)
+        local short = want - (c.stockpile[id] or 0)
+        if short > 0.5 then out[id] = short end
+    end
+    return out
+end
+
 function colony.tierName(tier)
     return ({ "Outpost", "Settlement", "Township", "City", "Metropolis" })[tier] or "Outpost"
 end

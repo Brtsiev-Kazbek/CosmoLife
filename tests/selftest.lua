@@ -995,7 +995,82 @@ step(215, "buy and sell a commodity", function(game)
         "trading did nothing and reported nothing")
 end)
 
+step(220, "the market says what is cheap and who wants it", function(game)
+    local port = selftest.port
+    assert(port, "the port screen never opened")
+    for i, t in ipairs(port.tabs) do
+        if t == "market" then port.tab = i end
+    end
+
+    -- A pilot with no colony never reaches the "your colonies are short" line,
+    -- and an unexercised draw path is how the canister crash shipped. Plant a
+    -- starving colony so the row really is marked and really is drawn.
+    local colonyMod = require("src.sim.colony")
+    local player = game.world.player
+    local saved = player.colonies
+    local c = colonyMod.found({ seed = 4242, body = { type = "rock", landable = true },
+                                day = game.world.day })
+    c.population = 4000
+    c.stockpile = {}
+    player.colonies = { c }
+
+    port:rebuild()
+    -- put something in the hold that this port pays over the odds for, so the
+    -- "sell it here" colour is a path the test walks and not a claim
+    local held
+    for _, id in ipairs(port.market:tradedIds()) do
+        if not held and port.assessed[id].verdict == "dear" then
+            held = id
+            player:addCargo(id, 2)
+        end
+    end
+    selftest.plantedCargo = held
+
+    port:rebuild()
+    local rows = port.assessed
+    assert(rows and next(rows), "the market assessed nothing")
+    local marked, cheap, dear = 0, 0, 0
+    for _, r in pairs(rows) do
+        assert(r.ratio == nil or r.ratio > 0, "a price came out at or below zero")
+        assert(r.take <= player:cargoFree(), "the hold was offered more than it holds")
+        if r.wanted > 0 then marked = marked + 1 end
+        if r.verdict == "cheap" then cheap = cheap + 1 end
+        if r.verdict == "dear" then dear = dear + 1 end
+    end
+    assert(marked > 0, "a starving colony of 4000 asks for nothing this port sells")
+    -- not an assertion about balance, an assertion that the column is doing
+    -- work: a shelf where every row reads the same tells the player nothing
+    assert(cheap + dear < #port.menu.items or #port.menu.items <= 2,
+        "every single row got the same verdict")
+
+    if held then
+        local palette = require("src.render.palette")
+        local lit = false
+        for _, item in ipairs(port.menu.items) do
+            if item.commodity == held then lit = (item.valueColor == palette.colors.uiWarn) end
+        end
+        assert(lit, "a cargo this port pays over the odds for is not flagged to sell")
+    end
+
+    -- park the cursor on a marked row: the side panel's new lines then run for
+    -- real, and the screenshot at 221 has something in it worth looking at
+    for i, item in ipairs(port.menu.items) do
+        if item.commodity and rows[item.commodity].wanted > 0 then port.menu.cursor = i end
+    end
+    port:draw()
+    -- the colony is put back in step 230, once the shot has been taken
+    selftest.plantedColonies = saved
+end)
+
 step(230, "leave the port and the building", function(game)
+    if selftest.plantedColonies then
+        game.world.player.colonies = selftest.plantedColonies
+        selftest.plantedColonies = nil
+    end
+    if selftest.plantedCargo then
+        game.world.player:removeCargo(selftest.plantedCargo, 2)
+        selftest.plantedCargo = nil
+    end
     if selftest.port then
         selftest.port:launch()
     end
@@ -1623,6 +1698,7 @@ local SHOTS = {
     [158] = "04-onfoot",
     [178] = "05-interior",
     [205] = "06-port",
+    [221] = "06b-market",
     [268] = "07-chart",
     [344] = "07b-panel",
     [345] = "08-chase",

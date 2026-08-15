@@ -12,6 +12,7 @@ local commodities = require("src.sim.commodities")
 local palette = require("src.render.palette")
 local i18n = require("src.i18n")
 local layout = require("src.port.layout")
+local trade = require("src.sim.trade")
 
 local market = {}
 
@@ -19,26 +20,67 @@ local C = palette.colors
 local L = i18n.format
 local floor, min, max = math.floor, math.min, math.max
 
+--- The colour of the comparison column: only what the player can act on.
+--
+-- Colouring every dear row amber lit up half the shelf at the first industrial
+-- station it was tried on, which is the same mistake as flagging every row --
+-- a port charging over the odds for goods you are not carrying is simply not
+-- your business. Amber is kept for the one case where "dear" is an instruction:
+-- you are holding the stuff and this is where it sells.
+local function columnColor(verdict, held)
+    if verdict == "cheap" then return C.uiPrimary end
+    if verdict == "dear" and held > 0 then return C.uiWarn end
+    return nil
+end
+
+--- Assessments for everything on this shelf, keyed by commodity id.
+--
+-- Built once per rebuild and hung off the port state so the side panel does
+-- not recompute what the list already worked out.
+function market.assess(p)
+    local out = {}
+    local opts = {
+        credits = p.player.credits,
+        free = p.player:cargoFree(),
+        colonies = p.player.colonies,
+    }
+    for _, id in ipairs(p.market:tradedIds()) do
+        local row = trade.assess(p.market, id, opts)
+        if row then out[id] = row end
+    end
+    p.assessed = out
+    return out
+end
+
 function market.buildMarketMenu(p, black)
     local items = {}
     local law = p.place.lawLevel or 0.5
+    local rows = market.assess(p)
+    -- ranked over the rows this tab actually shows, so the legal market never
+    -- points at something only the black market sells
+    local shown = {}
     for _, id in ipairs(p.market:tradedIds()) do
         local c = commodities.get(id)
         local legality = commodities.legalityIn(c, law)
         local illicit = (legality ~= "legal")
         if illicit == (black and true or false) then
-            local buy = p.market:buyPrice(id)
-            local sell = p.market:sellPrice(id)
+            local r = rows[id]
+            shown[#shown + 1] = r
             local held = p.player:cargoCount(id)
+            -- the comparison column goes first: its width jitters with the
+            -- number, and everything to its right is anchored to the same edge
+            local pct = r.ratio and string.format("%+d%%", floor((r.ratio - 1) * 100 + 0.5)) or "   "
             items[#items + 1] = {
-                label = L(c.name),
-                value = string.format("%s / %s   %d   %d",
-                    util.money(buy), util.money(sell), p.market:available(id), held),
+                label = r.wanted > 0 and L("{name}  (colony)", { name = L(c.name) }) or L(c.name),
+                value = string.format("%s   %s / %s   %d   %d",
+                    pct, util.money(r.buy), util.money(r.sell), r.stock, held),
                 commodity = id,
-                color = illicit and C.magenta or nil,
+                color = illicit and C.magenta or (r.wanted > 0 and C.uiWarn or nil),
+                valueColor = columnColor(r.verdict, held),
             }
         end
     end
+    p.bestBuy = trade.best(shown)
     if #items == 0 then
         items[1] = {
             label = black and L("No black market trade today.") or L("Nothing traded here."),
