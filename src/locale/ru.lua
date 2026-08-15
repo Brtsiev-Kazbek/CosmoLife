@@ -280,6 +280,7 @@ local strings = {
     ["Buy here"] = "Купить здесь",
     ["Sell here"] = "Продать здесь",
     ["Galactic average"] = "Средняя по галактике",
+    ["Production here is short of {cargo:gen:lc}"] = "Производству здесь не хватает {cargo:gen:lc}",
     ["{n}% under the average"] = "На {n}% ниже средней",
     ["{n}% over the average"] = "На {n}% выше средней",
     ["About the average price"] = "Цена около средней",

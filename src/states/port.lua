@@ -383,6 +383,21 @@ function Port:drawSidePanelContent(x, y, w, h, tab, item)
             py = py + 6
         end
 
+        -- Why the price is what it is.
+        --
+        -- A world only makes what its inputs allow, and when a chain upstream
+        -- breaks the price of everything it makes climbs. Without this line
+        -- that is invisible: the player sees an expensive commodity and no
+        -- reason, when the reason is a shortage they could go and fix.
+        local prod = require("src.sim.production")
+        if prod.isOutput(self.place.economyId, c.id) and (self.market.supply or 1) < 0.75 then
+            local short = self.market.limiting
+            ui.textFit(L("Production here is short of {cargo:gen:lc}", {
+                cargo = i18n.term(commodities.get(short or "ore").name) }),
+                px, py, w - 36, C.uiWarn, "small")
+            py = py + 18
+        end
+
         local ev = self.market.events[c.id]
         if ev then
             py = py + ui.paragraph(ev.text, px, py, w - 36, C.uiWarn, "small") + 8

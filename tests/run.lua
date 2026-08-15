@@ -314,7 +314,11 @@ test("the same seed gives the same market in every process", function(assert_)
     m:update(120)
     local sum = 0
     for i, id in ipairs(m:tradedIds()) do sum = sum + i * math.floor(m.stock[id]) end
-    assert_(sum == 22410, "market fingerprint moved: " .. sum)
+    -- 22410 before production chains: a world's output is now gated by
+    -- whether its inputs arrived, which changes every stock in the galaxy and
+    -- is exactly the kind of deliberate change this number is here to make
+    -- visible rather than to forbid.
+    assert_(sum == 18829, "market fingerprint moved: " .. sum)
 
     local d = factions.Diplomacy.new(21)
     for day = 1, 600 do d:update(day) end
@@ -342,6 +346,76 @@ test("a market's fill does not depend on what else it trades", function(assert_)
     assert_(alone.stock[id] == full.stock[id],
         string.format("%s filled to %d alone and %d in company",
             id, alone.stock[id] or -1, full.stock[id] or -1))
+end)
+
+test("a world only makes what its inputs allow", function(assert_)
+    local production = require("src.sim.production")
+
+    -- A refinery eats ore and minerals and makes alloys. Starve it and the
+    -- alloys have to run down; feed it and they hold. Before this, `produces`
+    -- and `consumes` were multipliers on a restocking drift, so a refinery
+    -- with no ore at all made alloys at exactly its usual rate and nothing
+    -- upstream of a world could ever affect it.
+    local fed = economy.Market.new({ seed = 21, economyId = "refinery", population = 80000 })
+    local starved = economy.Market.new({ seed = 21, economyId = "refinery", population = 80000 })
+    assert_(starved:trades("alloys"), "the refinery does not trade its own output")
+
+    -- take away everything it consumes, and keep taking it away
+    local inputs = production.demand("refinery", starved.equilibrium)
+    assert_(next(inputs) ~= nil, "the refinery consumes nothing at all")
+
+    local alloys0 = starved:available("alloys")
+    for day = 1, 60 do
+        for id in pairs(inputs) do starved.stock[id] = 0 end
+        starved:update(day)
+        fed:update(day)
+    end
+
+    assert_(starved.supply < 0.2, string.format(
+        "a refinery with no inputs reports supply %.2f", starved.supply or -1))
+    assert_(starved.limiting ~= nil, "nothing was identified as the limiting input")
+    -- Measured: 593 tonnes of alloys become 170, and the price goes from 309
+    -- to 521. That is the size a shortage has to be before a player two jumps
+    -- upstream has any reason to care about it.
+    assert_(starved:available("alloys") < alloys0 * 0.5, string.format(
+        "starved for sixty days, alloys went from %d to %d",
+        alloys0, starved:available("alloys")))
+    assert_(starved:buyPrice("alloys") > fed:buyPrice("alloys") * 1.35, string.format(
+        "alloys cost %d where the chain is broken and %d where it is not",
+        starved:buyPrice("alloys"), fed:buyPrice("alloys")))
+
+    -- and a fed refinery is not starving: this is a supply chain, not a decay
+    assert_(fed.supply > 0.5, string.format( "a refinery left alone reports supply %.2f -- if a world starves with nobody interfering, the ration is set above what imports can deliver", fed.supply or -1))
+end)
+
+test("the worst input decides, and only outputs are gated", function(assert_)
+    local production = require("src.sim.production")
+    local m = economy.Market.new({ seed = 22, economyId = "industrial", population = 90000 })
+
+    -- one missing input is a stopped factory, however full the others are
+    local inputs = production.demand("industrial", m.equilibrium)
+    local first
+    for id in pairs(inputs) do
+        m.stock[id] = m.equilibrium[id] * 3
+        first = first or id
+    end
+    assert_(select(1, production.supply("industrial", m.equilibrium, m.stock)) == 1,
+        "a fully stocked world is not fully supplied")
+    m.stock[first] = 0
+    local supply, limiting = production.supply("industrial", m.equilibrium, m.stock)
+    assert_(supply == 0, "one empty input did not stop production")
+    assert_(limiting == first, "the wrong input was named as the limit")
+
+    -- a starved world still restocks what it merely trades: a farm whose
+    -- harvest failed still buys machinery, and a market that stopped
+    -- restocking everything would be a dead world rather than a hungry one
+    local eq = 1000
+    assert_(production.target("industrial", "machinery", eq, 0) < eq * 0.5,
+        "an output's level was not cut by a stopped supply")
+    assert_(production.target("industrial", "machinery", eq, 1) == eq,
+        "a fully supplied world holds less than its usual stock")
+    assert_(production.target("industrial", "provisions", eq, 0) == eq,
+        "an import was gated as though the world made it")
 end)
 
 test("a market assessment answers what is cheap here", function(assert_)
@@ -1190,7 +1264,8 @@ test("every module loads", function(assert_)
         "src.render.renderer", "src.render.shaders", "src.render.sky",
         "src.sim.colony", "src.sim.combat", "src.sim.commodities", "src.sim.economy",
         "src.sim.equipment", "src.sim.factions", "src.sim.missions", "src.sim.npc",
-        "src.sim.player", "src.sim.stick", "src.sim.trade", "src.sim.world",
+        "src.sim.player", "src.sim.production", "src.sim.stick",
+        "src.sim.trade", "src.sim.travel", "src.sim.world",
         "src.states.colonies", "src.states.flight", "src.states.galaxymap",
         "src.states.gameover", "src.states.logbook", "src.states.manager",
         "src.states.menu", "src.states.onfoot", "src.states.pause",
