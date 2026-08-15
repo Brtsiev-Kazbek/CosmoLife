@@ -32,6 +32,9 @@ local strings = {
     ["FRAME SHIFT"] = "СВЕРХСВЕТ",
     ["SPOOLING"] = "РАСКРУТКА",
     ["CRUISE"] = "КРЕЙСЕР",
+    ["ARRIVAL"] = "ПРИБЫТИЕ",
+    ["{n} min"] = "{n} мин",
+    ["{n} s"] = "{n} с",
     ["LANDING MODE"] = "РЕЖИМ ПОСАДКИ",
     ["AUTOPILOT"] = "АВТОПИЛОТ",
     ["CONFLICT ZONE"] = "ЗОНА КОНФЛИКТА",
@@ -80,6 +83,8 @@ local strings = {
     ["Auto-level on"] = "Автовыравнивание включено",
     ["Auto-level off"] = "Автовыравнивание выключено",
     ["Frame shift engaged"] = "Сверхсветовой режим включён",
+    ["Frame shift disengaged"] = "Сверхсветовой режим выключен",
+    ["Arrived: {name}"] = "Прибытие: {name}",
     ["Mass locked - too close to a surface"] = "Масс-блокировка: слишком близко к поверхности",
     ["Frame shift dropped - mass lock"] = "Сверхсвет сброшен: масс-блокировка",
     ["Game saved"] = "Игра сохранена",
@@ -144,6 +149,12 @@ local strings = {
     ["Quit to title"] = "В главное меню",
     ["Quit to desktop"] = "Выйти из игры",
     ["CRT filter"] = "ЭЛТ-фильтр",
+    ["Stick self-centring"] = "Возврат стика в центр",
+    ["How fast the mouse stick returns to the middle on its own. Zero holds the deflection, which is what a stick does."] =
+        "Насколько быстро стик мыши сам возвращается в центр. Ноль удерживает отклонение — как настоящая ручка.",
+    ["Travel assist"] = "Помощь в перелёте",
+    ["In cruise with a target selected, holds the speed that arrives at it and drops out on arrival."] =
+        "В сверхсвете с выбранной целью держит скорость подхода и сам выходит по прибытии.",
     ["Sun shadows"] = "Тени от солнца",
     ["A second pass over nearby geometry from the sun's side. Off below the Medium preset whatever this says."] =
         "Второй проход по ближней геометрии со стороны солнца. Ниже пресета «Средне» выключены в любом случае.",
@@ -651,8 +662,8 @@ local strings = {
     ["{target} cycles targets. Pick the station ahead."] =
         "{target} перебирает цели. Выберите станцию впереди.",
     ["Let the autopilot fly you there"] = "Пусть автопилот довезёт вас",
-    ["{autopilot} engages it. {warp} is manual cruise."] =
-        "{autopilot} включает его. {warp} — ручной сверхсвет.",
+    ["{autopilot} engages it. {warp} toggles cruise, which then flies the approach itself."] =
+        "{autopilot} включает его. {warp} — сверхсвет: нажал, и он сам ведёт подход.",
     ["Dock at the station"] = "Состыкуйтесь со станцией",
     ["Slow to under 120 m/s and fly into the lit mouth. {dock} to dock."] =
         "Сбросьте скорость ниже 120 м/с и войдите в освещённый зев. {dock} — стыковка.",

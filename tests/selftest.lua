@@ -55,7 +55,7 @@ step(19, "mouse flight turns the way the mouse moves", function(game)
     local function x() return (camera:project(mx, my, mz, w, h)) end
     local before = x()
 
-    f.mouseDx, f.mouseDy = 0, 0
+    f:centreStick()
     f:mousemoved(0, 0, 60, 0)               -- mouse to the right
     for _ = 1, 30 do f:update(1 / 60) end
     local after = x()
@@ -70,7 +70,7 @@ step(19, "mouse flight turns the way the mouse moves", function(game)
     local uz = s.pos.z + s.up.z * 700 + s.fwd.z * 2000
     local function y() local _, sy = camera:project(ux, uy, uz, w, h) return sy end
     local by = y()
-    f.mouseDx, f.mouseDy = 0, 0
+    f:centreStick()
     f:mousemoved(0, 0, 0, -60)              -- mouse up
     for _ = 1, 30 do f:update(1 / 60) end
     local ay = y()
@@ -78,7 +78,7 @@ step(19, "mouse flight turns the way the mouse moves", function(game)
     assert(ay > by, string.format(
         "cockpit: mouse up turned away from the landmark above the nose (%.0f -> %.0f px)",
         by, ay))
-    f.mouseDx, f.mouseDy = 0, 0
+    f:centreStick()
 end)
 
 step(20, "fly in normal space", function(game)
@@ -233,6 +233,86 @@ step(44, "a new arrival can reach a port", function(game)
     local ok = f:toggleAutopilot()
     assert(f.autopilot, "autopilot refused a target at " .. math.floor(port.distance) .. " m")
     f:toggleAutopilot()
+end)
+
+step(45, "one tap on cruise flies you to the target", function(game)
+    -- Travel assist, end to end, through the keys a player presses: select,
+    -- tap cruise, hands off. Cruise used to be a *held* key with the throttle
+    -- judged by hand, so this whole path is new and nothing else covers it.
+    local f = game.manager:current()
+    local input = require("src.input")
+    local port = f:targetNearestPort()
+    assert(port, "nothing to fly to")
+    local startDist = port.distance
+    assert(f.autopilot == nil, "the autopilot is running; this tests the assist")
+
+    -- point the nose at it by hand, the way a player would
+    local mat4 = require("src.lib.mat4")
+    local function aim()
+        local t = f.target
+        local dx = t.pos.x - f.ship.pos.x
+        local dy = t.pos.y - f.ship.pos.y
+        local dz = t.pos.z - f.ship.pos.z
+        local d = math.sqrt(dx * dx + dy * dy + dz * dz)
+        f.ship.fwd:set(dx / d, dy / d, dz / d)
+        mat4.orthonormalize(f.ship.right, f.ship.up, f.ship.fwd)
+    end
+    -- Everything after this step is a scripted sequence that starts from the
+    -- arrival point, so this one has to hand the world back exactly as it
+    -- found it: flying 57 km early left the autopilot step docking from the
+    -- far side of the station and thirty-seven later steps failed with it.
+    local function snapshot()
+        local sh = f.ship
+        return {
+            pos = { sh.pos.x, sh.pos.y, sh.pos.z },
+            vel = { sh.vel.x, sh.vel.y, sh.vel.z },
+            fwd = { sh.fwd.x, sh.fwd.y, sh.fwd.z },
+            up = { sh.up.x, sh.up.y, sh.up.z },
+            right = { sh.right.x, sh.right.y, sh.right.z },
+            throttle = f.throttle, warpState = f.warpState, warpSpeed = f.warpSpeed,
+        }
+    end
+    local function restore(sn)
+        local sh = f.ship
+        sh.pos:set(sn.pos[1], sn.pos[2], sn.pos[3])
+        sh.vel:set(sn.vel[1], sn.vel[2], sn.vel[3])
+        sh.fwd:set(sn.fwd[1], sn.fwd[2], sn.fwd[3])
+        sh.up:set(sn.up[1], sn.up[2], sn.up[3])
+        sh.right:set(sn.right[1], sn.right[2], sn.right[3])
+        f.throttle, f.warpState, f.warpSpeed = sn.throttle, sn.warpState, sn.warpSpeed
+        f.warpWanted, f.travelEta = false, nil
+    end
+    local saved = snapshot()
+
+    aim()
+    f.throttle = 1
+    f:keypressed(input.keyName("warp"):lower())
+    assert(f.warpWanted, "tapping cruise did not latch it on")
+
+    local sawCruise, sawEta, arrived = false, false, false
+    for _ = 1, 5000 do
+        aim()
+        game:update(1 / 60)
+        if f.warpState == "cruise" then sawCruise = true end
+        if f.travelEta then sawEta = true end
+        if sawCruise and f.warpState == "off" then arrived = true break end
+    end
+    assert(sawCruise, "the drive never reached cruise from a single tap")
+    assert(sawEta, "no time-to-arrival was ever computed")
+    assert(arrived, "the assist never dropped out")
+
+    local t = f:targetNearestPort()
+    local standoff = require("src.sim.travel").standoff(t)
+    assert(t.distance < standoff * 2.5, string.format(
+        "dropped out %.0f m from a %.0f m standoff (started %.0f m out)",
+        t.distance, standoff, startDist))
+    local rel = f:relativeSpeed(t.station and t.station.vel)
+    assert(rel < 900, string.format("arrived doing %.0f m/s relative to the station", rel))
+    io.write(string.format("    DIAG-ASSIST start=%.0f m  dropped at %.0f m, %.0f m/s relative\n",
+        startDist, t.distance, rel))
+    io.flush()
+    restore(saved)
+    f:targetNearestPort()
 end)
 
 step(46, "autopilot arrives without overshooting", function(game)
@@ -569,7 +649,7 @@ step(98, "level flight in surface mode turns the way the mouse moves", function(
     b.up:set(0, 1, 0)
     mat4.orthonormalize(b.right, b.up, b.fwd, f:frameHanded())
     f:syncFromLocal()
-    f.mouseDx, f.mouseDy = 0, 0
+    f:centreStick()
     for _ = 1, 30 do
         f.local_.pos.y = ground + 900
         f.local_.vel:set(0, 0, 0)
@@ -584,7 +664,7 @@ step(98, "level flight in surface mode turns the way the mouse moves", function(
     local before = camera:project(mx, my, mz, w, h)
     assert(before and before > w / 2, "the probe landmark is not on the right of the screen")
 
-    f.mouseDx, f.mouseDy = 0, 0
+    f:centreStick()
     f:mousemoved(0, 0, 60, 0)
     for _ = 1, 20 do
         f.local_.pos.y = ground + 900
@@ -599,7 +679,7 @@ step(98, "level flight in surface mode turns the way the mouse moves", function(
         "level surface flight: mouse right turned AWAY from the right-hand landmark "
         .. "(%.0f -> %.0f px) -- the controls are mirrored", before, after))
 
-    f.mouseDx, f.mouseDy = 0, 0
+    f:centreStick()
     settings.set("autoLevel", true)
     f.autoLevel = true
     camera.mode = wasMode
@@ -679,7 +759,7 @@ step(100, "a rolled landing approach still turns the way the mouse moves", funct
     local before = camera:project(mx, my, mz, w, h)
     assert(before and before > w / 2, "the probe landmark is not on the right of the screen")
 
-    f.mouseDx, f.mouseDy = 0, 0
+    f:centreStick()
     f:mousemoved(0, 0, 60, 0)
     for _ = 1, 20 do game:update(1 / 60) end
     local after = camera:project(mx, my, mz, w, h)
@@ -692,7 +772,7 @@ step(100, "a rolled landing approach still turns the way the mouse moves", funct
     -- settling upside down, which is where `right.y` alone left it
     settings.set("autoLevel", true)
     f.autoLevel = true
-    f.mouseDx, f.mouseDy = 0, 0
+    f:centreStick()
     local rolled = math.abs((math.atan2 or math.atan)(f.local_.right.y, f.local_.up.y))
     -- hold it in the air: a ship that has landed stops levelling, and this is
     -- about the approach
@@ -704,7 +784,7 @@ step(100, "a rolled landing approach still turns the way the mouse moves", funct
     local levelled = math.abs((math.atan2 or math.atan)(f.local_.right.y, f.local_.up.y))
     assert(levelled < 0.35, string.format(
         "the hull did not level itself: %.2f rad of roll became %.2f", rolled, levelled))
-    f.mouseDx, f.mouseDy = 0, 0
+    f:centreStick()
     camera.mode = wasMode
 end)
 

@@ -38,6 +38,7 @@ local input = require("src.input")
 local salvage = require("src.sim.salvage")
 local context = require("src.sim.context")
 local autopilot = require("src.flight.autopilot")
+local travel = require("src.sim.travel")
 local audio = require("src.audio")
 local rocks = require("src.flight.rocks")
 local docking = require("src.flight.docking")
@@ -50,6 +51,11 @@ local Flight = class("FlightState")
 local sqrt, min, max, abs, floor = math.sqrt, math.min, math.max, math.abs, math.floor
 local atan2 = math.atan2 or math.atan
 local FL = config.flight
+
+-- Dead zone at the middle of the virtual stick, as a fraction of full
+-- deflection. Small, because the response curve above it already gives the
+-- fine control; this only exists so that "hands off" really is zero.
+local STICK_DEAD = 0.04
 local S = config.scale
 local C = palette.colors
 local L = i18n.format
@@ -446,18 +452,34 @@ function Flight:readRotation(dt, basis, agility)
     -- any manual input takes the ship back: an autopilot you cannot override
     -- instantly is a trap, not a convenience
     if self.autopilot and (pitch ~= 0 or yaw ~= 0 or roll ~= 0
-        or math.abs(self.mouseDx or 0) > 0.05 or math.abs(self.mouseDy or 0) > 0.05) then
+        or math.abs(self.stickX or 0) > STICK_DEAD or math.abs(self.stickY or 0) > STICK_DEAD) then
         self:cancelAutopilot("Autopilot disengaged")
     end
 
     if self.mouseSteer then
-        -- accumulated mouse motion, decayed so the ship settles when the hand
-        -- stops rather than drifting on
-        pitch = pitch + util.clamp(-(self.mouseDy or 0), -1, 1)
-        yaw = yaw + util.clamp(self.mouseDx or 0, -1, 1)
-        local decay = math.exp(-16 * dt)
-        self.mouseDx = (self.mouseDx or 0) * decay
-        self.mouseDy = (self.mouseDy or 0) * decay
+        local sx, sy = self.stickX or 0, self.stickY or 0
+        local len = math.sqrt(sx * sx + sy * sy)
+        if len < STICK_DEAD then
+            -- a small dead zone, snapped rather than scaled: without it the
+            -- ship never quite stops turning and the reticle creeps
+            sx, sy = 0, 0
+            self.stickX, self.stickY = 0, 0
+        else
+            -- a squared response near the middle: most of the disc is spent on
+            -- the small corrections that aiming is made of, and full
+            -- deflection still turns as hard as it ever did
+            local k = ((len - STICK_DEAD) / (1 - STICK_DEAD)) ^ 1.6 / len
+            sx, sy = sx * k, sy * k
+        end
+        pitch = pitch - sy
+        yaw = yaw + sx
+
+        -- optional self-centring, for players who want the old rate feel
+        local ret = settings.get("mouseReturn") or 0
+        if ret > 0 then
+            local decay = math.exp(-ret * dt)
+            self.stickX, self.stickY = (self.stickX or 0) * decay, (self.stickY or 0) * decay
+        end
     end
 
     -- Steer in the frame the player is looking through, not the hull's.
@@ -522,6 +544,20 @@ end
 -- Flight model
 -- ---------------------------------------------------------------------------
 
+--- The travel assist's answer for this frame, or nil when it has nothing to
+--- say (no target, assist off, or the target is behind rather than ahead).
+function Flight:travelPlan(ceiling)
+    if not settings.get("travelAssist") then return nil end
+    local t = self.target
+    if not t or not t.distance then return nil end
+    local standoff = travel.standoff(t)
+    -- how fast the target itself is going: a station orbits, and you cannot
+    -- arrive at something more precisely than it moves
+    local tv = t.station and t.station.vel
+    local tspeed = tv and sqrt((tv[1] or 0) ^ 2 + (tv[2] or 0) ^ 2 + (tv[3] or 0) ^ 2) or 0
+    return travel.plan(t.distance, standoff, ceiling, FL.warpMinSpeed * 0.5, tspeed)
+end
+
 --- Ceiling on frame shift speed: the closer to a mass, the slower you go.
 function Flight:warpCeiling()
     local sys = self.world.system
@@ -547,7 +583,13 @@ function Flight:updateWarp(dt)
         self.warpFraction = ceiling > 0 and util.clamp(self.warpSpeed / ceiling, 0, 1) or 0
         return
     end
-    local wants = config.down("warp")
+    -- A latch, not a held key.
+    --
+    -- Cruise used to run only while the key was down, so crossing a system was
+    -- a minute of holding the space bar with nothing to do -- the single most
+    -- tiring thing in the game and the one with the least reason to be. Tap to
+    -- engage, tap to drop.
+    local wants = self.warpWanted or false
     local ceiling, clearance = self:warpCeiling()
     self.massLocked = clearance < FL.warpMinAltitude
 
@@ -574,6 +616,7 @@ function Flight:updateWarp(dt)
     else
         if not wants or self.massLocked then
             self.warpState = "off"
+            self.warpWanted = false
             self.warpSpeed = 0
             -- the same applies to letting go of the key by hand: cruise
             -- velocity is assigned, not accumulated, so it must not be handed
@@ -583,6 +626,27 @@ function Flight:updateWarp(dt)
         else
             local target = ceiling * util.clamp(self.throttle, 0, 1)
             target = max(target, FL.warpMinSpeed * 0.5)
+            -- Travel assist: with something selected, the speed is the game's
+            -- problem. It keeps `travel.LOOKAHEAD` seconds of flight in front
+            -- of the ship and drops out at the same standoff the autopilot
+            -- uses, so an assisted arrival and an automatic one put you in the
+            -- same place.
+            local plan = self:travelPlan(ceiling)
+            if plan then
+                if plan.drop then
+                    self.warpState = "off"
+                    self.warpWanted = false
+                    self.warpSpeed = 0
+                    self:brakeToApproach()
+                    hud.message(L("Arrived: {name}", { name = self.target.label or "?" }), "good")
+                    self.travelEta = nil
+                    return
+                end
+                target = plan.speed
+                self.travelEta = plan.eta
+            else
+                self.travelEta = nil
+            end
             self.warpSpeed = self.warpSpeed + (target - self.warpSpeed) * util.clamp(FL.warpAccel * dt, 0, 1)
             self.heat = self.heat + dt * 3
         end
@@ -1118,6 +1182,9 @@ function Flight:draw(background)
         weaponSpeed = self.player:weapon().weapon.speed or config.combat.laserSpeed,
         weaponRange = config.combat.laserRange,
         corridor = self.corridor,
+        -- the virtual stick, so the HUD can show where it is being held
+        stick = self.mouseSteer and { self.stickX or 0, self.stickY or 0 } or nil,
+        travelEta = self.travelEta,
         autopilot = self.autopilot ~= nil,
         landed = self.landedOn ~= nil,
         gearDown = self.gearDown,
@@ -1185,7 +1252,13 @@ end
 -- Input
 -- ---------------------------------------------------------------------------
 
-function Flight:keypressed(key)
+function Flight:keypressed(key, scancode, isrepeat)
+    -- `setKeyRepeat(true)` is on for the text fields, so a held key fires this
+    -- thirty times a second. Nothing in the cockpit wants that: it would flap
+    -- the landing gear, and it would toggle cruise on and off continuously for
+    -- anyone who holds the key out of the habit the old hold-to-cruise taught
+    -- them.
+    if isrepeat then return end
     if config.is("pause", key) then
         local Pause = require("src.states.pause")
         self.manager:push(Pause.new(), self)
@@ -1208,6 +1281,8 @@ function Flight:keypressed(key)
         hud.message(self.gearDown and L("Landing gear down") or L("Landing gear up"), "info")
         return
     end
+    if config.is("warp", key) then self:toggleCruise() return end
+    if config.is("levelOut", key) then self:centreStick() end
     if config.is("target", key) then self:cycleTarget(false) return end
     if config.is("nextTarget", key) then self:cycleTarget(true) return end
     if config.is("scan", key) then self:scanTarget() return end
@@ -1294,8 +1369,31 @@ end
 
 function Flight:setMouseFlight(on)
     self.mouseSteer = on
-    self.mouseDx, self.mouseDy = 0, 0
+    self:centreStick()
     if love and love.mouse then love.mouse.setRelativeMode(on) end
+end
+
+--- Engages or drops frame shift.
+function Flight:toggleCruise()
+    if self.warpWanted then
+        self.warpWanted = false
+        if self.warpState ~= "off" then hud.message(L("Frame shift disengaged"), "info") end
+        return
+    end
+    if self.landedOn then
+        hud.message(L("Land first"), "warn")
+        return
+    end
+    self.warpWanted = true
+end
+
+--- Puts the virtual stick back in the middle.
+--
+-- Wanted after an autopilot hands the ship back, on landing, and on demand:
+-- a stick that holds its deflection is precise, and precision is no use if
+-- there is no way to say "straight ahead".
+function Flight:centreStick()
+    self.stickX, self.stickY = 0, 0
 end
 
 function Flight:mousepressed(x, y, button)
@@ -1305,13 +1403,31 @@ function Flight:mousepressed(x, y, button)
     end
 end
 
+--- Mouse motion moves a virtual stick, and the stick is the command.
+--
+-- The old scheme accumulated motion into a value that decayed with a 60 ms
+-- time constant, which makes the mouse a *rate* device: the ship turns while
+-- you are moving the hand and stops when you stop, with nothing on screen
+-- saying how hard you are pulling. It flies like a wet towel, and it is why
+-- fine aim was so hard.
+--
+-- A virtual stick is what every space sim with a mouse ended up with. The
+-- deflection is a position, clamped to a disc; where it sits is drawn on the
+-- HUD; and letting go of the mouse holds the turn instead of cancelling it.
+-- Position in, command out, with the state visible -- which is the whole of
+-- the difference.
 function Flight:mousemoved(x, y, dx, dy)
-    if self.mouseSteer then
-        local sens = settings.get("mouseSensitivity")
-        local invert = settings.get("invertY") and -1 or 1
-        self.mouseDx = util.clamp((self.mouseDx or 0) + dx * sens, -1.6, 1.6)
-        self.mouseDy = util.clamp((self.mouseDy or 0) + dy * sens * invert, -1.6, 1.6)
-    end
+    if not self.mouseSteer then return end
+    local sens = settings.get("mouseSensitivity") * 0.9
+    local invert = settings.get("invertY") and -1 or 1
+    local sx = (self.stickX or 0) + dx * sens
+    local sy = (self.stickY or 0) + dy * sens * invert
+    -- clamped to a disc rather than a square: a corner of a square is 1.41
+    -- times the deflection of an edge, so a diagonal pull turned faster than
+    -- any straight one
+    local len = math.sqrt(sx * sx + sy * sy)
+    if len > 1 then sx, sy = sx / len, sy / len end
+    self.stickX, self.stickY = sx, sy
 end
 
 function Flight:wheelmoved(x, y)

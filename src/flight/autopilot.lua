@@ -58,17 +58,11 @@ function autopilot.cancel(f, message)
 end
 
 --- Standoff distance for a contact: far enough out to see it whole.
-local function standoffFor(contact)
-    if contact.body then
-        return contact.body.radius * 1.9 + 20000
-    elseif contact.station then
-        return (contact.station.size or 600) * 2.2
-    elseif contact.place then
-        -- a settlement: aim for a low approach over its site
-        return 9000
-    end
-    return 1200
-end
+--
+-- Lives in `sim/travel.lua` now, because travel assist has to drop the player
+-- at the same place the autopilot would: two answers to "how close is close
+-- enough" would be two different arrivals for the same station.
+local standoffFor = require("src.sim.travel").standoff
 
 --- Sheds cruise velocity when leaving frame shift.
 --

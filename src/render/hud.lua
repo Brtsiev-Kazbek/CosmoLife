@@ -580,6 +580,31 @@ function hud.draw(ctx, w, h)
     love.graphics.line(cx, cy + 15, cx, cy + 26)
     love.graphics.points(cx, cy)
 
+    -- Where the stick is.
+    --
+    -- The mouse commands a virtual stick, and a stick you cannot see is a
+    -- control with hidden state: the ship turns and the pilot has no way to
+    -- know how hard they are pulling or how far back to come. This is that
+    -- state, drawn once, right where the eyes already are -- a ring for the
+    -- limit of the deflection and a dot for the deflection itself.
+    if ctx.stick then
+        local sx, sy = ctx.stick[1] or 0, ctx.stick[2] or 0
+        local R = 46
+        if sx * sx + sy * sy > 1e-4 then
+            ui.setColor(accent, 0.30)
+            love.graphics.circle("line", cx, cy, R)
+            local px, py = cx + sx * R, cy + sy * R
+            ui.setColor(accent, 0.55)
+            love.graphics.setLineWidth(2)
+            love.graphics.line(cx, cy, px, py)
+            love.graphics.setLineWidth(1)
+            ui.setColor(accent, 1)
+            love.graphics.circle("fill", px, py, 4)
+            ui.setColor(accent, 0.5)
+            love.graphics.circle("line", px, py, 7)
+        end
+    end
+
     -- velocity vector: where the ship is actually going
     if ctx.speed and ctx.speed > 2 then
         local vx = ship.vel.x / ctx.speed
@@ -653,6 +678,17 @@ function hud.draw(ctx, w, h)
         local label = ctx.warpState == "spool" and L("SPOOLING") or L("CRUISE")
         ui.textRight(label, rx + 190, gy + 52, C.cyan, "small")
         ui.bar(rx, gy + 70, 190, 6, ctx.warpFraction or 0, C.cyan)
+        -- Time to arrival, which is the number a pilot in cruise actually
+        -- wants: the speed readout above it is in hundreds of km/s and says
+        -- nothing about whether to go and make tea.
+        if ctx.travelEta then
+            local eta = ctx.travelEta
+            local text = eta >= 90
+                and L("{n} min", { n = string.format("%.0f", eta / 60) })
+                or L("{n} s", { n = string.format("%.0f", eta) })
+            ui.text(L("ARRIVAL"), rx, gy + 80, C.uiDim, "small")
+            ui.textRight(text, rx + 190, gy + 80, C.cyan, "small")
+        end
     elseif ctx.altitude then
         pop()
         layer("nav")

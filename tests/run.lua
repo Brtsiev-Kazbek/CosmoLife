@@ -479,6 +479,55 @@ test("a noted lead lives in the log and then expires", function(assert_)
     assert_(#player.leads == 0, "expiry left the lead in place")
 end)
 
+test("travel assist arrives instead of overshooting", function(assert_)
+    local travel = require("src.sim.travel")
+    local ceiling = 1e6
+
+    -- far out it uses whatever the mass-lock ceiling allows
+    local far = travel.plan(4e7, 2000, ceiling, 250)
+    assert_(far.drop == false, "dropped out 40 000 km from the target")
+    assert_(far.speed <= ceiling, "planned above the mass-lock ceiling")
+    assert_(far.eta > 0, "no time to arrival")
+
+    -- and the whole point: the speed falls with the distance, so the last
+    -- stretch is flown at a speed the hull can actually shed
+    local mid = travel.plan(1e6, 2000, ceiling, 250)
+    local near = travel.plan(1e4, 2000, ceiling, 250)
+    assert_(mid.speed < far.speed and near.speed < mid.speed,
+        "the approach does not slow down")
+    assert_(near.speed < 3000, "arriving at " .. math.floor(near.speed) .. " m/s")
+
+    -- inside the standoff there is nothing left to do
+    assert_(travel.plan(1500, 2000, ceiling, 250).drop == true, "flew past the standoff")
+
+    -- and arriving is a band, not a point: speed proportional to distance is
+    -- an exponential decay that reaches the standoff never, and a station
+    -- orbiting at 100 m/s turns the last stretch into a stern chase
+    assert_(travel.plan(2000 + 200, 2000, ceiling, 250).drop == true,
+        "200 m short of a 2 km standoff is not counted as arrived")
+    assert_(travel.plan(2000 + 4000, 2000, ceiling, 250).drop == false,
+        "dropped out 4 km early")
+
+    -- the floor stops the approach crawling, but not so close in that it
+    -- becomes an overshoot: at one lookahead out, the floor is done applying
+    local crawl = travel.plan(2000 + 250 * travel.LOOKAHEAD * 0.9, 2000, ceiling, 250)
+    assert_(crawl.speed < 250, "the floor kept the ship fast right up to the target")
+
+    -- A moving target is chased, not approached, unless its own speed is in
+    -- the command: with a speed proportional to distance the gap settles at
+    -- exactly `LOOKAHEAD` times the target's speed and stops closing.
+    local chasing = travel.plan(1e5, 2000, ceiling, 250, 100)
+    local still = travel.plan(1e5, 2000, ceiling, 250, 0)
+    assert_(chasing.speed - still.speed > 99,
+        "the target's own velocity is not in the commanded speed")
+
+    -- and both approaches agree on where "arrived" is
+    local ap = require("src.flight.autopilot")
+    local contact = { station = { size = 900 } }
+    assert_(ap.standoffFor(contact) == travel.standoff(contact),
+        "the autopilot and the assist would drop the player in different places")
+end)
+
 test("a course is plotted through systems in range", function(assert_)
     local routeMod = require("src.sim.route")
     -- a line of stops 9 ly apart with a cloud of decoys 3 ly apart beside it:
