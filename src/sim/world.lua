@@ -275,6 +275,12 @@ function World:jump(stub)
     self.rumourCache = {}
     self:enterSystem(stub)
     self.player:addLog(string.format("Jumped %.1f ly to %s.", dist, stub.name), self.day, "nav")
+
+    -- a course that has arrived is not a course any more
+    local course = self.player.course
+    if course and course.destId == stub.id then
+        self.player.course = nil
+    end
     return true, string.format("Arrived at %s", stub.name)
 end
 

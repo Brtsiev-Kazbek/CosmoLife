@@ -43,6 +43,19 @@ function Map:enter(flight)
     self.showRange = true
     self:refresh()
     self:findContracts()
+
+    -- An active course picks itself up where it was left: the chart opens on
+    -- the destination with the next legs already drawn, so continuing is the
+    -- same key again rather than a search.
+    local course = self.player.course
+    if course and course.destId and course.destId ~= here.id then
+        local dest = self.world.galaxy:byId(course.destId)
+        if dest then
+            self.selected = dest
+            self.cx, self.cy, self.cz = dest.x, dest.y, dest.z
+            self:refresh()
+        end
+    end
     self:planRoute()
 end
 
@@ -344,6 +357,21 @@ function Map:jump()
         hud.message("Already here", "warn")
         return
     end
+
+    -- Beyond one jump, ENTER sets a course rather than refusing.
+    --
+    -- The route has been plotted and drawn on screen since the course planner
+    -- went in, and pressing jump still said "out of range" -- the player had to
+    -- read the first hop off the panel, find it on the chart, click it, and do
+    -- that again at every stop. The destination is remembered instead, so a
+    -- five jump haul is five taps on the same key.
+    local here = self.world.stub
+    local dist = sqrt((target.x - here.x) ^ 2 + (target.y - here.y) ^ 2 + (target.z - here.z) ^ 2)
+    if dist > self.jumpRange and self.route and self.route.hops[1] then
+        self.player.course = { destId = target.id, destName = target.name }
+        target = self.route.hops[1]
+    end
+
     local ok, msg = self.world:jump(target)
     if ok then
         hud.message(msg, "good")

@@ -36,6 +36,7 @@ function Player:init(opts)
     self.missions = {}
     self.colonies = {}
     self.leads = {}            -- rumours worth following up, marked on the chart
+    self.course = nil          -- a multi-jump destination, kept between jumps
     self.knownSystems = {}
     self.log = {}
 
@@ -263,6 +264,7 @@ function Player:save()
         bounties = self.bounties,
         missions = self.missions,
         leads = self.leads,
+        course = self.course,
         colonies = self.colonies,
         knownSystems = self.knownSystems,
         systemId = self.systemId,
@@ -293,6 +295,7 @@ function Player:load(data)
     self.bounties = data.bounties or {}
     self.missions = data.missions or {}
     self.leads = data.leads or {}
+    self.course = data.course
     self.colonies = data.colonies or {}
     self.knownSystems = data.knownSystems or {}
     self.systemId = data.systemId

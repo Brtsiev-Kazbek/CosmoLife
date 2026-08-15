@@ -1185,6 +1185,7 @@ function Flight:draw(background)
         -- the virtual stick, so the HUD can show where it is being held
         stick = self.mouseSteer and { self.stickX or 0, self.stickY or 0 } or nil,
         travelEta = self.travelEta,
+        course = self.player.course and self.player.course.destName or nil,
         autopilot = self.autopilot ~= nil,
         landed = self.landedOn ~= nil,
         gearDown = self.gearDown,

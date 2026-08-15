@@ -808,6 +808,16 @@ function hud.draw(ctx, w, h)
             ui.textRightFit(L("CONFLICT ZONE"), w - 34, 82, textW, C.uiDanger, "small")
         end
         pop()
+
+        -- A course in progress, under the banner. Without it the only place
+        -- that knew a five jump haul was under way was the chart, so arriving
+        -- somewhere told the player nothing about why they were there.
+        if ctx.course then
+            layer("banner")
+            ui.textRightFit(L("COURSE: {name}", { name = ctx.course }),
+                w - 34, conflict and 100 or 82, textW, C.cyan, "small")
+            pop()
+        end
     end
 
     -- ---- messages -------------------------------------------------------

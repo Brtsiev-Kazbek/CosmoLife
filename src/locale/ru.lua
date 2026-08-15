@@ -38,6 +38,7 @@ local strings = {
     ["LANDING MODE"] = "РЕЖИМ ПОСАДКИ",
     ["AUTOPILOT"] = "АВТОПИЛОТ",
     ["CONFLICT ZONE"] = "ЗОНА КОНФЛИКТА",
+    ["COURSE: {name}"] = "КУРС: {name}",
     ["CONTROLS"] = "УПРАВЛЕНИЕ",
     ["Unknown"] = "Неизвестно",
     ["No target"] = "Нет цели",

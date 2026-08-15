@@ -1335,6 +1335,63 @@ step(267, "the chart plots a course and marks what is owed", function(game)
     selftest.plantedMission = mission
 end)
 
+step(272, "a course out of range jumps to the first hop and remembers the rest", function(game)
+    local map = selftest.map
+    assert(map, "the galaxy map was not open")
+    local player = game.world.player
+    local here = game.world.stub
+
+    -- somewhere several jumps out: the case that used to answer "out of range"
+    local far
+    for _, s in ipairs(map.systems) do
+        local d = math.sqrt((s.x - here.x) ^ 2 + (s.y - here.y) ^ 2 + (s.z - here.z) ^ 2)
+        if d > map.jumpRange * 2.2 and d < map.jumpRange * 4
+            and (not far or d > far.d) then far = { s = s, d = d } end
+    end
+    assert(far, "nothing on the chart is several jumps away")
+    map:select(far.s)
+    assert(map.route and map.route.jumps >= 2, "no multi-jump course to test with")
+    local firstHop = map.route.hops[1]
+
+    -- ENTER on it sets the course and takes the first leg
+    local fuelBefore = player.fuel
+    map:jump()
+    assert(player.course and player.course.destId == far.s.id,
+        "jumping at an out-of-range system did not set a course")
+    assert(game.world.stub.id == firstHop.id, string.format(
+        "the first leg went to %s rather than %s", game.world.stub.name, firstHop.name))
+    assert(player.fuel < fuelBefore, "the jump cost no fuel")
+
+    -- Jumping pops the chart, so reopen it the way the player would -- and
+    -- leave it open, because the steps after this one still expect a map on
+    -- the stack. An inserted step that eats the next one's state takes forty
+    -- later steps down with it; that was measured the hard way one commit ago.
+    local Map = require("src.states.galaxymap")
+    game.manager:push(Map.new(), map.flight)
+    local m2 = game.manager:current()
+    assert(m2.selected and m2.selected.id == far.s.id,
+        "reopening the chart lost the course")
+    assert(m2.route, "no course from the new system to the destination")
+    selftest.map = m2
+
+    -- and it clears itself on arrival rather than lingering
+    player.course = { destId = game.world.stub.id, destName = "here" }
+    game.world:jump(game.world.stub)
+    player.course = nil
+
+    -- Back where we started. A jump moves the whole game -- different system,
+    -- different planets -- and everything after this is a scripted sequence
+    -- that was written for the system it starts in: leaving the ship one hop
+    -- away sent the biome tour to a different world and failed there instead.
+    game.world:jump(here)
+    player.fuel = fuelBefore
+    player.course = nil
+    game.manager:pop()
+    game.manager:push(Map.new(), map.flight)
+    selftest.map = game.manager:current()
+    assert(game.world.stub.id == here.id, "the test did not put the ship back")
+end)
+
 step(275, "hyperspace jump", function(game)
     local map = selftest.map
     if not map then return end
