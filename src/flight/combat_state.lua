@@ -41,6 +41,7 @@ function combatState.updateWeapons(f, dt)
         f.muzzle = f.muzzle + 1
         f.heat = f.heat + def.energy * 0.8
         f.game.camera:addShake(0.035)
+        f.firedRecently = true
         -- a mining laser is a different job and says so; the small pitch
         -- wobble stops a burst sounding like one long tone
         audio.play(def.mining and "mining" or "laser",

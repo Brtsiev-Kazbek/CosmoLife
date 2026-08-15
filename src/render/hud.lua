@@ -15,10 +15,54 @@ local i18n = require("src.i18n")
 local audio = require("src.audio")
 local L = i18n.format
 
+local hudmode = require("src.render.hudmode")
+
 local hud = {}
 
 local C = palette.colors
 local cos, sin, pi, floor, min, max = math.cos, math.sin, math.pi, math.floor, math.min, math.max
+
+-- ---------------------------------------------------------------------------
+-- Layout
+-- ---------------------------------------------------------------------------
+
+--- Where every group of the HUD sits, for a given window.
+--
+-- This exists so the numbers have one owner. The check that the message band
+-- does not run into the scanner used to live in tests/run.lua as a *copy* of
+-- the arithmetic -- `msgBottom = h - 152` written out again -- so the test was
+-- checking its own transcription and the two could drift apart in silence.
+-- Now the drawing and the test read the same table.
+function hud.layout(w, h)
+    local l = {
+        cx = w * 0.5,
+        cy = h * 0.5,
+        gaugeY = h - 150,             -- top of both gauge clusters
+        gaugeW = 210,
+        gaugeH = 140,
+        leftX = 26,
+        rightX = w - 236,
+        scannerY = h - 78,            -- centre of the scanner bowl
+        scannerRX = 132,
+        scannerRY = 58,
+        scannerCaptionY = h - 146,
+        flagsY = h - 168,
+        targetX = 26,
+        targetY = 26,
+        targetW = 250,
+        bannerW = 274,
+        bannerY = 22,
+        objectiveY = 26,
+        promptY = h * 0.5 - 96,
+    }
+    l.bannerX = w - 34 - l.bannerW
+    -- The message band runs from under the reticle to just above the scanner
+    -- caption. At 540 px the old fixed fraction put the last four messages
+    -- inside the scanner ellipse.
+    l.msgBottom = l.scannerCaptionY - 6
+    l.msgTop = max(h * 0.30, min(h * 0.5 + 60, l.msgBottom - 140))
+    return l
+end
 
 hud.messages = {}
 
@@ -284,9 +328,19 @@ function hud.draw(ctx, w, h)
     local player = ctx.player
     local stats = player.stats
     local accent = C.uiPrimary
+    local l = hud.layout(w, h)
+
+    -- What the situation calls for. Groups the mode does not want are faded
+    -- rather than removed: a readout that vanishes and comes back is harder to
+    -- trust than one that recedes. See render/hudmode.lua.
+    local mode = ctx.mode or hudmode.resolve(ctx)
+    hud.mode = mode
+    ui.resetAlpha()
+    local function layer(name) ui.pushAlpha(hudmode.alpha(mode, name)) end
+    local pop = ui.popAlpha
 
     -- ---- reticle --------------------------------------------------------
-    local cx, cy = w * 0.5, h * 0.5
+    local cx, cy = l.cx, l.cy
     ui.setColor(accent, 0.85)
     love.graphics.setLineWidth(1)
     love.graphics.circle("line", cx, cy, 12)
@@ -319,23 +373,28 @@ function hud.draw(ctx, w, h)
     end
 
     -- ---- left gauges ----------------------------------------------------
-    local gx, gy = 26, h - 150
-    ui.brackets(gx - 8, gy - 12, 210, 140, 12, accent, 0.5)
+    local gx, gy = l.leftX, l.gaugeY
+    layer("vitals")
+    ui.brackets(gx - 8, gy - 12, l.gaugeW, l.gaugeH, 12, accent, 0.5)
 
     ui.text(L("SHIELD"), gx, gy, C.uiDim, "small")
     ui.segmentBar(gx, gy + 16, 190, 9, (ship.shield or 0) / max(stats.maxShield, 1), 14, C.cyan)
     ui.text(L("HULL"), gx, gy + 32, C.uiDim, "small")
     local hullFrac = (ship.hull or 0) / max(stats.maxHull, 1)
     ui.segmentBar(gx, gy + 48, 190, 9, hullFrac, 14, hullFrac < 0.3 and C.uiDanger or C.uiPrimary)
+    pop()
+    layer("power")
     ui.text(L("FUEL"), gx, gy + 64, C.uiDim, "small")
     ui.segmentBar(gx, gy + 80, 190, 7, (player.fuel or 0) / max(stats.fuel, 1), 12, C.amber)
     ui.text(L("HEAT"), gx, gy + 94, C.uiDim, "small")
     local heat = util.clamp((ctx.heat or 0) / max(stats.heatCapacity or 100, 1), 0, 1)
     ui.segmentBar(gx, gy + 110, 190, 7, heat, 12, heat > 0.8 and C.uiDanger or C.orange)
+    pop()
 
     -- ---- right gauges ---------------------------------------------------
-    local rx = w - 236
-    ui.brackets(rx - 8, gy - 12, 210, 140, 12, accent, 0.5)
+    local rx = l.rightX
+    layer("drive")
+    ui.brackets(rx - 8, gy - 12, l.gaugeW, l.gaugeH, 12, accent, 0.5)
     ui.text(L("THROTTLE"), rx, gy, C.uiDim, "small")
     ui.bar(rx, gy + 16, 190, 9, ctx.throttle or 0, C.uiPrimary)
     ui.textRight(string.format("%d%%", floor((ctx.throttle or 0) * 100)), rx + 190, gy - 2, C.uiText, "small")
@@ -357,6 +416,8 @@ function hud.draw(ctx, w, h)
         ui.textRight(label, rx + 190, gy + 52, C.cyan, "small")
         ui.bar(rx, gy + 70, 190, 6, ctx.warpFraction or 0, C.cyan)
     elseif ctx.altitude then
+        pop()
+        layer("nav")
         ui.text(L("ALTITUDE"), rx, gy + 52, C.uiDim, "small")
         ui.textRight(util.distance(ctx.altitude), rx + 190, gy + 52, ctx.altitude < 800 and C.uiWarn or C.uiText, "small")
         if ctx.verticalSpeed then
@@ -364,15 +425,21 @@ function hud.draw(ctx, w, h)
             ui.textRight(string.format("%+.0f m/s", ctx.verticalSpeed), rx + 190, gy + 70,
                 ctx.verticalSpeed < -40 and C.uiDanger or C.uiText, "small")
         end
+        pop()
+        layer("drive")
     end
+    pop()
 
+    layer("cargo")
     ui.text(L("CARGO"), rx, gy + 92, C.uiDim, "small")
     ui.textRight(string.format("%d / %d t", player:cargoUsed(), player:cargoCapacity()), rx + 190, gy + 92, C.uiText, "small")
     ui.text(L("CREDITS"), rx, gy + 110, C.uiDim, "small")
     ui.textRight(util.money(player.credits), rx + 190, gy + 110, C.amber, "small")
+    pop()
 
     -- ---- artificial horizon, whenever there is a ground to be level with --
     if ctx.horizon then
+        layer("nav")
         drawHorizon(cx, cy - h * 0.22, math.min(w, h) * 0.11,
             ctx.horizon.roll, ctx.horizon.pitch, ctx.altitude, ctx.verticalSpeed,
             ctx.horizon.landable)
@@ -380,11 +447,17 @@ function hud.draw(ctx, w, h)
             ui.textCenter(L("LANDING MODE"), cx, cy - h * 0.22 + math.min(w, h) * 0.13,
                 C.uiPrimary, "small")
         end
+        pop()
     end
 
     -- ---- scanner --------------------------------------------------------
-    drawScanner(cx, h - 78, 132, 58, ship, ctx.contacts, config.combat.scanRange)
-    ui.text(L("SCANNER"), cx - 132, h - 146, C.uiDim, "small")
+    if hudmode.alpha(mode, "scanner") > 0 then
+        layer("scanner")
+        drawScanner(cx, l.scannerY, l.scannerRX, l.scannerRY, ship, ctx.contacts,
+            config.combat.scanRange)
+        ui.text(L("SCANNER"), cx - l.scannerRX, l.scannerCaptionY, C.uiDim, "small")
+        pop()
+    end
 
     -- ---- landing gear / status flags ------------------------------------
     --
@@ -408,7 +481,7 @@ function hud.draw(ctx, w, h)
         for _, f in ipairs(flags) do
             local fw = font:getWidth(f[1])
             if not (f[2] == C.uiDanger) or ui.blink(0.4) then
-                ui.text(f[1], fx, h - 168, f[2], "small")
+                ui.text(f[1], fx, l.flagsY, f[2], "small")
             end
             fx = fx + fw + gap
         end
@@ -417,9 +490,10 @@ function hud.draw(ctx, w, h)
     -- ---- target panel ---------------------------------------------------
 
     if ctx.target then
+        layer("target")
         local t = ctx.target
-        local px, py = 26, 26
-        local pw = 250
+        local px, py = l.targetX, l.targetY
+        local pw = l.targetW
         local textW = pw - 28
         ui.panel(px, py, pw, t.detail and 118 or 78, L("TARGET"), accent)
         ui.textFit(t.label or L("Unknown"), px + 14, py + 12, textW, C.uiText, "small")
@@ -436,19 +510,21 @@ function hud.draw(ctx, w, h)
             ui.textFit(t.detail, px + 14, py + 82, textW, C.uiDim, "small")
             if t.detail2 then ui.textFit(t.detail2, px + 14, py + 96, textW, C.uiDim, "small") end
         end
+        pop()
     end
 
     -- ---- system banner --------------------------------------------------
     local sys = ctx.world.stub
     if sys then
+        layer("banner")
         local faction = factions.get(sys.factionId)
-        local bw = 274
-        local bx = w - 34 - bw
+        local bw = l.bannerW
+        local bx = l.bannerX
         local textW = bw - 20
         -- the conflict line used to print at y=88 inside a frame that ended at
         -- 84, so the frame grows when it is showing
         local conflict = sys.conflict and sys.conflict > 0.2
-        ui.brackets(bx, 22, bw, conflict and 84 or 62, 10, accent, 0.4)
+        ui.brackets(bx, l.bannerY, bw, conflict and 84 or 62, 10, accent, 0.4)
         ui.textRightFit(sys.name, w - 34, 28, textW, C.uiText, "normal")
         ui.textRightFit(L(faction.name), w - 34, 48, textW,
             { faction.color[1], faction.color[2], faction.color[3], 1 }, "small")
@@ -457,6 +533,7 @@ function hud.draw(ctx, w, h)
         if conflict and ui.blink(0.7) then
             ui.textRightFit(L("CONFLICT ZONE"), w - 34, 82, textW, C.uiDanger, "small")
         end
+        pop()
     end
 
     -- ---- messages -------------------------------------------------------
@@ -466,22 +543,21 @@ function hud.draw(ctx, w, h)
     -- inside the scanner ellipse.
     -- the band runs from just under the reticle to just above the scanner
     -- caption at h-146
-    local msgBottom = h - 152
-    local msgTop = math.max(h * 0.30, math.min(h * 0.5 + 60, msgBottom - 140))
-    drawMessages(cx, msgTop, msgBottom, w)
+    drawMessages(cx, l.msgTop, l.msgBottom, w)
 
     -- ---- objective ------------------------------------------------------
     --
     -- Top centre, under the system banner: the game never told anyone what to
     -- do next, and a player who does not know what to do next stops playing.
     if ctx.objective then
+        layer("objective")
         local f = ui.font("normal")
         local fs = ui.font("small")
         local tw = math.max(f:getWidth(ctx.objective),
             ctx.objectiveHint and fs:getWidth(ctx.objectiveHint) or 0) + 40
         tw = math.min(tw, w - 620)
         if tw > 120 then
-            local oy = 26
+            local oy = l.objectiveY
             local oh = ctx.objectiveHint and 50 or 32
             ui.setColor(C.uiPanel, 0.9)
             love.graphics.rectangle("fill", cx - tw * 0.5, oy, tw, oh)
@@ -498,6 +574,7 @@ function hud.draw(ctx, w, h)
                 ui.textCenter(ui.fit(ctx.objectiveHint, tw - 20, "small"), cx, oy + 28, C.uiDim, "small")
             end
         end
+        pop()
     end
 
     -- ---- prompts --------------------------------------------------------
@@ -505,11 +582,14 @@ function hud.draw(ctx, w, h)
         ui.setColor(C.uiPanel, 1)
         local f = ui.font("normal")
         local tw = f:getWidth(ctx.prompt) + 34
-        love.graphics.rectangle("fill", cx - tw * 0.5, h * 0.5 - 96, tw, 30)
+        love.graphics.rectangle("fill", cx - tw * 0.5, l.promptY, tw, 30)
         ui.setColor(accent, 0.8)
-        love.graphics.rectangle("line", cx - tw * 0.5, h * 0.5 - 96, tw, 30)
-        ui.textCenter(ctx.prompt, cx, h * 0.5 - 90, C.uiPrimary, "normal")
+        love.graphics.rectangle("line", cx - tw * 0.5, l.promptY, tw, 30)
+        ui.textCenter(ctx.prompt, cx, l.promptY + 6, C.uiPrimary, "normal")
     end
+
+    -- a group that threw part way through must not leave the whole UI faded
+    ui.resetAlpha()
 end
 
 --- Compact readout for on-foot mode.

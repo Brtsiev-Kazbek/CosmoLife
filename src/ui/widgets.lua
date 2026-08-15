@@ -70,8 +70,43 @@ end
 
 function ui.font(name) return ui.fonts[name] or ui.fonts.normal end
 
+-- A global alpha multiplier, so a caller can push a whole group of widgets
+-- back without every helper growing an alpha argument.
+--
+-- The flight HUD uses this to fade the readouts that the current situation
+-- does not call for (see render/hudmode.lua). It is a stack rather than a
+-- setter because the groups nest: a dimmed panel still contains a bar that
+-- wants its own alpha within it.
+ui.alpha = 1
+local alphaStack = {}
+
+function ui.pushAlpha(a)
+    alphaStack[#alphaStack + 1] = ui.alpha
+    ui.alpha = ui.alpha * (a or 1)
+end
+
+function ui.popAlpha()
+    local n = #alphaStack
+    if n == 0 then ui.alpha = 1 return end
+    ui.alpha = alphaStack[n]
+    alphaStack[n] = nil
+end
+
+--- Resets the stack. Called at the top of a frame so a caller that threw
+--- part way through a group cannot leave the whole UI faded.
+function ui.resetAlpha()
+    for i = #alphaStack, 1, -1 do alphaStack[i] = nil end
+    ui.alpha = 1
+end
+
 function ui.setColor(c, alpha)
-    love.graphics.setColor(c[1], c[2], c[3], (c[4] or 1) * (alpha or 1))
+    love.graphics.setColor(c[1], c[2], c[3], (c[4] or 1) * (alpha or 1) * ui.alpha)
+end
+
+--- Raw colour with the group alpha applied, for fills that are not palette
+--- entries.
+local function fill(r, g, b, a)
+    love.graphics.setColor(r, g, b, (a or 1) * ui.alpha)
 end
 
 -- ---------------------------------------------------------------------------
@@ -82,7 +117,8 @@ end
 function ui.panel(x, y, w, h, title, accent)
     accent = accent or palette.colors.uiPrimary
     local c = 10
-    love.graphics.setColor(palette.colors.uiPanel)
+    fill(palette.colors.uiPanel[1], palette.colors.uiPanel[2], palette.colors.uiPanel[3],
+        palette.colors.uiPanel[4] or 1)
     love.graphics.polygon("fill",
         x + c, y, x + w, y, x + w, y + h - c, x + w - c, y + h, x, y + h, x, y + c)
     love.graphics.setLineWidth(1)
@@ -94,7 +130,7 @@ function ui.panel(x, y, w, h, title, accent)
         local tw = ui.font("small"):getWidth(title) + 16
         ui.setColor(accent, 0.9)
         love.graphics.rectangle("fill", x + 18, y - 1, tw, 2)
-        love.graphics.setColor(palette.colors.uiPanel[1], palette.colors.uiPanel[2], palette.colors.uiPanel[3], 1)
+        fill(palette.colors.uiPanel[1], palette.colors.uiPanel[2], palette.colors.uiPanel[3], 1)
         love.graphics.rectangle("fill", x + 18, y - 9, tw, 16)
         ui.setColor(accent, 1)
         love.graphics.print(title, x + 26, y - 9)
@@ -240,7 +276,7 @@ end
 
 function ui.bar(x, y, w, h, frac, color, bg)
     frac = util.clamp(frac or 0, 0, 1)
-    love.graphics.setColor(bg and bg[1] or 0.08, bg and bg[2] or 0.12, bg and bg[3] or 0.12, 0.7)
+    fill(bg and bg[1] or 0.08, bg and bg[2] or 0.12, bg and bg[3] or 0.12, 0.7)
     love.graphics.rectangle("fill", x, y, w, h)
     ui.setColor(color or palette.colors.uiPrimary, 0.95)
     love.graphics.rectangle("fill", x, y, w * frac, h)

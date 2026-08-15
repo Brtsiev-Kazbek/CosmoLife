@@ -1282,15 +1282,77 @@ test("screen layouts fit at every supported window size", function(assert_)
             lastRowBottom <= py + ph - 30,
             "pause status overlaps the last menu item at " .. where)
 
-        -- HUD: the message band must sit entirely above the scanner caption
-        -- at h-146 (the scanner ellipse itself starts at h-136)
-        local msgBottom = h - 152
-        local msgTop = math.max(h * 0.30, math.min(h * 0.5 + 60, msgBottom - 140))
+        -- HUD: read the real layout rather than a copy of its arithmetic.
+        --
+        -- This used to recompute `msgBottom = h - 152` here, so the test was
+        -- checking its own transcription of the geometry and the two could
+        -- drift apart without anything failing.
+        local hud = require("src.render.hud")
+        local l = hud.layout(w, h)
         check("screen layouts fit at every supported window size",
-            msgBottom <= h - 146 and msgTop < msgBottom,
-            string.format("hud message band %d..%d clashes with the scanner at %s",
-                msgTop, msgBottom, where))
+            l.msgBottom <= l.scannerCaptionY and l.msgTop < l.msgBottom,
+            string.format("hud message band %d..%d clashes with the scanner caption at %d, %s",
+                l.msgTop, l.msgBottom, l.scannerCaptionY, where))
+        check("screen layouts fit at every supported window size",
+            l.flagsY < l.scannerCaptionY and l.flagsY > 0,
+            "hud status flags land on the scanner caption at " .. where)
+        check("screen layouts fit at every supported window size",
+            l.leftX + l.gaugeW < l.rightX,
+            "the two gauge clusters overlap at " .. where)
+        check("screen layouts fit at every supported window size",
+            l.targetX + l.targetW < l.bannerX,
+            "the target panel runs into the system banner at " .. where)
+        check("screen layouts fit at every supported window size",
+            l.gaugeY + l.gaugeH <= h,
+            "the gauge cluster runs off the bottom at " .. where)
     end
+end)
+
+-- The HUD's mode, which decides what the player is looking at.
+--
+-- Worth a head-less test for the same reason sim/context.lua is: it is a rule
+-- about what matters, and a rule is easier to get right when it can be asked
+-- questions without a window open.
+test("the HUD emphasises what the situation calls for", function(assert_)
+    local hudmode = require("src.render.hudmode")
+
+    assert_(hudmode.resolve({}) == "space", "an empty situation is not ordinary flight")
+    assert_(hudmode.resolve({ cruise = true }) == "cruise", "frame shift is not cruise")
+    assert_(hudmode.resolve({ docking = true }) == "approach", "inside the mouth is not approach")
+    assert_(hudmode.resolve({ horizon = true }) == "surface", "over ground is not surface")
+    assert_(hudmode.resolve({ landed = true }) == "surface", "landed is not surface")
+    assert_(hudmode.resolve({ hostileNear = true }) == "combat", "a hostile in range is not combat")
+
+    -- Being shot at outranks everything else: a station is not going anywhere,
+    -- and a pilot in a fight needs the fight's numbers.
+    assert_(hudmode.resolve({ hostileNear = true, docking = true, cruise = true }) == "combat",
+        "combat did not win over docking and cruise")
+
+    -- and it holds for a while after the shooting stops, so the screen does
+    -- not change dress between passes of a dogfight
+    assert_(hudmode.resolve({ sinceCombat = 1 }) == "combat", "combat mood ends immediately")
+    assert_(hudmode.resolve({ sinceCombat = hudmode.COMBAT_HOLD + 1 }) == "space",
+        "combat mood never ends")
+end)
+
+test("no HUD mode hides everything", function(assert_)
+    local hudmode = require("src.render.hudmode")
+    for mode in pairs(hudmode.MODES) do
+        local lit = 0
+        for _, name in ipairs(hudmode.LAYERS) do
+            local a = hudmode.alpha(mode, name)
+            check("no HUD mode hides everything", a >= 0 and a <= 1,
+                string.format("%s/%s has an alpha of %.2f", mode, name, a))
+            if a > 0.9 then lit = lit + 1 end
+        end
+        -- A mode that dims everything is a blank screen with extra steps.
+        check("no HUD mode hides everything", lit >= 2,
+            mode .. " leaves only " .. lit .. " layers at full strength")
+    end
+    -- an unknown layer must dim rather than error, so adding one to the HUD
+    -- cannot crash a mode that has not been told about it
+    assert_(hudmode.alpha("space", "somethingNew") == hudmode.DIM,
+        "an unlisted layer does not fall back to dim")
 end)
 
 test("text fitting never returns something wider than asked", function(assert_)

@@ -283,6 +283,33 @@ function Flight:updateWeather(body) return environment.updateWeather(self, body)
 
 
 
+--- How long ago anything violent happened, and whether it is still nearby.
+--
+-- The HUD uses this to decide it is in a fight (render/hudmode.lua). Firing is
+-- not enough on its own -- a miner burns rock all day -- so it is fire *or*
+-- losing shield or hull, and a hostile inside scanner range keeps it up
+-- regardless.
+function Flight:updateCombatMood(dt)
+    local health = (self.ship.hull or 0) + (self.ship.shield or 0)
+    local hurt = self._lastHealth and health < self._lastHealth - 0.5
+    self._lastHealth = health
+    if hurt or self.firedRecently then
+        self.sinceCombat = 0
+    elseif self.sinceCombat then
+        self.sinceCombat = self.sinceCombat + dt
+    end
+    self.firedRecently = false
+
+    local range = self.player.stats.scanRange or config.combat.scanRange
+    self.hostileNear = false
+    for _, c in ipairs(self.contacts) do
+        if c.hostile and (c.distance or 1e12) < range then
+            self.hostileNear = true
+            break
+        end
+    end
+end
+
 --- The soundscape: the drive and the air outside it.
 --
 -- Both are continuous voices rather than events, so this only sets where they
@@ -837,6 +864,7 @@ function Flight:update(dt, background)
         self:targetNearestPort()
     end
     self:updateDockPrompt()
+    self:updateCombatMood(dt)
     self:updateSound(dt)
 
     self.player.hull = self.ship.hull
@@ -1012,6 +1040,11 @@ function Flight:draw(background)
         warpFraction = self.warpFraction,
         hoverMode = self.hoverMode,
         horizon = self:attitude(),
+        -- what the HUD should emphasise; see render/hudmode.lua
+        cruise = self.warpState ~= "off",
+        docking = self.relativeTo ~= nil,
+        hostileNear = self.hostileNear,
+        sinceCombat = self.sinceCombat,
         autopilot = self.autopilot ~= nil,
         landed = self.landedOn ~= nil,
         gearDown = self.gearDown,
