@@ -274,6 +274,39 @@ local strings = {
     ["Nothing traded here."] = "Здесь ничем не торгуют.",
     ["No contracts posted."] = "Контрактов нет.",
 
+    -- Разговоры в баре. Тексты слухов лежат в таблице (src/sim/rumours.lua),
+    -- а не в литералах L(), поэтому audit_locale их не видит — правятся руками.
+    ["LOCAL TALK"] = "РАЗГОВОРЫ",
+    ["Nobody here has anything to say."] = "Здесь никому нечего сказать.",
+    ["ENTER to note"] = "ENTER — записать",
+    ["noted"] = "записано",
+    ["Noted: {system}"] = "Записано: {system}",
+    ["Already in your notes."] = "Уже в записях.",
+    ["That is talk, not a destination."] = "Это разговор, а не пункт назначения.",
+    ["ENTER note a lead   Q/E tabs"] = "ENTER записать   Q/E вкладки",
+    ["Noted leads are marked on the galactic chart."] =
+        "Записанное отмечается на галактической карте.",
+    ["Talk, and nothing you can steer by."] = "Разговор, по которому не проложишь курс.",
+    ["System"] = "Система",
+    ["They are short of {cargo:gen:lc} in {system}"] = "В системе {system} не хватает {cargo:gen:lc}",
+    ["Nobody flies into {system} unarmed these days"] =
+        "В систему {system} нынче без оружия не суются",
+    ["The war between {a} and {b} shows no sign of ending"] =
+        "Война между {a:ins} и {b:ins} не думает кончаться",
+    ["{cargo} is hard to come by here just now"] = "{cargo} здесь сейчас не достать",
+    ["There is more {cargo:gen:lc} here than anyone can use"] =
+        "{cargo:gen:lc} здесь больше, чем кому-то нужно",
+    ["Word from {name}: they are down to their last {cargo:gen:lc}"] =
+        "Весть из {name}: у них кончается {cargo:nom:lc}",
+    ["Everyone here works for the same company, one way or another"] =
+        "Здесь все так или иначе работают на одну компанию",
+    ["The dock crew will tell you the pay was better last year"] =
+        "Докеры скажут вам, что в прошлом году платили лучше",
+    ["Half the bar is waiting on a ship that is late"] =
+        "Полбара ждёт корабль, который опаздывает",
+    ["They say the last commander through here left owing money"] =
+        "Говорят, прошлый командир ушёл отсюда с долгами",
+
     -- карта
     ["Distance"] = "Расстояние",
     ["Fuel needed"] = "Нужно топлива",
@@ -284,6 +317,7 @@ local strings = {
     ["Tech level"] = "Тех. уровень",
     ["Security"] = "Безопасность",
     ["Star"] = "Звезда",
+    ["Height"] = "Высота над плоскостью",
     ["Frontier"] = "Фронтир",
     ["Visited"] = "Посещена",
     ["CURRENT SYSTEM"] = "ТЕКУЩАЯ СИСТЕМА",

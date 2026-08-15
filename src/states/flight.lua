@@ -739,7 +739,9 @@ end
 --- Ground contact: land, bounce or crash.
 function Flight:collideGround(dt)
     local s, l = self.surface, self.local_
-    local ground = s:groundHeight(l.pos.x, l.pos.z)
+    -- the drawn ground, for the same reason the walker uses it: a hull resting
+    -- on the analytic height sits inside the hillside on screen
+    local ground = s:renderedHeight(l.pos.x, l.pos.z)
     local clearance = self.player.shipDef.length * 0.22 + 1.2
     local floorY = ground + clearance
 

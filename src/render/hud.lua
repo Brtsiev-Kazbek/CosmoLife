@@ -270,21 +270,29 @@ local function drawEdgeArrow(camera, w, h, x, y, z, col)
     love.graphics.setColor(1, 1, 1, 1)
 end
 
-local function drawContactMarker(camera, w, h, c, selected)
+local function drawContactMarker(camera, w, h, c, selected, placed)
     local x, y, dist = camera:project(c.pos.x, c.pos.y, c.pos.z, w, h)
     local col = c.color or C.uiPrimary
     if x and x > -60 and x < w + 60 and y > -60 and y < h + 60 then
-        local s = util.clamp(2400 / math.max(dist, 1), 6, 34)
-        ui.setColor(col, selected and 1 or 0.65)
-        love.graphics.setLineWidth(selected and 2 or 1)
+        -- A pip, not a frame.
+        --
+        -- The marker used to grow with proximity up to 34 px and be drawn as a
+        -- closed rectangle, so anything you flew near ended up wearing a box:
+        -- a station at 20 km was a model inside a wireframe cage, and three
+        -- contacts in the same direction were three nested cages. A fixed
+        -- little mark says "there is something here" without drawing over the
+        -- something.
+        local s = selected and 7 or 4
+        ui.setColor(col, selected and 1 or 0.6)
+        love.graphics.setLineWidth(1)
         love.graphics.rectangle("line", x - s, y - s, s * 2, s * 2)
         if selected then
             ui.setColor(col, 0.9)
-            local t = s * 1.6
-            love.graphics.line(x - t, y, x - s * 1.1, y)
-            love.graphics.line(x + s * 1.1, y, x + t, y)
-            love.graphics.line(x, y - t, x, y - s * 1.1)
-            love.graphics.line(x, y + s * 1.1, x, y + t)
+            local t = s * 2.4
+            love.graphics.line(x - t, y, x - s * 1.6, y)
+            love.graphics.line(x + s * 1.6, y, x + t, y)
+            love.graphics.line(x, y - t, x, y - s * 1.6)
+            love.graphics.line(x, y + s * 1.6, x, y + t)
         end
         -- Navigation contacts are labelled at any distance. They used to be
         -- named only within 6 km, so from an arrival point tens of thousands
@@ -304,6 +312,21 @@ local function drawContactMarker(camera, w, h, c, selected)
             local topBand = ly < 112
             local free = not (topBand and (lx < 300 or lx + lw > w - 310))
                 and ly < h - 170
+            -- and not on top of a label already drawn. Four contacts in the
+            -- same direction printed four names in the same place: a stack of
+            -- overlapping text that named nothing. The nearer contact is drawn
+            -- first, so the one that survives is the one that matters.
+            if free and placed then
+                local x1, y1, x2, y2 = lx - 3, ly - 2, lx + lw + 3, y + 22
+                for i = 1, #placed do
+                    local p = placed[i]
+                    if x1 < p[3] and x2 > p[1] and y1 < p[4] and y2 > p[2] then
+                        free = false
+                        break
+                    end
+                end
+                if free then placed[#placed + 1] = { x1, y1, x2, y2 } end
+            end
             if free then
                 ui.text(c.label, lx, ly, col, "small")
                 if selected or navigable then
@@ -334,23 +357,16 @@ local function drawTargetIndicator(ctx, w, h)
     if not x then return end
 
     local col = t.hostile and C.uiDanger or C.cyan
-    local s = util.clamp(3200 / max(dist, 1), 14, 90)
+    -- Fixed size, and no frame around the hull.
+    --
+    -- The brackets grew to 90 px as the target closed, which is a cage drawn
+    -- over the very model the player is looking at. The ticks from the contact
+    -- marker already say which one is selected; what only this can say is how
+    -- much of it is left and where to aim.
+    local s = 22
 
-    -- corner brackets rather than a closed box: the target stays visible
-    -- inside its own indicator
-    ui.setColor(col, 0.95)
-    love.graphics.setLineWidth(2)
-    local arm = s * 0.42
-    for _, corner in ipairs({ { -1, -1 }, { 1, -1 }, { -1, 1 }, { 1, 1 } }) do
-        local px, py = x + corner[1] * s, y + corner[2] * s
-        love.graphics.line(px, py, px - corner[1] * arm, py)
-        love.graphics.line(px, py, px, py - corner[2] * arm)
-    end
-    love.graphics.setLineWidth(1)
-
-    -- health, under the frame, as wide as the frame is
     local bw = s * 2
-    local by = y + s + 5
+    local by = y + 16
     if t.shield then
         ui.bar(x - s, by, bw, 4, t.shield, C.cyan)
         by = by + 6
@@ -421,62 +437,44 @@ local function drawObjectiveMarker(ctx, w, h)
     love.graphics.setColor(1, 1, 1, 1)
 end
 
-local function drawCorridor(ctx, c, w, h)
+--- The dock, marked where it is, in as little ink as that takes.
+--
+-- The first version drew the mouth and two rings up the approach axis: three
+-- squares in the world, and at anything under a few kilometres the nearest of
+-- them was larger than the screen, so the station arrived wearing a wireframe
+-- box. The information that mattered was never the box -- it was *which way*
+-- the opening faces and whether the closing speed will be let in. That is a
+-- ring on the mouth, a short stub along the axis, and one number.
+local function drawCorridorHint(ctx, c, w, h)
     local camera = ctx.camera
-    -- two axes across the mouth: any vector not parallel to the normal will do
-    local ax, ay, az = 0, 1, 0
-    if math.abs(c.ny) > 0.94 then ax, ay, az = 1, 0, 0 end
-    -- u = n x a, v = n x u
-    local ux, uy, uz = c.ny * az - c.nz * ay, c.nz * ax - c.nx * az, c.nx * ay - c.ny * ax
-    local ul = math.sqrt(ux * ux + uy * uy + uz * uz)
-    if ul < 1e-6 then return end
-    ux, uy, uz = ux / ul, uy / ul, uz / ul
-    local vx, vy, vz = c.ny * uz - c.nz * uy, c.nz * ux - c.nx * uz, c.nx * uy - c.ny * ux
-
     local col = c.tooFast and C.uiWarn or C.uiPrimary
-    local r = c.radius
+    local mx, my, dist = camera:project(c.x, c.y, c.z, w, h)
+    if not mx then return end
 
-    local function at(du, dv, dn)
-        return camera:project(
-            c.x + ux * du + vx * dv + c.nx * dn,
-            c.y + uy * du + vy * dv + c.ny * dn,
-            c.z + uz * du + vz * dv + c.nz * dn, w, h)
-    end
-
-    -- the mouth itself, and two rings up the approach axis: three squares of
-    -- shrinking screen size read as a tunnel without drawing one
-    ui.setColor(col, 0.9)
-    love.graphics.setLineWidth(2)
-    for i, dn in ipairs({ 0, r * 1.6, r * 3.4 }) do
-        local pts, ok = {}, true
-        for _, corner in ipairs({ { -1, -1 }, { 1, -1 }, { 1, 1 }, { -1, 1 } }) do
-            local px, py = at(corner[1] * r, corner[2] * r, dn)
-            if not px then ok = false break end
-            pts[#pts + 1] = px
-            pts[#pts + 1] = py
-        end
-        if ok then
-            ui.setColor(col, i == 1 and 0.95 or (0.5 / i))
-            love.graphics.polygon("line", pts)
-        end
-    end
+    -- a fixed ring, so closing in does not inflate it over the model
+    ui.setColor(col, 0.85)
+    love.graphics.setLineWidth(1.5)
+    love.graphics.circle("line", mx, my, 13)
     love.graphics.setLineWidth(1)
 
-    -- the axis, so the direction to come in from is unambiguous
-    local mx, my = at(0, 0, 0)
-    local ex, ey = at(0, 0, r * 3.4)
-    if mx and ex then
-        ui.setColor(col, 0.35)
-        love.graphics.line(mx, my, ex, ey)
+    -- the axis as a stub out of the mouth: enough to read the facing from,
+    -- not enough to draw a tunnel with
+    local ex, ey = camera:project(c.x + c.nx * c.radius * 2,
+        c.y + c.ny * c.radius * 2, c.z + c.nz * c.radius * 2, w, h)
+    if ex then
+        local dx, dy = ex - mx, ey - my
+        local len = math.sqrt(dx * dx + dy * dy)
+        if len > 1 then
+            local k = math.min(len, 34) / len
+            ui.setColor(col, 0.5)
+            love.graphics.line(mx + dx / len * 14, my + dy / len * 14,
+                mx + dx * k, my + dy * k)
+        end
     end
 
-    -- and the one number that decides whether this works, on the mouth rather
-    -- than in a corner
-    if mx then
-        local label = util.speed(c.speed)
-        if c.tooFast then label = label .. "  " .. L("TOO FAST") end
-        ui.textCenter(label, mx, my + r * 0.1 + 8, col, "small")
-    end
+    local label = util.speed(c.speed)
+    if c.tooFast then label = label .. "  " .. L("TOO FAST") end
+    ui.textCenter(label, mx, my + 18, col, "small")
     love.graphics.setColor(1, 1, 1, 1)
 end
 
@@ -598,14 +596,15 @@ function hud.draw(ctx, w, h)
     end
 
     -- ---- contacts in the world -----------------------------------------
+    local placed = {}
     for _, c in ipairs(ctx.contacts) do
         if c.marker then
-            drawContactMarker(ctx.camera, w, h, c, c == ctx.target)
+            drawContactMarker(ctx.camera, w, h, c, c == ctx.target, placed)
         end
     end
     layer("target")
     drawTargetIndicator(ctx, w, h)
-    if ctx.corridor then drawCorridor(ctx, ctx.corridor, w, h) end
+    if ctx.corridor then drawCorridorHint(ctx, ctx.corridor, w, h) end
     pop()
     layer("objective")
     drawObjectiveMarker(ctx, w, h)

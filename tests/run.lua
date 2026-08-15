@@ -404,6 +404,81 @@ test("a colony's shortfall is what to put in the hold", function(assert_)
     assert_(trade.wanted(nil, "water", 30) == 0, "a pilot with no colonies was asked to supply one")
 end)
 
+test("what a bar says is true and points somewhere", function(assert_)
+    local rumoursMod = require("src.sim.rumours")
+    local g = Galaxy.new(31)
+    local stub = g:findStartSystem()
+    local diplo = factions.Diplomacy.new(31)
+    local place = { seed = 4242, economyId = "agricultural", population = 20000,
+                    lawLevel = 0.6, techLevel = 5 }
+    local player = { colonies = {}, cargo = {} }
+
+    local list = rumoursMod.generate({
+        seed = place.seed, day = 12, place = place, stub = stub,
+        galaxy = g, diplomacy = diplo, player = player,
+    })
+    assert_(#list > 0, "the bar had nothing to say at all")
+
+    -- the load-bearing claim: a rumour that names a system names a real one,
+    -- and a demand rumour is true of that system's economy
+    local commoditiesMod = require("src.sim.commodities")
+    local pointed = 0
+    for _, r in ipairs(list) do
+        assert_(type(r.text) == "string" and #r.text > 0, "a rumour with no words")
+        if r.systemId then
+            pointed = pointed + 1
+            local s = g:byId(r.systemId)
+            assert_(s ~= nil, "a rumour points at a system that does not exist: " .. r.systemId)
+            if r.kind == "demand" then
+                -- the claim itself, not a proxy for it: that system's economy
+                -- really does consume the thing the bar named
+                local eaten = commoditiesMod.economy(s.economyId).consumes[r.cargoId] or 0
+                assert_(eaten > 0, string.format(
+                    "%s is said to want %s and its economy does not", s.name, r.cargoId))
+                assert_(r.systemId ~= stub.id, "the bar sent the player where they stand")
+            end
+            if r.kind == "danger" then
+                assert_((s.lawLevel or 1) < 0.25,
+                    string.format("%s is called lawless at law %.2f", s.name, s.lawLevel or 1))
+            end
+        end
+    end
+    assert_(pointed > 0, "nothing said in the bar was worth steering by")
+
+    -- the same day at the same port says the same thing
+    local again = rumoursMod.generate({
+        seed = place.seed, day = 12, place = place, stub = stub,
+        galaxy = g, diplomacy = diplo, player = player,
+    })
+    assert_(#again == #list, "the bar changed its mind between two readings")
+    for i = 1, #list do
+        assert_(again[i].text == list[i].text, "rumour " .. i .. " differs between readings")
+    end
+end)
+
+test("a noted lead lives in the log and then expires", function(assert_)
+    local rumoursMod = require("src.sim.rumours")
+    local player = { leads = {} }
+    local r = { kind = "demand", text = "They are short of {cargo:gen:lc} in {system}",
+                args = { cargo = "Grain", system = "Xeiton" }, terms = { "cargo" },
+                systemId = "1.0.2.3", systemName = "Xeiton" }
+
+    assert_(select(1, rumoursMod.note(player, r, 10)) == true, "the lead was not noted")
+    assert_(#player.leads == 1, "noting produced " .. #player.leads .. " leads")
+    assert_(select(1, rumoursMod.note(player, r, 12)) == false, "the same lead was noted twice")
+    assert_(player.leads[1].expires == 12 + rumoursMod.LEAD_DAYS,
+        "hearing it again did not refresh the note")
+
+    local flavour = { kind = "flavour", text = "Half the bar is waiting", args = {} }
+    assert_(select(1, rumoursMod.note(player, flavour, 12)) == false,
+        "talk with no destination was noted as a lead")
+
+    assert_(rumoursMod.bySystem(player)["1.0.2.3"] ~= nil, "the chart cannot find the lead")
+    assert_(rumoursMod.expire(player, 20) == 0, "a fresh lead expired")
+    assert_(rumoursMod.expire(player, 100) == 1, "a stale lead was kept")
+    assert_(#player.leads == 0, "expiry left the lead in place")
+end)
+
 test("a course is plotted through systems in range", function(assert_)
     local routeMod = require("src.sim.route")
     -- a line of stops 9 ly apart with a cloud of decoys 3 ly apart beside it:
@@ -662,6 +737,54 @@ test("standing water is its own mesh, and only where there is water", function(a
     }
     local surf = Surface.new(barren)
     assert_(surf._seaLevelMetres == nil, "a barren world reports a sea level")
+end)
+
+test("a walker stands on the ground that is drawn", function(assert_)
+    -- The reported symptom was walking under the planet. The cause is that the
+    -- ground has two heights: the analytic field, and the triangle mesh
+    -- sampled from it every 108 m. Between vertices they disagree by whatever
+    -- the field does in between, and a walker clamped to the analytic one ends
+    -- up inside the hillside on screen.
+    local Surface = require("src.procgen.surface")
+    local vec3lib = require("src.lib.vec3")
+    local body = {
+        seed = 4242, radius = 3.2e6, terrain = "rock", atmosphere = 0.2, type = "rock",
+        pos = vec3lib(0, 0, 0), spin = 0, axialTilt = 0, gravity = 6.4, settlements = {},
+    }
+    local surf = Surface.new(body)
+    surf:setOrigin(0.2, 0.4)
+
+    local cfg = require("src.config")
+    local rng = Rng.new(11)
+    local worstAnalytic, worstRendered, buried = 0, 0, 0
+    local eye = cfg.walk.eyeHeight
+    for _ = 1, 3000 do
+        local x, z = rng:range(-4000, 4000), rng:range(-4000, 4000)
+        local drawn = surf:renderedHeight(x, z)
+        local gap = drawn - surf:groundHeight(x, z)
+        if gap > worstAnalytic then worstAnalytic = gap end
+        if gap > eye then buried = buried + 1 end
+        -- the walker's own height against the mesh: this is the one that has
+        -- to be zero, and it is what the fix makes true
+        local err = math.abs(drawn - surf:renderedHeight(x, z))
+        if err > worstRendered then worstRendered = err end
+    end
+    assert_(buried > 0, "the test terrain is too smooth to show the defect at all")
+    assert_(worstAnalytic > eye, string.format(
+        "the analytic height never sank below the mesh by more than %.1f m", worstAnalytic))
+    assert_(worstRendered < 1e-6, "renderedHeight disagrees with itself")
+
+    -- and the mesh height really is the mesh: at a vertex the two must agree
+    -- exactly, because there the triangle passes through the sampled point
+    -- the live resolution is the quality preset's, not the config fallback:
+    -- reading the wrong one puts the "vertices" between the real ones
+    local CH = cfg.render.terrainChunkSize
+    local step = CH / (require("src.settings").q().terrainRes or cfg.render.terrainChunk)
+    for i = 1, 20 do
+        local x, z = i * step, (i * 3) * step
+        assert_(math.abs(surf:renderedHeight(x, z) - surf:groundHeight(x, z)) < 1e-6,
+            "the drawn height misses the vertex it is built from")
+    end
 end)
 
 test("terrain is deterministic and continuous", function(assert_)

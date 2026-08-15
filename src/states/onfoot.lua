@@ -43,7 +43,7 @@ function OnFoot:enter(opts)
     self.walker = Walker.new({
         frame = "surface",
         x = opts.x or 0, z = opts.z or 0,
-        y = self.surface:groundHeight(opts.x or 0, opts.z or 0),
+        y = self.surface:renderedHeight(opts.x or 0, opts.z or 0),
     })
     -- aliases: the rest of the state, the HUD and the self-test all address
     -- these directly, and they are the walker's own vectors, not copies
@@ -122,7 +122,11 @@ function OnFoot:update(dt, background)
         self.pos.x, self.pos.z = site.x + nx, site.z + nz
     end
 
-    local ground = surface:groundHeight(self.pos.x, self.pos.z)
+    -- The height as *drawn*, not as sampled: between mesh vertices the two
+    -- differ by whatever the field does in between, and on this planet that is
+    -- more than eye height at nearly a fifth of all positions -- which is why
+    -- walking over rough ground put the camera underneath it.
+    local ground = surface:renderedHeight(self.pos.x, self.pos.z)
     if site and mesh then
         -- The plate is flat at the settlement's height and the terrain around
         -- it is not, so the two are blended across the rim rather than swapped

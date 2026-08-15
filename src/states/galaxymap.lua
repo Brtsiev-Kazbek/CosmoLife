@@ -1,9 +1,13 @@
 -- The galaxy map.
 --
--- Drawn in 2D on purpose: a projected top-down chart with a height rail for
--- the third axis is far easier to plot a route on than a rotating 3D cloud,
--- and it is what the genre's players expect.  Panning is unbounded, because
--- so is the galaxy.
+-- Drawn in 2D on purpose: a projected top-down chart is far easier to plot a
+-- route on than a rotating 3D cloud, and it is what the genre's players
+-- expect.  Panning is unbounded, because so is the galaxy.
+--
+-- The third axis used to be drawn as a vertical rail under every star. Those
+-- rails were the loudest marks on the chart and the stars were lost in them,
+-- so the height now shows in the dot -- higher is nearer, so larger and
+-- brighter -- and as a figure in the panel for the one system it matters for.
 
 local class = require("src.lib.class")
 local util = require("src.lib.util")
@@ -16,6 +20,7 @@ local commodities = require("src.sim.commodities")
 local hud = require("src.render.hud")
 local routeMod = require("src.sim.route")
 local missionsMod = require("src.sim.missions")
+local rumoursMod = require("src.sim.rumours")
 
 local Map = class("GalaxyMapState")
 
@@ -55,6 +60,9 @@ function Map:findContracts()
         end
     end
     self.contracts = out
+    -- what a bar told you, marked where it applies: this is the whole point of
+    -- noting a lead, and without it the talk tab is a wall of text
+    self.leads = rumoursMod.bySystem(self.player)
 end
 
 --- What this system's economy eats that the player is carrying.
@@ -154,8 +162,8 @@ function Map:refreshIfMoved()
     if key ~= self._viewKey then self:refresh() end
 end
 
--- Where a system's *base* sits: its x/z projected onto the chart plane. This
--- is the foot of the height rail, not where the star is drawn.
+-- Where a system's *base* sits: its x/z projected onto the chart plane,
+-- ignoring its height.
 function Map:screenOf(sys, w, h)
     local x = w * 0.5 + (sys.x - self.cx) * self.scale
     local y = h * 0.5 + (sys.z - self.cz) * self.scale
@@ -166,9 +174,9 @@ end
 --- above the chart plane.
 --
 -- Everything that has to agree with what the player can see -- the hit test,
--- the labels, the range ring, the jump line -- has to use this. The click
--- test used `screenOf`, so the target was the foot of the rail and clicking
--- the circle itself missed by however tall the star stood.
+-- the labels, the range ring, the course -- has to use this. The click test
+-- used `screenOf`, so the target sat at the foot of the lift and clicking the
+-- star itself missed by however far it stood off the plane.
 function Map:dotOf(sys, w, h)
     local x, y = self:screenOf(sys, w, h)
     return x, y - (sys.y - self.cy) * self.scale
@@ -300,9 +308,20 @@ function Map:draw()
         love.graphics.circle("line", hx, hy, self.jumpRange * self.scale)
     end
 
-    -- grid
-    ui.setColor(C.uiLine, 0.10)
-    local step = 10 * self.scale
+    -- Grid, at whatever spacing keeps the lines readable.
+    --
+    -- It was fixed at 10 ly, so zoomed out it turned into a grey wash and
+    -- zoomed in it vanished. Stepping through 5 / 10 / 25 / 50 / 100 keeps the
+    -- squares between 30 and 150 px, and the spacing is printed with the scale
+    -- bar so the grid is a ruler rather than decoration.
+    local gridLy = 10
+    for _, candidate in ipairs({ 5, 10, 25, 50, 100, 250 }) do
+        gridLy = candidate
+        if candidate * self.scale >= 60 then break end
+    end
+    self.gridLy = gridLy
+    local step = gridLy * self.scale
+    ui.setColor(C.uiLine, 0.08)
     if step > 8 then
         local ox = (w * 0.5 - self.cx * self.scale) % step
         local oy = (h * 0.5 - self.cz * self.scale) % step
@@ -310,75 +329,89 @@ function Map:draw()
         for y = oy, h, step do love.graphics.line(0, y, w, y) end
     end
 
-    -- systems
+    -- Systems.
+    --
+    -- The chart used to draw a vertical rail under every star to carry the
+    -- third axis, and the rails were the loudest thing on it -- a field of
+    -- streaks with the stars lost among them. The height is still in the
+    -- drawing, because a star is plotted at its true projected position, but
+    -- it is carried by the dot itself now: a star above the plane is drawn a
+    -- touch larger and brighter than the same star below it, the way anything
+    -- nearer the viewer is. The exact figure, for the one system anyone needs
+    -- it for, is a line in the panel.
     local labels = {}
     for _, s in ipairs(self.systems) do
-        local x, y = self:screenOf(s, w, h)
+        local x, y = self:dotOf(s, w, h)
         if x > -20 and x < w + 20 and y > -20 and y < h + 20 then
             local faction = factions.get(s.factionId)
             local col = faction.color
-            local dy = (s.y - self.cy)
-            -- Height rail: the stalk that shows the third axis.
-            --
-            -- Drawn for every system in view, at a quarter opacity, this was
-            -- a field of vertical streaks across the whole chart -- more ink
-            -- than the stars themselves, and unreadable. The height only tells
-            -- the player anything where it decides whether a system is
-            -- reachable, so the rails are now on the current system, the
-            -- selected one, and whatever is inside the jump range.
-            local near = self.showRange
-                and ((s.x - here.x) ^ 2 + (s.y - here.y) ^ 2 + (s.z - here.z) ^ 2)
-                    < (self.jumpRange * 1.15) ^ 2
-            if s.id == here.id or (self.selected and s.id == self.selected.id) or near then
-                ui.setColor(C.uiLine, 0.35)
-                love.graphics.line(x, y, x, y - dy * self.scale)
-                ui.setColor(C.uiLine, 0.5)
-                love.graphics.circle("fill", x, y, 1.5)
-            end
-
-            local r = util.clamp(2 + math.log(1 + s.population) * 0.22, 2, 8)
             local visited = self.player.knownSystems[s.id] ~= nil
             local shown = self:passesFilter(s, here)
-            local alpha = (visited and 1 or 0.5) * (shown and 1 or 0.22)
-            love.graphics.setColor(col[1], col[2], col[3], alpha)
-            love.graphics.circle("fill", x, y - dy * self.scale, r)
 
-            -- somewhere that eats what is in the hold: an open ring, which is
-            -- the one mark on this chart that answers "where do I sell this"
-            if shown and self.wantsCargo and self.wantsCargo[s.id] then
-                ui.setColor(C.cyan, 0.8)
-                love.graphics.circle("line", x, y - dy * self.scale, r + 4)
+            -- height as depth: +-SLAB of lift maps to a quarter either way
+            local lift = util.clamp((s.y - self.cy) / SLAB, -1, 1)
+            local r = util.clamp(2 + math.log(1 + s.population) * 0.22, 2, 8) * (1 + lift * 0.25)
+            local alpha = (visited and 1 or 0.5) * (shown and 1 or 0.22) * (1 + lift * 0.2)
+
+            love.graphics.setColor(col[1], col[2], col[3], min(alpha, 1))
+            love.graphics.circle("fill", x, y, r)
+
+            -- Marks. One size for all of them regardless of the star under
+            -- them, so three marks on one system stay three readable rings
+            -- instead of a target.
+            -- Only under its own filter.
+            --
+            -- Drawn always, this marked every economy that eats anything in
+            -- the hold -- which at one tonne of grain was a third of the
+            -- chart, a wash of rings worse than the rails they replaced. It is
+            -- the answer to a question, so it appears when the question is
+            -- asked.
+            if shown and FILTERS[self.filter or 1] == "demand"
+                and self.wantsCargo and self.wantsCargo[s.id] then
+                ui.setColor(C.cyan, 0.75)
+                love.graphics.circle("line", x, y, 7)
+            end
+            if self.leads and self.leads[s.id] then
+                ui.setColor(C.magenta, shown and 0.95 or 0.3)
+                love.graphics.line(x - 12, y - 5, x - 15, y, x - 12, y + 5)
+                love.graphics.line(x + 12, y - 5, x + 15, y, x + 12, y + 5)
+            end
+            if self.contracts and self.contracts[s.id] then
+                ui.setColor(C.amber, shown and 0.9 or 0.3)
+                love.graphics.setLineWidth(1.4)
+                love.graphics.polygon("line", x, y - 13, x + 13, y, x, y + 13, x - 13, y)
+                love.graphics.setLineWidth(1)
             end
 
             if s.id == here.id then
-                ui.setColor(C.uiPrimary, 1)
-                love.graphics.circle("line", x, y - dy * self.scale, r + 6)
-                love.graphics.circle("line", x, y - dy * self.scale, r + 9)
+                ui.setColor(C.uiPrimary, 0.9)
+                love.graphics.circle("line", x, y, 16)
             end
             if self.selected and s.id == self.selected.id then
+                -- corners rather than a box: the star stays visible inside its
+                -- own selection, the same reason the flight HUD stopped
+                -- drawing cages round its contacts
                 ui.setColor(C.uiWarn, 1)
-                love.graphics.rectangle("line", x - r - 7, y - dy * self.scale - r - 7, (r + 7) * 2, (r + 7) * 2)
+                local d, arm = 19, 7
+                for _, c in ipairs({ { -1, -1 }, { 1, -1 }, { -1, 1 }, { 1, 1 } }) do
+                    love.graphics.line(x + c[1] * d, y + c[2] * d,
+                        x + c[1] * (d - arm), y + c[2] * d)
+                    love.graphics.line(x + c[1] * d, y + c[2] * d,
+                        x + c[1] * d, y + c[2] * (d - arm))
+                end
             end
-            -- somewhere you owe someone something: a diamond, so it reads
-            -- differently from the current system's rings and the selection box
-            if self.contracts and self.contracts[s.id] then
-                local cy = y - dy * self.scale
-                local d = r + 11
-                ui.setColor(C.amber, shown and 0.9 or 0.3)
-                love.graphics.setLineWidth(1.4)
-                love.graphics.polygon("line", x, cy - d, x + d, cy, x, cy + d, x - d, cy)
-                love.graphics.setLineWidth(1)
-            end
+
             -- Labels are collected, not drawn here. Printing one per system
             -- turned the chart into an unreadable wall of text the moment the
             -- view held more than a few dozen stars.
             if self.scale > 2.4 then
                 labels[#labels + 1] = {
-                    text = s.name, x = floor(x + r + 5), y = floor(y - dy * self.scale - 7),
+                    text = s.name, x = floor(x + r + 6), y = floor(y - 7),
                     col = col, alpha = (visited and 0.9 or 0.4) * (shown and 1 or 0.3),
                     rank = (s.id == here.id and 1e9 or 0)
                         + (self.selected and s.id == self.selected.id and 1e9 or 0)
                         + (self.contracts and self.contracts[s.id] and 1e8 or 0)
+                        + (self.leads and self.leads[s.id] and 1e7 or 0)
                         + (visited and 1e6 or 0) + (s.population or 0),
                 }
             end
@@ -418,7 +451,9 @@ function Map:draw()
     -- before the info panel so it does not paint over it.
     love.graphics.setColor(0.015, 0.02, 0.03, 0.82)
     love.graphics.rectangle("fill", 0, 0, w, 84)
-    love.graphics.rectangle("fill", 0, h - 68, w, 68)
+    -- the wash has to cover the scale bar too, or the ruler is read through a
+    -- few hundred stars
+    love.graphics.rectangle("fill", 0, h - 92, w, 92)
     love.graphics.setColor(1, 1, 1, 1)
 
     -- info panel
@@ -436,6 +471,20 @@ function Map:draw()
         -- a label lying loose on the star field
         ui.textRight(L(FILTER_NAME[FILTERS[self.filter]]), w - 400, 62, C.cyan, "small")
     end
+    -- Scale bar: one grid square, labelled. A chart without one leaves the
+    -- player guessing how far a gap is, which is the question the chart exists
+    -- to answer.
+    do
+        local barLen = (self.gridLy or 10) * self.scale
+        local bx, by = 40, h - 76
+        ui.setColor(C.uiDim, 0.9)
+        love.graphics.line(bx, by, bx + barLen, by)
+        love.graphics.line(bx, by - 4, bx, by + 4)
+        love.graphics.line(bx + barLen, by - 4, bx + barLen, by + 4)
+        ui.text(L("{n} ly", { n = tostring(self.gridLy or 10) }), bx + barLen + 8, by - 8,
+            C.uiDim, "small")
+    end
+
     ui.rule(40, h - 60, w - 80, C.uiLine, 0.4)
     local fuel = L("FUEL") .. " " .. L("{a} / {b} t", {
         a = string.format("%.1f", self.player.fuel),
@@ -461,7 +510,7 @@ function Map:drawLabels(labels, w, h)
     local font = ui.font("small")
     local lineH = font:getHeight()
     -- bands the chart furniture owns
-    local headerH, footerY = 84, h - 68
+    local headerH, footerY = 84, h - 92
     local panelX, panelY, panelH = w - 372, 40, 340
 
     local placed = {}
@@ -507,8 +556,9 @@ function Map:drawInfo(x, y, w)
     local extra = (self.selected and self.selected.id ~= self.world.stub.id
         and sqrt((s.x - self.world.stub.x) ^ 2 + (s.y - self.world.stub.y) ^ 2
                  + (s.z - self.world.stub.z) ^ 2) > self.jumpRange) and 18 or 0
-    local h = 310 + wars * 18 + extra + #contracts * 32
+    local h = 330 + wars * 18 + extra + #contracts * 34
         + (#self:demandAt(s) > 0 and 18 or 0)
+        + #((self.leads and self.leads[s.id]) or {}) * 34
     ui.panel(x, y, w, h, L("SYSTEM"))
     local px, py = x + 18, y + 18
     ui.textFit(s.name, px, py, w - 36, C.uiPrimary, "large")
@@ -535,6 +585,7 @@ function Map:drawInfo(x, y, w)
         { L("Population"), util.money(s.population) },
         { L("Tech level"), tostring(s.techLevel) },
         { L("Security"), string.format("%.0f%%", s.lawLevel * 100) },
+        { L("Height"), L("{n} ly", { n = string.format("%+.2f", s.y - here.y) }) },
         { L("Star"), L("class {c}", { c = s.starClass }) },
         { L("Frontier"), string.format("%.0f%%", (s.frontier or 0) * 100) },
     }
@@ -596,6 +647,12 @@ function Map:drawInfo(x, y, w)
         ui.paragraph(L("Unvisited - long range survey"), px, py, w - 36, C.uiDim, "small")
     end
     py = py + 22
+
+    -- what you were told about this place
+    local leads = (self.leads and self.leads[s.id]) or {}
+    for _, lead in ipairs(leads) do
+        py = py + ui.paragraph(rumoursMod.line(lead), px, py, w - 36, C.magenta, "small") + 4
+    end
 
     -- what you promised, and by when
     if #contracts > 0 then
