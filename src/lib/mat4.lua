@@ -160,32 +160,44 @@ end
 
 --- Re-orthonormalises a basis that has drifted after many incremental
 --- rotations.  Called every frame on every rotating body.
-function mat4.orthonormalize(right, up, fwd)
+--- Rebuilds an orthonormal basis from `fwd` and roughly-`up`.
+--
+-- `handed` is +1 (the default) for a right-handed coordinate system and -1 for
+-- a left-handed one. It exists because the surface tangent frame
+-- (east, up, north) *is* left-handed -- its determinant is exactly -1 -- and a
+-- cross product taken in that frame comes out mirrored. Rebuilding a ship's
+-- basis there gave a `right` vector pointing the wrong way, which the flight
+-- controls then used to yaw and roll: measured, the reconstructed right and
+-- the true right had a dot product of -1.000, and the player's answer was
+-- "right is left when I approach a planet".
+function mat4.orthonormalize(right, up, fwd, handed)
     local fl = sqrt(fwd.x * fwd.x + fwd.y * fwd.y + fwd.z * fwd.z)
     if fl < 1e-9 then fwd:set(0, 0, -1); fl = 1 end
     fwd.x, fwd.y, fwd.z = fwd.x / fl, fwd.y / fl, fwd.z / fl
 
     -- With X = right, Y = up, Z = -fwd forming a right handed frame we have
     -- right = fwd x up and up = right x fwd.
-    local rx = fwd.y * up.z - fwd.z * up.y
-    local ry = fwd.z * up.x - fwd.x * up.z
-    local rz = fwd.x * up.y - fwd.y * up.x
+    local h = handed or 1
+    local rx = (fwd.y * up.z - fwd.z * up.y) * h
+    local ry = (fwd.z * up.x - fwd.x * up.z) * h
+    local rz = (fwd.x * up.y - fwd.y * up.x) * h
     local rl = sqrt(rx * rx + ry * ry + rz * rz)
     if rl < 1e-6 then
         -- up drifted parallel to fwd: rebuild it from any other axis
         local ax, ay, az = 0, 1, 0
         if math.abs(fwd.y) > 0.9 then ax, ay, az = 1, 0, 0 end
-        rx = fwd.y * az - fwd.z * ay
-        ry = fwd.z * ax - fwd.x * az
-        rz = fwd.x * ay - fwd.y * ax
+        rx = (fwd.y * az - fwd.z * ay) * h
+        ry = (fwd.z * ax - fwd.x * az) * h
+        rz = (fwd.x * ay - fwd.y * ax) * h
         rl = sqrt(rx * rx + ry * ry + rz * rz)
         if rl < 1e-9 then rx, ry, rz, rl = 1, 0, 0, 1 end
     end
     right:set(rx / rl, ry / rl, rz / rl)
 
-    up:set(right.y * fwd.z - right.z * fwd.y,
-           right.z * fwd.x - right.x * fwd.z,
-           right.x * fwd.y - right.y * fwd.x)
+    -- up = right x fwd, mirrored in a left-handed frame like the cross above
+    up:set((right.y * fwd.z - right.z * fwd.y) * h,
+           (right.z * fwd.x - right.x * fwd.z) * h,
+           (right.x * fwd.y - right.y * fwd.x) * h)
 end
 
 return mat4

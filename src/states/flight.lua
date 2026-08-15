@@ -161,7 +161,7 @@ function Flight:spawn(opts)
         self.local_.vel:set(0, 0, 0)
         self.local_.fwd:set(0, 0, 1)
         self.local_.up:set(0, 1, 0)
-        mat4.orthonormalize(self.local_.right, self.local_.up, self.local_.fwd)
+        mat4.orthonormalize(self.local_.right, self.local_.up, self.local_.fwd, -1)
         self.gearDown = true
         self.landedOn = body
         self.landedPlace = place
@@ -239,6 +239,18 @@ function Flight:leaveSurface()
 end
 
 --- World state -> local frame state.
+--- Which way round a cross product goes in the frame the ship is flying in.
+--
+-- The surface tangent frame (east, up, north) is left-handed -- measured, its
+-- determinant is exactly -1 -- so `right = fwd x up` comes out mirrored there.
+-- Everything that rebuilds the ship's basis while in surface mode has to say
+-- so, or the controls turn the wrong way (see mat4.orthonormalize). This is
+-- the same notion `sim/walker.lua` carries as `self.handed`; the walker was
+-- fixed when the on-foot camera was reported and the ship was not.
+function Flight:frameHanded()
+    return self.surface and -1 or 1
+end
+
 function Flight:syncToLocal()
     local s, ship, l = self.surface, self.ship, self.local_
     if not s then return end
@@ -250,7 +262,7 @@ function Flight:syncToLocal()
     l.fwd:set(fx, fy, fz)
     local ux, uy, uz = s:dirToLocal(ship.up.x, ship.up.y, ship.up.z)
     l.up:set(ux, uy, uz)
-    mat4.orthonormalize(l.right, l.up, l.fwd)
+    mat4.orthonormalize(l.right, l.up, l.fwd, -1)
 end
 
 --- Local frame state -> world state (run every frame while on a surface).
@@ -389,6 +401,22 @@ function Flight:brakeToApproach() return autopilot.brakeToApproach(self) end
 -- scheme every space sim converged on because it maps "look where you want to
 -- go" onto the device people already point with.  The keyboard keeps a full
 -- fallback so the game is playable without a mouse at all.
+--- How far the camera is rolled relative to the hull, about the shared nose
+--- axis. Zero whenever the view is glued to the hull, which is most of the time.
+function Flight:viewRoll(basis)
+    local cam = self.game and self.game.camera
+    if not cam or not cam.up then return 0 end
+    -- the camera lives in world space; the hull's basis may not
+    local ux, uy, uz = cam.up.x, cam.up.y, cam.up.z
+    if self.surface then
+        ux, uy, uz = self.surface:dirToLocal(ux, uy, uz)
+    end
+    local c = ux * basis.up.x + uy * basis.up.y + uz * basis.up.z
+    local s = ux * basis.right.x + uy * basis.right.y + uz * basis.right.z
+    if math.abs(s) < 1e-4 and c > 0 then return 0 end
+    return atan2(s, c)
+end
+
 function Flight:readRotation(dt, basis, agility)
     local pitch, yaw, roll = 0, 0, 0
 
@@ -414,6 +442,28 @@ function Flight:readRotation(dt, basis, agility)
         local decay = math.exp(-16 * dt)
         self.mouseDx = (self.mouseDx or 0) * decay
         self.mouseDy = (self.mouseDy or 0) * decay
+    end
+
+    -- Steer in the frame the player is looking through, not the hull's.
+    --
+    -- Near the ground the camera levels itself to the horizon while the hull
+    -- does not, so the two can be a long way apart -- at the limit the view is
+    -- upright over a hull that is upside down. Yawing about the *hull's* axis
+    -- then moves the view the other way, and the mouse works backwards.
+    --
+    -- This is the mechanism the rolled-approach test has always asked for. It
+    -- appeared to work before only because the surface frame's left-handedness
+    -- was mirroring `right` (see mat4.orthonormalize): two wrongs that cancelled
+    -- at a half turn and disagreed everywhere else, which is why level flight
+    -- had inverted controls while a nearly inverted hull did not.
+    --
+    -- phi is the roll of the camera relative to the hull about the shared
+    -- forward axis; rotating the input by it turns "up and right on screen"
+    -- into "up and right for the hull".
+    local phi = self:viewRoll(basis)
+    if phi ~= 0 then
+        local c, s = math.cos(phi), math.sin(phi)
+        pitch, yaw = pitch * c - yaw * s, yaw * c + pitch * s
     end
 
     -- Landing mode: with the gear down close to the ground the ship holds
@@ -444,7 +494,7 @@ function Flight:readRotation(dt, basis, agility)
     basis.fwd:addScaled(basis.right, a.y * dt)
     basis.up:addScaled(basis.right, -a.z * dt)
     basis.fwd:normalize()
-    mat4.orthonormalize(basis.right, basis.up, basis.fwd)
+    mat4.orthonormalize(basis.right, basis.up, basis.fwd, self:frameHanded())
 end
 
 function Flight:readThrottle(dt)

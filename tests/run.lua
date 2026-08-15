@@ -1355,6 +1355,46 @@ test("no HUD mode hides everything", function(assert_)
         "an unlisted layer does not fall back to dim")
 end)
 
+test("a basis rebuilt in a left-handed frame is not mirrored", function(assert_)
+    local vec3lib = require("src.lib.vec3")
+    local mat4lib = require("src.lib.mat4")
+
+    local function det(a, b, c)
+        return a.x * (b.y * c.z - b.z * c.y)
+             - a.y * (b.x * c.z - b.z * c.x)
+             + a.z * (b.x * c.y - b.y * c.x)
+    end
+
+    -- the default is unchanged: right-handed, as every call site but the
+    -- surface frame relies on
+    local r, u, f = vec3lib(), vec3lib(0, 1, 0), vec3lib(0, 0, 1)
+    mat4lib.orthonormalize(r, u, f)
+    local dRight = det(r, u, f)
+
+    local r2, u2, f2 = vec3lib(), vec3lib(0, 1, 0), vec3lib(0, 0, 1)
+    mat4lib.orthonormalize(r2, u2, f2, -1)
+    local dLeft = det(r2, u2, f2)
+
+    assert_(dRight * dLeft < 0, string.format(
+        "handed = -1 did not flip the orientation: %.3f against %.3f", dRight, dLeft))
+    assert_(math.abs(r.x + r2.x) < 1e-9 and math.abs(r.y + r2.y) < 1e-9
+        and math.abs(r.z + r2.z) < 1e-9, "handed = -1 did not mirror right")
+    -- up must still be the up that was asked for, whichever hand it is
+    assert_(u.y > 0.99 and u2.y > 0.99, "the up vector was lost")
+
+    -- and the triple stays orthonormal either way, which is the whole job
+    for _, set in ipairs({ { r, u, f }, { r2, u2, f2 } }) do
+        for _, v in ipairs(set) do
+            local len = math.sqrt(v.x * v.x + v.y * v.y + v.z * v.z)
+            check("a basis rebuilt in a left-handed frame is not mirrored",
+                math.abs(len - 1) < 1e-9, "an axis is not unit length: " .. len)
+        end
+        local dot = set[1].x * set[2].x + set[1].y * set[2].y + set[1].z * set[2].z
+        check("a basis rebuilt in a left-handed frame is not mirrored",
+            math.abs(dot) < 1e-9, "right and up are not perpendicular: " .. dot)
+    end
+end)
+
 test("the lead point puts the bolt and the target in the same place", function(assert_)
     local aim = require("src.sim.aim")
 

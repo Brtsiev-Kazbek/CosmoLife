@@ -493,6 +493,75 @@ step(71, "profile: atmospheric entry", function(game)
     io.flush()
 end)
 
+-- The plain case: level flight in surface mode, mouse right, nose right.
+--
+-- This is the one a player actually meets -- you cross the surface handover on
+-- the way to a planet and everything after that is in the tangent frame -- and
+-- nothing covered it. Step 100 below covers a hull rolled nearly onto its
+-- back, step 152 covers walking; between them sat the ordinary approach, which
+-- is exactly where the report came from.
+step(98, "level flight in surface mode turns the way the mouse moves", function(game)
+    local f = game.manager:current()
+    local camera = game.camera
+    local mat4 = require("src.lib.mat4")
+    local settings = require("src.settings")
+    local w, h = game.renderer.width, game.renderer.height
+    assert(f.surface, "not in surface mode, so this proves nothing")
+
+    local ground = f.surface:groundHeight(f.local_.pos.x, f.local_.pos.z)
+    f.local_.pos.y = ground + 900
+    f.local_.vel:set(0, 0, 0)
+    f.gearDown = false
+    f.hoverMode = false
+    f:setMouseFlight(true)
+    local wasMode = camera.mode
+    camera.mode = "cockpit"
+
+    -- level and pointing along the frame's north, which is as ordinary as it
+    -- gets; auto-level off so nothing is fighting the input
+    settings.set("autoLevel", false)
+    f.autoLevel = false
+    local b = f.local_
+    b.fwd:set(0, 0, 1)
+    b.up:set(0, 1, 0)
+    mat4.orthonormalize(b.right, b.up, b.fwd, f:frameHanded())
+    f:syncFromLocal()
+    f.mouseDx, f.mouseDy = 0, 0
+    for _ = 1, 30 do
+        f.local_.pos.y = ground + 900
+        f.local_.vel:set(0, 0, 0)
+        game:update(1 / 60)
+    end
+
+    -- a landmark the screen shows on the right
+    local s = f.ship
+    local mx = s.pos.x + camera.right.x * 900 + s.fwd.x * 3000
+    local my = s.pos.y + camera.right.y * 900 + s.fwd.y * 3000
+    local mz = s.pos.z + camera.right.z * 900 + s.fwd.z * 3000
+    local before = camera:project(mx, my, mz, w, h)
+    assert(before and before > w / 2, "the probe landmark is not on the right of the screen")
+
+    f.mouseDx, f.mouseDy = 0, 0
+    f:mousemoved(0, 0, 60, 0)
+    for _ = 1, 20 do
+        f.local_.pos.y = ground + 900
+        f.local_.vel:set(0, 0, 0)
+        game:update(1 / 60)
+    end
+    local after = camera:project(mx, my, mz, w, h)
+    assert(after, "the landmark left the screen entirely")
+    io.write(string.format("    DIAG-YAW level surface: landmark %.0f -> %.0f px\n", before, after))
+    io.flush()
+    assert(after < before, string.format(
+        "level surface flight: mouse right turned AWAY from the right-hand landmark "
+        .. "(%.0f -> %.0f px) -- the controls are mirrored", before, after))
+
+    f.mouseDx, f.mouseDy = 0, 0
+    settings.set("autoLevel", true)
+    f.autoLevel = true
+    camera.mode = wasMode
+end)
+
 -- A landing approach with the hull rolled.
 --
 -- Near the ground the camera levels itself to the horizon while the hull does
@@ -534,7 +603,11 @@ step(100, "a rolled landing approach still turns the way the mouse moves", funct
     local ang = 2.8                        -- radians from level: nearly inverted
     b.fwd:set(0, 0, 1)
     b.up:set(math.sin(ang), math.cos(ang), 0)
-    mat4.orthonormalize(b.right, b.up, b.fwd)
+    -- The surface frame is left-handed, so the basis has to be built the way
+    -- the ship's own code builds it. Without this the test installs an
+    -- attitude the game cannot hold and readRotation mirrors it on the first
+    -- frame, which is a defect in the setup rather than in the assertion.
+    mat4.orthonormalize(b.right, b.up, b.fwd, f:frameHanded())
     assert(math.abs((math.atan2 or math.atan)(b.right.y, b.up.y)) > 2.5,
         "the test did not manage to roll the hull past ninety degrees")
 

@@ -209,7 +209,8 @@ function autopilot.update(f, dt)
     basis.fwd:addScaled(basis.right, util.clamp(ex * 3, -1, 1) * turn)
     basis.fwd:addScaled(basis.up, util.clamp(ey * 3, -1, 1) * turn)
     basis.fwd:normalize()
-    mat4.orthonormalize(basis.right, basis.up, basis.fwd)
+    -- the surface frame is left-handed, so the cross product has to be told
+    mat4.orthonormalize(basis.right, basis.up, basis.fwd, f:frameHanded())
 
     local aligned = util.clamp((dot - 0.9) / 0.1, 0, 1)
     local remaining = max(dist - standoff, 0)
